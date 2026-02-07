@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>QBIT Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-brand">
+      <span class="brand-accent">Q</span><span class="brand-text">BIT</span>
+      <span class="brand-sep"></span>
+      <span class="brand-sub">Dashboard</span>
+    </div>
+    <button class="theme-toggle" id="themeBtn" aria-label="Toggle theme">&#9790;</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Storage</div>
+    <div class="storage-info">
+      <span class="storage-label"><span id="sU">--</span> / <span id="sT">--</span></span>
+      <span class="storage-pct"><span id="sP">0</span>%</span>
+    </div>
+    <div class="storage-bar"><div class="storage-fill" id="sF" style="width:0%"></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Upload</div>
+    <div class="upload-area" id="dz" onclick="document.getElementById('fi').click()">
+      <input type="file" id="fi" accept=".qgif" multiple>
+      <span class="upload-icon">&#8682;</span>
+      Drop .qgif files here or tap to upload
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Settings</div>
+    <div class="setting">
+      <label class="setting-label">Speed</label>
+      <input type="range" id="rSpeed" min="1" max="10" value="1" class="slider">
+      <span class="setting-val" id="vSpeed">1</span>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Brightness</label>
+      <input type="range" id="rBright" min="0" max="255" value="207" class="slider">
+      <span class="setting-val" id="vBright">207</span>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Sound</label>
+      <button class="btn btn-mute" id="btnMute">ON</button>
+    </div>
+    <button class="btn btn-save" id="btnSave">Save</button>
+  </div>
+
+  <div class="card" id="fl">
+    <div class="card-title">Files</div>
+    <div class="empty">Loading...</div>
+  </div>
+
+  <div class="footer"><a href="/update">Firmware OTA Update</a></div>
+
+  <script src="/script.js"></script>
+</body>
+</html>
