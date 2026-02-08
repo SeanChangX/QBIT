@@ -308,19 +308,146 @@ body {
   border-radius: 3px;
 }
 
-/* Result message */
+/* Result message (inside modal) */
 .result-message {
-  padding: 8px;
-  border-radius: 6px;
-  margin: 10px 0;
-  font-size: .9em;
-  background: var(--bg-accent);
+  padding: 8px 0;
+  margin: 0;
+  font-size: .95em;
   color: var(--text-secondary);
-  border-left: 3px solid var(--success);
 }
 .result-message.error {
-  border-left-color: var(--error);
   color: var(--error);
+}
+
+/* Modal overlay */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: modalFadeIn 0.2s ease;
+}
+.modal-overlay[aria-hidden="false"] {
+  display: flex;
+}
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.modal-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-width: 400px;
+  width: 100%;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  animation: modalSlideIn 0.25s ease;
+}
+@keyframes modalSlideIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-title {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.modal-title .result-icon.success-icon { color: var(--success); }
+.modal-title .result-icon.error-icon { color: var(--error); }
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.5em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.modal-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-accent);
+}
+.modal-body {
+  padding: 16px;
+}
+.modal-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* Device section: Connect + Flash + Serial */
+.card-device .device-connect-row {
+  margin-bottom: 0;
+}
+.card-device .device-connect-row .btn {
+  margin-top: 0;
+}
+.device-connected {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.device-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.device-actions .btn {
+  width: auto;
+  flex: 1 1 0;
+}
+.btn-small {
+  padding: 6px 12px;
+  font-size: .8em;
+  margin-top: 0;
+  width: auto;
+}
+.monitor-output-box .log-content {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.monitor-send {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+  width: 100%;
+}
+.monitor-send input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: .85em;
+}
+.monitor-send input:focus {
+  outline: none;
+  border-color: var(--red);
+}
+.monitor-send .btn {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 4.5em;
 }
 
 /* Footer */

@@ -60,14 +60,30 @@
         <div class="hint">Ensure firmware integrity</div>
     </div>
 
-    <!-- Flash button -->
-    <div class="card">
-        <div class="card-title"><span class="material-icons icon-inline">flash_on</span> Flash</div>
-        <button class="btn btn-primary" id="flash-btn"><span class="material-icons icon-inline">usb</span> Connect & Flash</button>
-        <div class="hint small">Requires Chrome/Edge 89+</div>
+    <!-- Device: Connect + Flash + Serial in one section -->
+    <div class="card card-device">
+        <div class="card-title"><span class="material-icons icon-inline">usb</span> Device</div>
+        <div class="device-connect-row">
+            <button class="btn btn-primary" id="connect-btn"><span class="material-icons icon-inline">link</span> Connect</button>
+        </div>
+        <div class="device-connected" id="device-connected" style="display: none;">
+            <div class="device-actions">
+                <button class="btn btn-primary btn-small" id="flash-btn"><span class="material-icons icon-inline">flash_on</span> Flash firmware</button>
+                <button class="btn btn-secondary btn-small" id="disconnect-btn">Disconnect</button>
+                <button class="btn btn-secondary btn-small" id="monitor-clear-btn">Clear</button>
+            </div>
+            <div class="log-box monitor-output-box">
+                <div id="monitor-output" class="log-content"></div>
+            </div>
+            <div class="monitor-send">
+                <input type="text" id="monitor-send-input" placeholder="Send text...">
+                <button class="btn btn-secondary btn-small" id="monitor-send-btn">Send</button>
+            </div>
+        </div>
+        <div class="hint small">Requires Chrome/Edge 89+. Connect once to flash or use serial monitor.</div>
     </div>
 
-    <!-- Progress -->
+    <!-- Progress (shown during flash only) -->
     <div class="card" id="progress-card" style="display: none;">
         <div class="card-title"><span class="material-icons icon-inline">hourglass_empty</span> Progress</div>
         <div class="progress-bar">
@@ -81,11 +97,20 @@
         </div>
     </div>
 
-    <!-- Result -->
-    <div class="card" id="result-card" style="display: none;">
-        <div class="card-title" id="result-title"><span class="material-icons icon-inline">check_circle</span> Result</div>
-        <div class="result-message" id="result-message"></div>
-        <button class="btn btn-secondary" id="reset-btn"><span class="material-icons icon-inline">restart_alt</span> Restart</button>
+    <!-- Result modal (overlay) -->
+    <div class="modal-overlay" id="result-modal" aria-hidden="true">
+        <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="result-modal-title">
+            <div class="modal-header">
+                <h2 class="modal-title" id="result-modal-title"><span class="material-icons icon-inline result-icon success-icon">check_circle</span> Result</h2>
+                <button type="button" class="modal-close" id="result-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="result-message" id="result-message"></p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="reset-btn"><span class="material-icons icon-inline">restart_alt</span> OK</button>
+            </div>
+        </div>
     </div>
 
     <div class="footer">
@@ -93,6 +118,7 @@
         <div class="footer-copy">Copyright &copy; 2026 <a href="https://github.com/SeanChangX" target="_blank" rel="noopener noreferrer">SCX</a>. All rights reserved.</div>
     </div>
 
+    <script src="https://unpkg.com/esptool-js@0.5.7/bundle.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

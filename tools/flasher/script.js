@@ -1,4 +1,15 @@
 // Configuration: latest.json and firmware are served from same origin (gh-pages deploy)
+// Real flashing via esptool-js (loaded from CDN)
+
+const FLASH_BAUDRATE = 921600;
+
+// Flash layout matching firmware/partitions.csv
+const FLASH_MAP = {
+    'bootloader.bin': 0x0,
+    'partitions.bin': 0x8000,
+    'firmware.bin':   0x10000,
+    'littlefs.bin':   0x190000,
+};
 
 // UI elements
 const ui = {
@@ -10,49 +21,61 @@ const ui = {
     refreshBtn: document.getElementById('refresh-btn'),
     eraseAllCheckbox: document.getElementById('erase-all'),
     verifyChecksumCheckbox: document.getElementById('verify-checksum'),
+    connectBtn: document.getElementById('connect-btn'),
+    deviceConnected: document.getElementById('device-connected'),
     flashBtn: document.getElementById('flash-btn'),
+    disconnectBtn: document.getElementById('disconnect-btn'),
+    monitorClearBtn: document.getElementById('monitor-clear-btn'),
+    monitorOutput: document.getElementById('monitor-output'),
+    monitorSendInput: document.getElementById('monitor-send-input'),
+    monitorSendBtn: document.getElementById('monitor-send-btn'),
     progressCard: document.getElementById('progress-card'),
     progressFill: document.getElementById('progress-fill'),
     progressText: document.getElementById('progress-text'),
     logOutput: document.getElementById('log-output'),
-    resultCard: document.getElementById('result-card'),
+    resultModal: document.getElementById('result-modal'),
     resultMessage: document.getElementById('result-message'),
+    resultModalClose: document.getElementById('result-modal-close'),
+    resultModalTitle: document.getElementById('result-modal-title'),
     resetBtn: document.getElementById('reset-btn'),
 };
 
 let releaseData = null;
+let monitorPort = null;
+let monitorReader = null;
+let monitorReadAborted = false;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
-    // Theme toggle
     const isDark = !localStorage.getItem('qbit-light-mode');
-    if (!isDark) {
-        document.body.classList.add('light-mode');
-    }
+    if (!isDark) document.body.classList.add('light-mode');
     ui.themeBtn.addEventListener('click', toggleTheme);
-    
-    // Load latest version
+
     loadLatestVersion();
     ui.refreshBtn.addEventListener('click', loadLatestVersion);
     ui.flashBtn.addEventListener('click', startFlash);
-    ui.resetBtn.addEventListener('click', resetUI);
+
+    ui.resetBtn.addEventListener('click', () => { closeResultModal(); resetUI(); });
+    ui.resultModalClose.addEventListener('click', () => { closeResultModal(); resetUI(); });
+    ui.resultModal.addEventListener('click', (e) => { if (e.target === ui.resultModal) { closeResultModal(); resetUI(); } });
+
+    ui.connectBtn.addEventListener('click', connectDevice);
+    ui.disconnectBtn.addEventListener('click', disconnectDevice);
+    ui.monitorClearBtn.addEventListener('click', () => { ui.monitorOutput.textContent = ''; });
+    ui.monitorSendBtn.addEventListener('click', serialMonitorSend);
+    ui.monitorSendInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') serialMonitorSend(); });
 });
 
-/**
- * Toggle between light and dark theme
- */
-function toggleTheme() {
-    document.body.classList.toggle('light-mode');
-    if (document.body.classList.contains('light-mode')) {
-        localStorage.setItem('qbit-light-mode', 'true');
-    } else {
-        localStorage.removeItem('qbit-light-mode');
-    }
+function setDeviceConnectedUI(connected) {
+    ui.connectBtn.style.display = connected ? 'none' : '';
+    ui.deviceConnected.style.display = connected ? 'block' : 'none';
 }
 
-/**
- * Fetch latest firmware info from same-origin latest.json (bundled on deploy)
- */
+function toggleTheme() {
+    document.body.classList.toggle('light-mode');
+    localStorage.setItem('qbit-light-mode', document.body.classList.contains('light-mode') ? 'true' : '');
+}
+
 async function loadLatestVersion() {
     try {
         ui.refreshBtn.disabled = true;
@@ -62,186 +85,268 @@ async function loadLatestVersion() {
         ui.firmwareMd5El.textContent = 'Loading...';
 
         const response = await fetch('latest.json');
-        if (!response.ok) {
-            throw new Error(`Failed to fetch latest.json: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Failed to fetch latest.json: ${response.status}`);
         const latestJson = await response.json();
         addLog(`[OK] Loaded version ${latestJson.version}`);
 
         releaseData = latestJson;
-        
-        // Update UI
         ui.versionEl.textContent = latestJson.version || 'Unknown';
         ui.timestampEl.textContent = formatDate(latestJson.timestamp) || 'Unknown';
-        
         if (latestJson.files && latestJson.files['firmware.bin']) {
             const fw = latestJson.files['firmware.bin'];
             ui.firmwareSizeEl.textContent = formatBytes(fw.size);
             ui.firmwareMd5El.textContent = fw.md5.substring(0, 16) + '...';
         }
-        
         ui.flashBtn.disabled = false;
-        
     } catch (error) {
         console.error('Load version failed:', error);
         ui.versionEl.textContent = '[ERR] Load failed';
-        addLog(`[ERR] Error: ${error.message}`);
+        addLog(`[ERR] ${error.message}`);
         ui.flashBtn.disabled = true;
     } finally {
         ui.refreshBtn.disabled = false;
     }
 }
 
-/**
- * Initiate firmware flashing process
- */
 async function startFlash() {
-    if (!releaseData || !releaseData.files || !releaseData.files['firmware.bin']) {
+    if (!releaseData?.files?.['firmware.bin']) {
         alert('Failed to load firmware info. Please refresh version first.');
         return;
     }
-    
+    const existingPort = monitorPort;
+    if (existingPort) {
+        monitorReadAborted = true;
+        if (monitorReader) try { await monitorReader.cancel(); } catch (_) {}
+        monitorReader = null;
+    }
     try {
-        // Display progress panel
         ui.progressCard.style.display = 'block';
-        ui.resultCard.style.display = 'none';
         ui.flashBtn.disabled = true;
         resetLog();
-        
-        addLog('[CONN] Waiting for device connection...');
         addLog(`[PKG] Firmware version: ${releaseData.version}`);
         addLog(`[MEM] Firmware size: ${formatBytes(releaseData.files['firmware.bin'].size)}`);
-        
-        await flashWithEspTools();
-        
+
+        await flashWithEspTools(existingPort || undefined);
+        if (existingPort) {
+            monitorPort = null;
+            setDeviceConnectedUI(false);
+        }
         showSuccess('[OK] Flash successful! Device updated to version ' + releaseData.version);
-        
     } catch (error) {
         console.error('Flash failed:', error);
         showError('[ERR] Flash failed: ' + error.message);
+        if (existingPort) {
+            try { await existingPort.close(); } catch (_) {}
+            monitorPort = null;
+            setDeviceConnectedUI(false);
+        }
     } finally {
         ui.flashBtn.disabled = false;
     }
 }
 
 /**
- * Execute flashing with Web Serial API
+ * Real flashing using esptool-js (loaded from CDN).
+ * Erase all checked  -> flash bootloader + partitions + firmware + littlefs
+ * Erase all unchecked -> flash firmware.bin only (quick update)
  */
-async function flashWithEspTools() {
+async function flashWithEspTools(existingPort) {
+    const port = existingPort || await navigator.serial.requestPort();
+    if (!existingPort) addLog('[OK] Port selected');
+
+    const eraseAll = ui.eraseAllCheckbox.checked;
+
+    // Determine which files to flash
+    const filesToFlash = eraseAll
+        ? ['bootloader.bin', 'partitions.bin', 'firmware.bin', 'littlefs.bin']
+        : ['firmware.bin'];
+
+    // Download all needed binaries
+    const images = [];
+    for (const name of filesToFlash) {
+        const fileInfo = releaseData.files[name];
+        if (!fileInfo) {
+            if (name === 'firmware.bin') throw new Error('firmware.bin not found in release');
+            addLog(`[SKIP] ${name} not in release, skipping`);
+            continue;
+        }
+        addLog(`[DL] Downloading ${name}...`);
+        const resp = await fetch(fileInfo.url);
+        if (!resp.ok) throw new Error(`Failed to download ${name}: ${resp.status}`);
+        const buf = new Uint8Array(await resp.arrayBuffer());
+        addLog(`[OK] ${name}: ${formatBytes(buf.length)}`);
+        images.push({ name, offset: FLASH_MAP[name], data: buf });
+    }
+
+    const totalSize = images.reduce((s, i) => s + i.data.length, 0);
+    addLog(`[INFO] Total: ${formatBytes(totalSize)}, erase all: ${eraseAll ? 'yes' : 'no'}`);
+    addLog('[FLASH] Connecting to chip (hold BOOT if prompted)...');
+
+    if (!existingPort) await port.open({ baudRate: 115200 });
+
     try {
-        addLog('[WAIT] Establishing serial connection...');
-        
-        // No filters: show all serial ports so user can select their board (CP210x, CH340, ESP32 native USB, etc.)
-        const port = await navigator.serial.requestPort();
-        
-        addLog('[OK] Device connected');
-        
-        const fwInfo = releaseData.files['firmware.bin'];
-        const firmwareUrl = fwInfo.url;
-        const fwFileName = fwInfo.name || 'firmware.bin';
-        const eraseAll = ui.eraseAllCheckbox.checked;
+        const Transport = window.Transport || (window.ESPTool && window.ESPTool.Transport);
+        const ESPLoader = window.ESPLoader || (window.ESPTool && window.ESPTool.ESPLoader);
+        if (!Transport || !ESPLoader) throw new Error('esptool-js not loaded. Use Chrome/Edge 89+.');
 
-        addLog(`[URL] Firmware: ${fwFileName}`);
-        addLog(`[CLEAR] Erase flash: ${eraseAll ? 'yes' : 'no'}`);
+        const terminal = {
+            clean: () => {},
+            write: (data) => { addLog(data.replace(/\n$/, '')); },
+            writeLine: (data) => { addLog(data); },
+        };
 
-        addLog('[DL] Downloading firmware...');
-        const firmwareResponse = await fetch(firmwareUrl);
-        if (!firmwareResponse.ok) {
-            throw new Error(`Failed to download firmware: ${firmwareResponse.status}`);
+        const transport = new Transport(port);
+        const loader = new ESPLoader({
+            transport,
+            baudrate: FLASH_BAUDRATE,
+            terminal,
+        });
+
+        const result = await loader.connect();
+        if (result !== 'success') throw new Error(result || 'Connect failed');
+        addLog('[OK] Chip connected');
+
+        if (eraseAll) {
+            addLog('[ERASE] Erasing entire flash...');
+            await loader.eraseFlash();
+            addLog('[OK] Erase done');
         }
-        const firmwareBlob = await firmwareResponse.blob();
-        const firmwareBuffer = await firmwareBlob.arrayBuffer();
-        
-        addLog(`[OK] Downloaded ${formatBytes(firmwareBuffer.byteLength)}`);
-        
-        if (ui.verifyChecksumCheckbox.checked) {
-            addLog('[CHK] Verifying MD5...');
-            addLog(`[OK] Expected MD5: ${fwInfo.md5}`);
+
+        // Flash each image sequentially
+        let totalWritten = 0;
+        for (const img of images) {
+            const size = img.data.length;
+            const numBlocks = Math.ceil(size / loader.FLASH_WRITE_SIZE);
+            addLog(`[FLASH] Writing ${img.name} (${formatBytes(size)}) at 0x${img.offset.toString(16)}...`);
+            await loader.flashBegin(size, img.offset);
+
+            for (let seq = 0; seq < numBlocks; seq++) {
+                const start = seq * loader.FLASH_WRITE_SIZE;
+                const chunk = img.data.slice(start, start + loader.FLASH_WRITE_SIZE);
+                const block = new Uint8Array(loader.FLASH_WRITE_SIZE);
+                block.fill(0xff);
+                block.set(chunk);
+                await loader.flashBlock(block, seq, loader.timeoutPerMb(size));
+                totalWritten += chunk.length;
+                updateProgress(Math.round((totalWritten / totalSize) * 100));
+            }
+            addLog(`[OK] ${img.name} done`);
         }
-        
-        addLog('[FLASH] Starting flash...');
-        updateProgress(50);
-        addLog('[WAIT] Flashing... (do not disconnect)');
-        
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
+
+        await loader.flashFinish(true);
         updateProgress(100);
-        addLog('[OK] Flash complete');
-        
-    } catch (error) {
-        if (error.name === 'NotFoundError') {
-            addLog('[WARN] No device selected or device unavailable');
-        } else {
-            addLog(`[ERR] Error: ${error.message}`);
-        }
-        throw error;
+        addLog('[OK] Flash complete, rebooting.');
+    } finally {
+        try { await port.close(); } catch (_) {}
     }
 }
 
-/**
- * Update progress bar percentage
- */
 function updateProgress(percent) {
     const fill = Math.min(100, Math.max(0, percent));
     ui.progressFill.style.width = fill + '%';
     ui.progressText.textContent = Math.round(fill) + '%';
 }
 
-/**
- * Add message to log output
- */
 function addLog(message) {
-    const timestamp = new Date().toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true
-    });
-    ui.logOutput.textContent += `[${timestamp}] ${message}\n`;
-    ui.logOutput.parentElement.scrollTop = ui.logOutput.parentElement.scrollHeight;
+    const ts = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    ui.logOutput.textContent += `[${ts}] ${message}\n`;
+    ui.logOutput.scrollTop = ui.logOutput.scrollHeight;
 }
 
-/**
- * Clear log output
- */
 function resetLog() {
     ui.logOutput.textContent = '';
 }
 
-/**
- * Display success message
- */
+function showResultModal(isError, message) {
+    ui.progressCard.style.display = 'none';
+    const icon = ui.resultModalTitle.querySelector('.result-icon');
+    icon.classList.remove('success-icon', 'error-icon');
+    icon.classList.add(isError ? 'error-icon' : 'success-icon');
+    icon.textContent = isError ? 'error' : 'check_circle';
+    ui.resultMessage.textContent = message;
+    ui.resultMessage.classList.toggle('error', isError);
+    ui.resultModal.setAttribute('aria-hidden', 'false');
+}
+
+function closeResultModal() {
+    ui.resultModal.setAttribute('aria-hidden', 'true');
+}
+
 function showSuccess(message) {
-    ui.progressCard.style.display = 'none';
-    ui.resultCard.style.display = 'block';
-    ui.resultMessage.textContent = message;
-    ui.resultMessage.classList.remove('error');
+    showResultModal(false, message);
 }
 
-/**
- * Display error message
- */
 function showError(message) {
-    ui.progressCard.style.display = 'none';
-    ui.resultCard.style.display = 'block';
-    ui.resultMessage.textContent = message;
-    ui.resultMessage.classList.add('error');
+    showResultModal(true, message);
 }
 
-/**
- * Reset UI to initial state
- */
 function resetUI() {
     ui.progressCard.style.display = 'none';
-    ui.resultCard.style.display = 'none';
+    closeResultModal();
     ui.flashBtn.disabled = false;
     resetLog();
     loadLatestVersion();
 }
 
-/**
- * Helper: Format bytes to human-readable size
- */
+// Device: Connect / Disconnect (single port for both flash and serial)
+async function connectDevice() {
+    try {
+        const port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        monitorPort = port;
+        monitorReadAborted = false;
+        setDeviceConnectedUI(true);
+        appendMonitor('Connected. You can Flash firmware or use the serial monitor.\n');
+        readSerialLoop();
+    } catch (e) {
+        if (e.name !== 'NotFoundError') alert('Connect failed: ' + e.message);
+    }
+}
+
+async function disconnectDevice() {
+    monitorReadAborted = true;
+    if (monitorReader) try { await monitorReader.cancel(); } catch (_) {}
+    if (monitorPort) try { await monitorPort.close(); } catch (_) {}
+    monitorPort = null;
+    monitorReader = null;
+    setDeviceConnectedUI(false);
+    appendMonitor('Disconnected.\n');
+}
+
+async function readSerialLoop() {
+    if (!monitorPort || monitorReadAborted) return;
+    const decoder = new TextDecoder();
+    try {
+        monitorReader = monitorPort.readable.getReader();
+        while (!monitorReadAborted) {
+            const { value, done } = await monitorReader.read();
+            if (done) break;
+            if (value && value.length) appendMonitor(decoder.decode(value));
+        }
+    } catch (e) {
+        if (!monitorReadAborted) appendMonitor('\nRead error: ' + e.message + '\n');
+    } finally {
+        try { if (monitorReader) await monitorReader.releaseLock(); } catch (_) {}
+    }
+}
+
+function appendMonitor(text) {
+    ui.monitorOutput.textContent += text;
+    ui.monitorOutput.scrollTop = ui.monitorOutput.scrollHeight;
+}
+
+async function serialMonitorSend() {
+    if (!monitorPort || !monitorPort.writable) return;
+    const line = ui.monitorSendInput.value + '\n';
+    ui.monitorSendInput.value = '';
+    const writer = monitorPort.writable.getWriter();
+    try {
+        await writer.write(new TextEncoder().encode(line));
+    } finally {
+        writer.releaseLock();
+    }
+}
+
 function formatBytes(bytes) {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -250,17 +355,15 @@ function formatBytes(bytes) {
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }
 
-/**
- * Helper: Format ISO date string
- */
 function formatDate(isoString) {
     if (!isoString) return null;
     const date = new Date(isoString);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    if (Number.isNaN(date.getTime())) return null;
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const h = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    const s = String(date.getSeconds()).padStart(2, '0');
+    return `${y}-${m}-${d} ${h}:${min}:${s}`;
 }
