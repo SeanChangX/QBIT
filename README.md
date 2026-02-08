@@ -2,7 +2,17 @@
 
 An open-source ESP32-C3 desktop companion robot and personal IoT avatar.
 
-![QBIT Thumbnail](docs/images/Thumbnail.jpg)
+[![Assembly Video](https://img.youtube.com/vi/pUKB8I10Yfk/maxresdefault.jpg)](https://youtu.be/pUKB8I10Yfk)
+
+> Click the image above to watch the assembly video on YouTube.
+
+| Network | Poke |
+|---|---|
+| ![Network](docs/images/Network.png) | ![Poke](docs/images/Poke.png) |
+
+| Flash | Library |
+|---|---|
+| ![Flash](docs/images/Flash.png) | ![Library](docs/images/Library.png) |
 
 ---
 
@@ -39,9 +49,6 @@ The easiest way to flash QBIT firmware is through the browser-based flasher. No 
 2. Connect your QBIT board via USB.
 3. Click **Connect & Flash** and select the serial port.
 4. The flasher will write the bootloader, partition table, firmware, and filesystem image automatically.
-
-<!-- Screenshot: Flash page -->
-<!-- ![Flash Page](docs/images/flash-page.png) -->
 
 ### Initial Wi-Fi Setup
 
@@ -85,15 +92,13 @@ If you prefer, you can deploy your own web platform and backend on your own serv
 
 The Network page shows all currently connected QBIT devices as an interactive graph powered by [vis-js/vis-network](https://github.com/visjs/vis-network). Each node displays the device name. Clicking a device node opens a poke dialog where logged-in users can send a text message to the device. The QBIT OLED will display the message and play a notification sound.
 
-<!-- Screenshot: Network page -->
-<!-- ![Network Page](docs/images/network-page.png) -->
+![Network Page](docs/images/Network.png)
 
 ### Flash
 
 The Flash page embeds the browser-based firmware flasher, allowing users to flash their QBIT directly from the web platform without visiting a separate site.
 
-<!-- Screenshot: Flash page in web platform -->
-<!-- ![Flash Tab](docs/images/flash-tab.png) -->
+![Flash Tab](docs/images/Flash.png)
 
 ### Library
 
@@ -105,8 +110,7 @@ Each entry displays:
 - Animated preview rendered on a canvas element
 - Download link
 
-<!-- Screenshot: Library page -->
-<!-- ![Library Page](docs/images/library-page.png) -->
+![Library Page](docs/images/Library.png)
 
 ---
 
