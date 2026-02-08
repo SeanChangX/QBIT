@@ -1,9 +1,4 @@
-// Configuration
-const CONFIG = {
-    repo: 'SeanChangX/QBIT',
-    // GitHub release download URLs lack CORS; use proxy when fetch from another origin
-    corsProxy: 'https://corsproxy.io/?',
-};
+// Configuration: latest.json and firmware are served from same origin (gh-pages deploy)
 
 // UI elements
 const ui = {
@@ -56,16 +51,7 @@ function toggleTheme() {
 }
 
 /**
- * Fetch URL; use CORS proxy for GitHub release download URLs (they do not send CORS headers)
- */
-async function fetchWithCors(url) {
-    const isGitHubRelease = /^https:\/\/github\.com\/.*\/releases\/download\//.test(url);
-    const target = isGitHubRelease ? CONFIG.corsProxy + encodeURIComponent(url) : url;
-    return fetch(target);
-}
-
-/**
- * Fetch latest firmware version from GitHub releases
+ * Fetch latest firmware info from same-origin latest.json (bundled on deploy)
  */
 async function loadLatestVersion() {
     try {
@@ -75,42 +61,12 @@ async function loadLatestVersion() {
         ui.firmwareSizeEl.textContent = 'Loading...';
         ui.firmwareMd5El.textContent = 'Loading...';
 
-        let latestJson;
-
-        // Try raw from main branch first (for dev or when published in repo)
-        try {
-            const rawUrl = `https://raw.githubusercontent.com/${CONFIG.repo}/main/releases/latest.json`;
-            const response = await fetch(rawUrl);
-            if (response.ok) {
-                latestJson = await response.json();
-                addLog('[OK] Loaded from GitHub repo');
-            } else {
-                throw new Error('Not on main');
-            }
-        } catch (_) {
-            // Use GitHub API: release assets are not in repo tree; fetch via CORS proxy
-            addLog('[INFO] Fetching latest release from API...');
-            const apiUrl = `https://api.github.com/repos/${CONFIG.repo}/releases/latest`;
-            const apiResponse = await fetch(apiUrl);
-
-            if (!apiResponse.ok) {
-                throw new Error(`GitHub API error: ${apiResponse.status}`);
-            }
-
-            const release = await apiResponse.json();
-            const latestJsonAsset = release.assets.find(a => a.name === 'latest.json');
-
-            if (!latestJsonAsset) {
-                throw new Error('latest.json not found in release assets');
-            }
-
-            const assetResponse = await fetchWithCors(latestJsonAsset.browser_download_url);
-            if (!assetResponse.ok) {
-                throw new Error(`Failed to fetch latest.json: ${assetResponse.status}`);
-            }
-            latestJson = await assetResponse.json();
-            addLog(`[OK] Loaded version ${latestJson.version}`);
+        const response = await fetch('latest.json');
+        if (!response.ok) {
+            throw new Error(`Failed to fetch latest.json: ${response.status}`);
         }
+        const latestJson = await response.json();
+        addLog(`[OK] Loaded version ${latestJson.version}`);
 
         releaseData = latestJson;
         
@@ -190,7 +146,7 @@ async function flashWithEspTools() {
         addLog(`[CLEAR] Erase flash: ${eraseAll ? 'yes' : 'no'}`);
 
         addLog('[DL] Downloading firmware...');
-        const firmwareResponse = await fetchWithCors(firmwareUrl);
+        const firmwareResponse = await fetch(firmwareUrl);
         if (!firmwareResponse.ok) {
             throw new Error(`Failed to download firmware: ${firmwareResponse.status}`);
         }

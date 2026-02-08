@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'tools/flasher/**'
+      - '.github/workflows/deploy-gh-pages.yml'
 
 permissions:
   contents: write
@@ -15,6 +16,50 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Fetch latest release and prepare publish dir
+        env:
+          REPO: SeanChangX/QBIT
+        run: |
+          set -e
+          API="https://api.github.com/repos/${REPO}/releases/latest"
+          echo "Fetching latest release..."
+          RELEASE_JSON=$(curl -sL "$API")
+          TAG=$(echo "$RELEASE_JSON" | jq -r '.tag_name')
+          if [ "$TAG" = "null" ] || [ -z "$TAG" ]; then
+            echo "No release found"
+            exit 1
+          fi
+          echo "Latest release: $TAG"
+
+          DIR=tools/flasher
+          LATEST_JSON_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name == "latest.json") | .browser_download_url')
+          if [ -z "$LATEST_JSON_URL" ] || [ "$LATEST_JSON_URL" = "null" ]; then
+            echo "latest.json not in release assets"
+            exit 1
+          fi
+          curl -sL -o "$DIR/latest.json" "$LATEST_JSON_URL"
+
+          for name in firmware.bin littlefs.bin bootloader.bin partitions.bin; do
+            URL=$(echo "$RELEASE_JSON" | jq -r --arg n "$name" '.assets[] | select(.name == $n) | .browser_download_url')
+            if [ -n "$URL" ] && [ "$URL" != "null" ]; then
+              echo "Downloading $name..."
+              curl -sL -o "$DIR/$name" "$URL"
+            fi
+          done
+
+          echo "Rewriting latest.json to use relative URLs..."
+          python3 << 'PY'
+          import json
+          with open("tools/flasher/latest.json") as f:
+              data = json.load(f)
+          for key in data.get("files", {}):
+              data["files"][key]["url"] = data["files"][key].get("name", key)
+          with open("tools/flasher/latest.json", "w") as f:
+              json.dump(data, f, indent=2)
+          PY
+          echo "Publish dir ready:"
+          ls -la "$DIR"
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
