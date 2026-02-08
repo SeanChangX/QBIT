@@ -114,11 +114,14 @@ async function startFlash() {
         alert('Failed to load firmware info. Please refresh version first.');
         return;
     }
-    const existingPort = monitorPort;
-    if (existingPort) {
+    // If serial monitor is connected, stop reading and close port so esptool-js can reopen it
+    const connectedPort = monitorPort;
+    if (connectedPort) {
         monitorReadAborted = true;
         if (monitorReader) try { await monitorReader.cancel(); } catch (_) {}
         monitorReader = null;
+        try { await connectedPort.close(); } catch (_) {}
+        monitorPort = null;
     }
     try {
         ui.progressCard.style.display = 'block';
@@ -127,33 +130,27 @@ async function startFlash() {
         addLog(`[PKG] Firmware version: ${releaseData.version}`);
         addLog(`[MEM] Firmware size: ${formatBytes(releaseData.files['firmware.bin'].size)}`);
 
-        await flashWithEspTools(existingPort || undefined);
-        if (existingPort) {
-            monitorPort = null;
-            setDeviceConnectedUI(false);
-        }
+        await flashWithEspTools(connectedPort || undefined);
+        setDeviceConnectedUI(false);
         showSuccess('[OK] Flash successful! Device updated to version ' + releaseData.version);
     } catch (error) {
         console.error('Flash failed:', error);
         showError('[ERR] Flash failed: ' + error.message);
-        if (existingPort) {
-            try { await existingPort.close(); } catch (_) {}
-            monitorPort = null;
-            setDeviceConnectedUI(false);
-        }
+        setDeviceConnectedUI(false);
     } finally {
         ui.flashBtn.disabled = false;
     }
 }
 
 /**
- * Real flashing using esptool-js (loaded from CDN).
+ * Real flashing using esptool-js.
+ * knownPort = a previously selected port (closed); skip requestPort dialog.
  * Erase all checked  -> flash bootloader + partitions + firmware + littlefs
  * Erase all unchecked -> flash firmware.bin only (quick update)
  */
-async function flashWithEspTools(existingPort) {
-    const port = existingPort || await navigator.serial.requestPort();
-    if (!existingPort) addLog('[OK] Port selected');
+async function flashWithEspTools(knownPort) {
+    const port = knownPort || await navigator.serial.requestPort();
+    if (!knownPort) addLog('[OK] Port selected');
 
     const eraseAll = ui.eraseAllCheckbox.checked;
 
@@ -182,8 +179,6 @@ async function flashWithEspTools(existingPort) {
     const totalSize = images.reduce((s, i) => s + i.data.length, 0);
     addLog(`[INFO] Total: ${formatBytes(totalSize)}, erase all: ${eraseAll ? 'yes' : 'no'}`);
     addLog('[FLASH] Connecting to chip (hold BOOT if prompted)...');
-
-    if (!existingPort) await port.open({ baudRate: 115200 });
 
     try {
         const terminal = {
