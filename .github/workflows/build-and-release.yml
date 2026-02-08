@@ -4,12 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:  # Allow manual trigger for testing
-    inputs:
-      version:
-        description: 'Version number (e.g., v0.0.1). Leave empty to use tag name.'
-        required: false
-        default: ''
 
 jobs:
   build:
@@ -75,7 +69,7 @@ jobs:
       
       - name: Generate latest.json
         env:
-          VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          VERSION: ${{ github.ref_name }}
           REPOSITORY: ${{ github.repository }}
         run: |
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -189,26 +183,9 @@ jobs:
           echo "Generated latest.json:"
           cat dist/latest.json
       
-      - name: Determine version and tag
-        run: |
-          # Use provided version input or fall back to git ref
-          VERSION="${{ github.event.inputs.version }}"
-          if [ -z "$VERSION" ]; then
-            VERSION="${{ github.ref_name }}"
-          fi
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          
-          # For workflow_dispatch with custom version, we need to create a local tag
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            git config user.email "github-actions@github.com"
-            git config user.name "GitHub Actions"
-            # Try to create and push tag
-            git tag -a "$VERSION" -m "Release $VERSION" 2>/dev/null || true
-            git push origin "$VERSION" 2>/dev/null || true
-          fi
-      
       - name: Create Release
         uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
             dist/firmware.bin
@@ -216,7 +193,6 @@ jobs:
             dist/bootloader.bin
             dist/partitions.bin
             dist/latest.json
-          tag_name: ${{ env.VERSION }}
           draft: false
           prerelease: false
           make_latest: true
