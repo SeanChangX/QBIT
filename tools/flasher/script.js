@@ -194,9 +194,9 @@ async function flashWithEspTools(knownPort) {
             terminal,
         });
 
-        const result = await loader.connect();
-        if (result !== 'success') throw new Error(result || 'Connect failed');
-        addLog('[OK] Chip connected');
+        // main() connects, syncs, detects chip and uploads stub
+        const chipName = await loader.main();
+        addLog(`[OK] Chip detected: ${chipName}`);
 
         if (eraseAll) {
             addLog('[ERASE] Erasing entire flash...');
