@@ -75,7 +75,7 @@ jobs:
           VERSION: ${{ github.ref_name }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          export TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           
           # Use python to build clean JSON
           python3 << 'PYEOF'

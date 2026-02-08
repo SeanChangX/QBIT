@@ -6,8 +6,10 @@ on:
     paths:
       - 'tools/flasher/**'
       - '.github/workflows/deploy-gh-pages.yml'
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ['Build and Release Firmware']
+    types: [completed]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,6 +17,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
