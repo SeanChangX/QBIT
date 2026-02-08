@@ -1,5 +1,7 @@
 // Configuration: latest.json and firmware are served from same origin (gh-pages deploy)
-// Real flashing via esptool-js (loaded from CDN)
+// Real flashing via esptool-js (ES module from CDN)
+import { ESPLoader } from 'https://unpkg.com/esptool-js@0.5.7/lib/index.js';
+import { Transport } from 'https://unpkg.com/esptool-js@0.5.7/lib/webserial.js';
 
 const FLASH_BAUDRATE = 921600;
 
@@ -185,10 +187,6 @@ async function flashWithEspTools(existingPort) {
     if (!existingPort) await port.open({ baudRate: 115200 });
 
     try {
-        const Transport = window.Transport || (window.ESPTool && window.ESPTool.Transport);
-        const ESPLoader = window.ESPLoader || (window.ESPTool && window.ESPTool.ESPLoader);
-        if (!Transport || !ESPLoader) throw new Error('esptool-js not loaded. Use Chrome/Edge 89+.');
-
         const terminal = {
             clean: () => {},
             write: (data) => { addLog(data.replace(/\n$/, '')); },
