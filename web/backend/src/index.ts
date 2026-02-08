@@ -68,8 +68,9 @@ app.use('/auth/', authLimiter);
 //  Sessions
 // ---------------------------------------------------------------------------
 
-// In local dev (COOKIE_DOMAIN=localhost), use lax cookies over HTTP.
-// In production (behind Cloudflare Tunnel with HTTPS), use secure cross-site cookies.
+// Everything is same-origin now (Nginx proxies /api/ and /auth/ on the
+// same domain), so 'lax' works for both local dev and production.
+// 'secure' is based on trust-proxy detecting HTTPS from X-Forwarded-Proto.
 const isLocalDev = COOKIE_DOMAIN === 'localhost';
 
 const sessionMiddleware = session({
@@ -78,8 +79,7 @@ const sessionMiddleware = session({
   saveUninitialized: false,
   cookie: {
     secure: !isLocalDev,
-    sameSite: isLocalDev ? 'lax' : 'none',
-    domain: isLocalDev ? undefined : COOKIE_DOMAIN,
+    sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   },
 });
