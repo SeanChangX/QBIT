@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:  # Allow manual trigger for testing
+    inputs:
+      version:
+        description: 'Version number (e.g., v0.0.1). Leave empty to use tag name.'
+        required: false
+        default: ''
 
 jobs:
   build:
@@ -28,58 +33,173 @@ jobs:
         run: |
           cd firmware
           platformio run -e seeed_xiao_esp32c3
+          platformio run -e seeed_xiao_esp32c3 -t buildfs
+      
+      - name: Check build output
+        run: |
+          echo "Build directory contents:"
+          ls -lh firmware/.pio/build/seeed_xiao_esp32c3/
       
       - name: Prepare artifacts
         run: |
           mkdir -p dist
-          cp firmware/.pio/build/seeed_xiao_esp32c3/firmware.bin dist/firmware.bin
-          cp firmware/.pio/build/seeed_xiao_esp32c3/littlefs.bin dist/littlefs.bin
-          cp firmware/.pio/build/seeed_xiao_esp32c3/bootloader.bin dist/bootloader.bin
-          cp firmware/.pio/build/seeed_xiao_esp32c3/partitions.bin dist/partitions.bin
+          
+          # Copy firmware.bin (always required)
+          if [ -f firmware/.pio/build/seeed_xiao_esp32c3/firmware.bin ]; then
+            cp firmware/.pio/build/seeed_xiao_esp32c3/firmware.bin dist/firmware.bin
+            echo "✓ firmware.bin copied"
+          else
+            echo "✗ firmware.bin NOT found"
+            exit 1
+          fi
+          
+          # Copy optional files if they exist
+          if [ -f firmware/.pio/build/seeed_xiao_esp32c3/littlefs.bin ]; then
+            cp firmware/.pio/build/seeed_xiao_esp32c3/littlefs.bin dist/littlefs.bin
+            echo "✓ littlefs.bin copied"
+          fi
+          
+          if [ -f firmware/.pio/build/seeed_xiao_esp32c3/bootloader.bin ]; then
+            cp firmware/.pio/build/seeed_xiao_esp32c3/bootloader.bin dist/bootloader.bin
+            echo "✓ bootloader.bin copied"
+          fi
+          
+          if [ -f firmware/.pio/build/seeed_xiao_esp32c3/partitions.bin ]; then
+            cp firmware/.pio/build/seeed_xiao_esp32c3/partitions.bin dist/partitions.bin
+            echo "✓ partitions.bin copied"
+          fi
+          
+          echo ""
+          echo "Final artifacts:"
           ls -lh dist/
       
       - name: Generate latest.json
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ github.event.inputs.version || github.ref_name }}
           REPOSITORY: ${{ github.repository }}
         run: |
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          FW_SIZE=$(stat -c%s dist/firmware.bin)
-          LFS_SIZE=$(stat -c%s dist/littlefs.bin)
-          BOOT_SIZE=$(stat -c%s dist/bootloader.bin)
-          PART_SIZE=$(stat -c%s dist/partitions.bin)
-          FW_MD5=$(md5sum dist/firmware.bin | cut -d' ' -f1)
-          LFS_MD5=$(md5sum dist/littlefs.bin | cut -d' ' -f1)
-          BOOT_MD5=$(md5sum dist/bootloader.bin | cut -d' ' -f1)
-          PART_MD5=$(md5sum dist/partitions.bin | cut -d' ' -f1)
           
-          cat > dist/latest.json << EOF
+          # Initialize JSON structure
+          cat > dist/latest.json << 'JSONEOF'
           {
-            "version": "$VERSION",
-            "timestamp": "$TIMESTAMP",
-            "firmware": {
-              "url": "https://github.com/$REPOSITORY/releases/download/$VERSION/firmware.bin",
-              "size": $FW_SIZE,
-              "md5": "$FW_MD5"
-            },
-            "littlefs": {
-              "url": "https://github.com/$REPOSITORY/releases/download/$VERSION/littlefs.bin",
-              "size": $LFS_SIZE,
-              "md5": "$LFS_MD5"
-            },
-            "bootloader": {
-              "url": "https://github.com/$REPOSITORY/releases/download/$VERSION/bootloader.bin",
-              "size": $BOOT_SIZE,
-              "md5": "$BOOT_MD5"
-            },
-            "partitions": {
-              "url": "https://github.com/$REPOSITORY/releases/download/$VERSION/partitions.bin",
-              "size": $PART_SIZE,
-              "md5": "$PART_MD5"
-            }
+            "version": "VERSION",
+            "timestamp": "TIMESTAMP",
+            "files": {}
           }
-          EOF
+          JSONEOF
+          
+          # Build JSON for each file that exists
+          FIRMWARE_DATA=""
+          LITTLEFS_DATA=""
+          BOOTLOADER_DATA=""
+          PARTITIONS_DATA=""
+          
+          if [ -f dist/firmware.bin ]; then
+            SIZE=$(stat -c%s dist/firmware.bin)
+            MD5=$(md5sum dist/firmware.bin | cut -d' ' -f1)
+            FIRMWARE_DATA="{\"url\": \"https://github.com/$REPOSITORY/releases/download/$VERSION/firmware.bin\", \"size\": $SIZE, \"md5\": \"$MD5\"}"
+          fi
+          
+          if [ -f dist/littlefs.bin ]; then
+            SIZE=$(stat -c%s dist/littlefs.bin)
+            MD5=$(md5sum dist/littlefs.bin | cut -d' ' -f1)
+            LITTLEFS_DATA="{\"url\": \"https://github.com/$REPOSITORY/releases/download/$VERSION/littlefs.bin\", \"size\": $SIZE, \"md5\": \"$MD5\"}"
+          fi
+          
+          if [ -f dist/bootloader.bin ]; then
+            SIZE=$(stat -c%s dist/bootloader.bin)
+            MD5=$(md5sum dist/bootloader.bin | cut -d' ' -f1)
+            BOOTLOADER_DATA="{\"url\": \"https://github.com/$REPOSITORY/releases/download/$VERSION/bootloader.bin\", \"size\": $SIZE, \"md5\": \"$MD5\"}"
+          fi
+          
+          if [ -f dist/partitions.bin ]; then
+            SIZE=$(stat -c%s dist/partitions.bin)
+            MD5=$(md5sum dist/partitions.bin | cut -d' ' -f1)
+            PARTITIONS_DATA="{\"url\": \"https://github.com/$REPOSITORY/releases/download/$VERSION/partitions.bin\", \"size\": $SIZE, \"md5\": \"$MD5\"}"
+          fi
+          
+          # Use python to build clean JSON
+          python3 << 'PYEOF'
+          import json
+          import os
+          
+          version = os.environ.get("VERSION")
+          timestamp = os.environ.get("TIMESTAMP")
+          repo = os.environ.get("REPOSITORY")
+          
+          data = {
+              "version": version,
+              "timestamp": timestamp,
+              "files": {}
+          }
+          
+          # Add firmware.bin
+          if os.path.exists("dist/firmware.bin"):
+              size = os.path.getsize("dist/firmware.bin")
+              with open("dist/firmware.bin", "rb") as f:
+                  import hashlib
+                  md5 = hashlib.md5(f.read()).hexdigest()
+              data["files"]["firmware.bin"] = {
+                  "url": f"https://github.com/{repo}/releases/download/{version}/firmware.bin",
+                  "size": size,
+                  "md5": md5
+              }
+          
+          # Add littlefs.bin if exists
+          if os.path.exists("dist/littlefs.bin"):
+              size = os.path.getsize("dist/littlefs.bin")
+              with open("dist/littlefs.bin", "rb") as f:
+                  import hashlib
+                  md5 = hashlib.md5(f.read()).hexdigest()
+              data["files"]["littlefs.bin"] = {
+                  "url": f"https://github.com/{repo}/releases/download/{version}/littlefs.bin",
+                  "size": size,
+                  "md5": md5
+              }
+          
+          # Add bootloader.bin if exists
+          if os.path.exists("dist/bootloader.bin"):
+              size = os.path.getsize("dist/bootloader.bin")
+              with open("dist/bootloader.bin", "rb") as f:
+                  import hashlib
+                  md5 = hashlib.md5(f.read()).hexdigest()
+              data["files"]["bootloader.bin"] = {
+                  "url": f"https://github.com/{repo}/releases/download/{version}/bootloader.bin",
+                  "size": size,
+                  "md5": md5
+              }
+          
+          # Add partitions.bin if exists
+          if os.path.exists("dist/partitions.bin"):
+              size = os.path.getsize("dist/partitions.bin")
+              with open("dist/partitions.bin", "rb") as f:
+                  import hashlib
+                  md5 = hashlib.md5(f.read()).hexdigest()
+              data["files"]["partitions.bin"] = {
+                  "url": f"https://github.com/{repo}/releases/download/{version}/partitions.bin",
+                  "size": size,
+                  "md5": md5
+              }
+          
+          with open("dist/latest.json", "w") as f:
+              json.dump(data, f, indent=2)
+          PYEOF
+          
+          echo "Generated latest.json:"
           cat dist/latest.json
+      
+      - name: Create or use tag
+        run: |
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          
+          # If manual dispatch with custom version, create the tag
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            git tag "$VERSION" || echo "Tag already exists"
+            git push origin "$VERSION" || echo "Tag push skipped (may already exist or manual dispatch)"
+          fi
+          
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
       
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -90,6 +210,7 @@ jobs:
             dist/bootloader.bin
             dist/partitions.bin
             dist/latest.json
+          tag_name: ${{ env.VERSION }}
           draft: false
           prerelease: false
         env:
