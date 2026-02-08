@@ -193,12 +193,15 @@ jobs:
           # Delete existing release if it exists
           gh release delete "$VERSION" --yes 2>/dev/null || true
           
-          # Create new release with assets
+          # Create release without assets first
           gh release create "$VERSION" \
-            dist/firmware.bin \
-            dist/littlefs.bin \
-            dist/bootloader.bin \
-            dist/partitions.bin \
-            dist/latest.json \
             --title "Release $VERSION" \
             --generate-notes
+          
+          # Upload each asset individually
+          for file in dist/*; do
+            if [ -f "$file" ]; then
+              echo "Uploading $(basename $file)..."
+              gh release upload "$VERSION" "$file"
+            fi
+          done
