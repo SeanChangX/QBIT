@@ -6,6 +6,8 @@ on:
     paths:
       - 'tools/flasher/**'
       - '.github/workflows/deploy-gh-pages.yml'
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -48,11 +50,16 @@ jobs:
             fi
           done
 
-          echo "Rewriting latest.json to use relative URLs..."
+          PUBLISHED_AT=$(echo "$RELEASE_JSON" | jq -r '.published_at // empty')
+          export PUBLISHED_AT
+          echo "Rewriting latest.json to use relative URLs and fix timestamp..."
           python3 << 'PY'
           import json
+          import os
           with open("tools/flasher/latest.json") as f:
               data = json.load(f)
+          if not data.get("timestamp") and os.environ.get("PUBLISHED_AT"):
+              data["timestamp"] = os.environ.get("PUBLISHED_AT")
           for key in data.get("files", {}):
               data["files"][key]["url"] = data["files"][key].get("name", key)
           with open("tools/flasher/latest.json", "w") as f:

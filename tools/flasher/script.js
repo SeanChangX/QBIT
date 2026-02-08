@@ -131,9 +131,8 @@ async function flashWithEspTools() {
     try {
         addLog('[WAIT] Establishing serial connection...');
         
-        const port = await navigator.serial.requestPort({
-            filters: [{ usbVendorId: 0x10c4 }],
-        });
+        // No filters: show all serial ports so user can select their board (CP210x, CH340, ESP32 native USB, etc.)
+        const port = await navigator.serial.requestPort();
         
         addLog('[OK] Device connected');
         
