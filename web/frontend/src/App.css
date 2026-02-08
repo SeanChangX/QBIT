@@ -60,16 +60,15 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 10px 10px 10px 20px;
+  gap: 12px;
+  padding: 8px 8px 8px 16px;
   background: rgba(24, 24, 24, 0.75);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 999px;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-  min-width: 320px;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100vw - 16px);
   width: auto;
 }
 
@@ -145,6 +144,44 @@ body {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-primary);
   font-weight: 600;
+}
+
+/* -- Mobile navbar adjustments -- */
+@media (max-width: 520px) {
+  .navbar {
+    gap: 6px;
+    padding: 6px 6px 6px 12px;
+    top: 8px;
+  }
+
+  .brand-q,
+  .brand-bit {
+    font-size: 1em;
+  }
+
+  .nav-tab {
+    font-size: 0.68em;
+    padding: 5px 8px;
+  }
+
+  .btn-login {
+    padding: 5px 12px;
+    font-size: 0.7em;
+  }
+
+  .btn-logout {
+    padding: 4px 10px;
+    font-size: 0.65em;
+  }
+
+  .navbar-name {
+    display: none;
+  }
+
+  .navbar-avatar {
+    width: 24px;
+    height: 24px;
+  }
 }
 
 .navbar-user {

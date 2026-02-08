@@ -5,8 +5,8 @@ services:
     container_name: qbit-backend
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "3001:3001"
+    expose:
+      - "3001"
     environment:
       - PORT=3001
       - DEVICE_API_KEY=${DEVICE_API_KEY:-}
