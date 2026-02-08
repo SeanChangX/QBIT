@@ -37,6 +37,51 @@
   </div>
 
   <div class="card">
+    <div class="card-title">Device</div>
+    <div class="setting">
+      <label class="setting-label">ID</label>
+      <span class="setting-val-wide" id="devId">--</span>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Name</label>
+      <input type="text" id="devName" class="input-text" maxlength="32" placeholder="Device name">
+    </div>
+    <button class="btn btn-save" id="btnDevSave">Save Name</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">MQTT</div>
+    <div class="setting">
+      <label class="setting-label">Enabled</label>
+      <button class="btn btn-mute" id="btnMqtt">OFF</button>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Host</label>
+      <input type="text" id="mqttHost" class="input-text" placeholder="192.168.1.x">
+    </div>
+    <div class="setting">
+      <label class="setting-label">Port</label>
+      <input type="number" id="mqttPort" class="input-text" value="1883" min="1" max="65535" style="width:80px;flex:none">
+    </div>
+    <div class="setting">
+      <label class="setting-label">User</label>
+      <input type="text" id="mqttUser" class="input-text" placeholder="(optional)">
+    </div>
+    <div class="setting">
+      <label class="setting-label">Password</label>
+      <input type="password" id="mqttPass" class="input-text" placeholder="(optional)">
+    </div>
+    <div class="setting">
+      <label class="setting-label">Prefix</label>
+      <input type="text" id="mqttPrefix" class="input-text" value="qbit" placeholder="qbit">
+    </div>
+    <div class="mqtt-hint">
+      Topics: <code>&lt;prefix&gt;/&lt;id&gt;/status</code>, <code>.../info</code>, <code>.../command</code>
+    </div>
+    <button class="btn btn-save" id="btnMqttSave">Save MQTT</button>
+  </div>
+
+  <div class="card">
     <div class="card-title">Settings</div>
     <div class="setting">
       <label class="setting-label">Speed</label>

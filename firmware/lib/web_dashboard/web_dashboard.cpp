@@ -264,6 +264,64 @@ static void handlePlay(AsyncWebServerRequest *request) {
 }
 
 // ==========================================================================
+//  Handlers -- Device identity API
+// ==========================================================================
+
+static void handleGetDevice(AsyncWebServerRequest *request) {
+    String json = "{\"id\":\"" + getDeviceId()
+                + "\",\"name\":\"" + getDeviceName() + "\"}";
+    request->send(200, "application/json", json);
+}
+
+static void handlePostDevice(AsyncWebServerRequest *request) {
+    if (request->hasParam("name")) {
+        String name = request->getParam("name")->value();
+        if (name.length() > 0 && name.length() <= 32) {
+            setDeviceName(name);
+        }
+    }
+    if (request->hasParam("save")) {
+        saveSettings();
+    }
+    handleGetDevice(request);
+}
+
+// ==========================================================================
+//  Handlers -- Local MQTT settings API
+// ==========================================================================
+
+static void handleGetMqtt(AsyncWebServerRequest *request) {
+    String json = "{\"enabled\":" + String(getMqttEnabled() ? "true" : "false")
+                + ",\"host\":\"" + getMqttHost() + "\""
+                + ",\"port\":"   + String(getMqttPort())
+                + ",\"user\":\"" + getMqttUser() + "\""
+                + ",\"pass\":\"" + getMqttPass() + "\""
+                + ",\"prefix\":\"" + getMqttPrefix() + "\""
+                + "}";
+    request->send(200, "application/json", json);
+}
+
+static void handlePostMqtt(AsyncWebServerRequest *request) {
+    String  host    = request->hasParam("host")   ? request->getParam("host")->value()   : getMqttHost();
+    uint16_t port   = request->hasParam("port")   ? request->getParam("port")->value().toInt() : getMqttPort();
+    String  user    = request->hasParam("user")   ? request->getParam("user")->value()   : getMqttUser();
+    String  pass    = request->hasParam("pass")   ? request->getParam("pass")->value()   : getMqttPass();
+    String  prefix  = request->hasParam("prefix") ? request->getParam("prefix")->value() : getMqttPrefix();
+    bool    enabled = request->hasParam("enabled") ? (request->getParam("enabled")->value() == "1") : getMqttEnabled();
+
+    if (port == 0) port = 1883;
+    if (prefix.length() == 0) prefix = "qbit";
+
+    setMqttConfig(host, port, user, pass, prefix, enabled);
+
+    if (request->hasParam("save")) {
+        saveSettings();
+    }
+
+    handleGetMqtt(request);
+}
+
+// ==========================================================================
 //  Init
 // ==========================================================================
 
@@ -282,4 +340,8 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/play",     HTTP_POST, handlePlay);
     server.on("/api/settings",      HTTP_GET,  handleGetSettings);
     server.on("/api/settings",      HTTP_POST, handlePostSettings);
+    server.on("/api/device",        HTTP_GET,  handleGetDevice);
+    server.on("/api/device",        HTTP_POST, handlePostDevice);
+    server.on("/api/mqtt",          HTTP_GET,  handleGetMqtt);
+    server.on("/api/mqtt",          HTTP_POST, handlePostMqtt);
 }

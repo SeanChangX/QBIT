@@ -13,6 +13,9 @@
 #include <ESPmDNS.h>
 #include <NonBlockingRtttl.h>
 #include <Preferences.h>
+#include <ArduinoJson.h>
+#include <WebSocketsClient.h>
+#include <PubSubClient.h>
 
 // --- Project-local headers ---
 #include "gif_types.h"
@@ -52,6 +55,179 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(
 static const char BOOT_MELODY[] =
     "tronboot:d=16,o=5,b=160:"
     "c,16p,g,16p,c6,16p,b,8a";
+
+// ==========================================================================
+//  Backend WebSocket connection
+// ==========================================================================
+// The QBIT connects to the backend server via WebSocket (wss://).
+// The backend handles MQTT bridging internally.  This avoids requiring
+// the ESP-IDF MQTT WebSocket sdkconfig and works reliably through
+// Cloudflare Tunnel (which only supports HTTP/HTTPS/WebSocket).
+
+// These defaults are overridden by GitHub Actions at build time
+// via secrets QBIT_WS_HOST and QBIT_WS_API_KEY.
+// For local development, change them here or use build flags.
+#ifndef WS_HOST
+#define WS_HOST         "localhost"
+#endif
+#ifndef WS_PORT
+#define WS_PORT         3001
+#endif
+#define WS_PATH         "/device"
+#ifndef WS_API_KEY
+#define WS_API_KEY      ""
+#endif
+#define WS_RECONNECT_MS 5000
+
+static WebSocketsClient _wsClient;
+static bool             _wsConnected = false;
+
+// ==========================================================================
+//  Device identity
+// ==========================================================================
+
+static String _deviceId;
+static String _deviceName;
+
+String getDeviceId() {
+    if (_deviceId.length() == 0) {
+        uint64_t mac = ESP.getEfuseMac();
+        char id[13];
+        snprintf(id, sizeof(id), "%04X%08X",
+                 (uint16_t)(mac >> 32), (uint32_t)mac);
+        _deviceId = String(id);
+    }
+    return _deviceId;
+}
+
+String getDeviceName() {
+    return _deviceName;
+}
+
+// Forward declaration -- defined after WebSocket helpers.
+static void wsSendDeviceInfo();
+
+void setDeviceName(const String &name) {
+    _deviceName = name;
+    wsSendDeviceInfo();  // notify backend of name change
+}
+
+// ==========================================================================
+//  Local MQTT client (user-configurable via web dashboard)
+// ==========================================================================
+// Connects to a local MQTT broker (e.g. Home Assistant / Mosquitto)
+// for home automation integration.  Configuration is stored in NVS
+// and editable from the QBIT web dashboard.
+
+static WiFiClient  _mqttWifi;
+static PubSubClient _mqttClient(_mqttWifi);
+
+static String  _mqttHost;
+static uint16_t _mqttPort   = 1883;
+static String  _mqttUser;
+static String  _mqttPass;
+static String  _mqttPrefix;       // topic prefix, e.g. "qbit"
+static bool    _mqttEnabled = false;
+
+static unsigned long _mqttLastReconnect = 0;
+#define MQTT_RECONNECT_MS 5000
+
+String getMqttHost()   { return _mqttHost; }
+uint16_t getMqttPort() { return _mqttPort; }
+String getMqttUser()   { return _mqttUser; }
+String getMqttPass()   { return _mqttPass; }
+String getMqttPrefix() { return _mqttPrefix; }
+bool   getMqttEnabled(){ return _mqttEnabled; }
+
+// Forward declaration
+static void mqttReconnect();
+
+void setMqttConfig(const String &host, uint16_t port,
+                   const String &user, const String &pass,
+                   const String &prefix, bool enabled) {
+    _mqttHost    = host;
+    _mqttPort    = port;
+    _mqttUser    = user;
+    _mqttPass    = pass;
+    _mqttPrefix  = prefix;
+    _mqttEnabled = enabled;
+
+    // Disconnect from current broker so next loop() picks up new config
+    if (_mqttClient.connected()) {
+        _mqttClient.disconnect();
+    }
+    _mqttLastReconnect = 0;  // trigger immediate reconnect attempt
+}
+
+// Forward declaration for poke handler (defined further below)
+static void handlePoke(const char *sender, const char *text);
+
+// MQTT message callback (subscribed topics arrive here)
+static void mqttCallback(char *topic, byte *payload, unsigned int length) {
+    // Parse JSON payload for poke-like commands from home automation
+    JsonDocument doc;
+    if (deserializeJson(doc, payload, length)) return;
+
+    const char *cmd = doc["command"];
+    if (!cmd) return;
+
+    if (strcmp(cmd, "poke") == 0) {
+        const char *sender = doc["sender"] | "MQTT";
+        const char *text   = doc["text"]   | "Poke!";
+        handlePoke(sender, text);
+        Serial.printf("[MQTT] Poke from %s: %s\n", sender, text);
+    }
+}
+
+static void mqttReconnect() {
+    if (!_mqttEnabled || _mqttHost.length() == 0) return;
+    if (_mqttClient.connected()) return;
+
+    unsigned long now = millis();
+    if (now - _mqttLastReconnect < MQTT_RECONNECT_MS) return;
+    _mqttLastReconnect = now;
+
+    _mqttClient.setServer(_mqttHost.c_str(), _mqttPort);
+    _mqttClient.setCallback(mqttCallback);
+
+    String clientId = "qbit-" + getDeviceId();
+    bool ok;
+    if (_mqttUser.length() > 0) {
+        ok = _mqttClient.connect(clientId.c_str(),
+                                 _mqttUser.c_str(), _mqttPass.c_str(),
+                                 (_mqttPrefix + "/" + getDeviceId() + "/status").c_str(),
+                                 0, true, "offline");
+    } else {
+        ok = _mqttClient.connect(clientId.c_str(),
+                                 (_mqttPrefix + "/" + getDeviceId() + "/status").c_str(),
+                                 0, true, "offline");
+    }
+
+    if (ok) {
+        Serial.printf("[MQTT] Connected to %s:%u\n", _mqttHost.c_str(), _mqttPort);
+
+        // Publish online status
+        String statusTopic = _mqttPrefix + "/" + getDeviceId() + "/status";
+        _mqttClient.publish(statusTopic.c_str(), "online", true);
+
+        // Publish device info
+        String infoTopic = _mqttPrefix + "/" + getDeviceId() + "/info";
+        JsonDocument info;
+        info["id"]   = getDeviceId();
+        info["name"] = _deviceName;
+        info["ip"]   = WiFi.localIP().toString();
+        String infoStr;
+        serializeJson(info, infoStr);
+        _mqttClient.publish(infoTopic.c_str(), infoStr.c_str(), true);
+
+        // Subscribe to command topic
+        String cmdTopic = _mqttPrefix + "/" + getDeviceId() + "/command";
+        _mqttClient.subscribe(cmdTopic.c_str());
+    } else {
+        Serial.printf("[MQTT] Connection failed (rc=%d), retrying...\n",
+                      _mqttClient.state());
+    }
+}
 
 // ==========================================================================
 //  Persistent settings (NVS via Preferences)
@@ -102,9 +278,17 @@ uint8_t getDisplayBrightness();
 // explicitly presses "Save" on the web dashboard.
 void saveSettings() {
     if (!_prefsReady) return;
-    _prefs.putUShort("speed",  gifPlayerGetSpeed());
-    _prefs.putUChar("bright",  getDisplayBrightness());
-    _prefs.putUChar("volume",  getBuzzerVolume());
+    _prefs.putUShort("speed",   gifPlayerGetSpeed());
+    _prefs.putUChar("bright",   getDisplayBrightness());
+    _prefs.putUChar("volume",   getBuzzerVolume());
+    _prefs.putString("devname", _deviceName);
+    // MQTT settings
+    _prefs.putString("mqttHost", _mqttHost);
+    _prefs.putUShort("mqttPort", _mqttPort);
+    _prefs.putString("mqttUser", _mqttUser);
+    _prefs.putString("mqttPass", _mqttPass);
+    _prefs.putString("mqttPfx",  _mqttPrefix);
+    _prefs.putBool("mqttOn",     _mqttEnabled);
     Serial.println("Settings saved to NVS");
 }
 
@@ -311,6 +495,18 @@ void loadSettings() {
     uint8_t  vol    = _prefs.getUChar("volume", 90);
     uint16_t speed  = _prefs.getUShort("speed", 4);
 
+    // Device name (default: QBIT- + last 4 hex chars of MAC)
+    String defaultName = "QBIT-" + getDeviceId().substring(8);
+    _deviceName = _prefs.getString("devname", defaultName);
+
+    // MQTT settings
+    _mqttHost    = _prefs.getString("mqttHost", "");
+    _mqttPort    = _prefs.getUShort("mqttPort", 1883);
+    _mqttUser    = _prefs.getString("mqttUser", "");
+    _mqttPass    = _prefs.getString("mqttPass", "");
+    _mqttPrefix  = _prefs.getString("mqttPfx",  "qbit");
+    _mqttEnabled = _prefs.getBool("mqttOn", false);
+
     // Apply to hardware + RAM state (setters will no-op re-save the
     // same value on first boot -- harmless and keeps code simple)
     _brightness   = bright;
@@ -319,6 +515,98 @@ void loadSettings() {
 
     Serial.printf("Settings loaded: bright=%u vol=%u speed=%u\n",
                   bright, vol, speed);
+    Serial.printf("Device ID: %s  Name: %s\n",
+                  getDeviceId().c_str(), _deviceName.c_str());
+    if (_mqttEnabled && _mqttHost.length() > 0) {
+        Serial.printf("MQTT: %s:%u (prefix: %s)\n",
+                      _mqttHost.c_str(), _mqttPort, _mqttPrefix.c_str());
+    }
+}
+
+// ==========================================================================
+//  Poke handling
+// ==========================================================================
+// When a poke arrives via WebSocket, the OLED shows the sender + text for
+// POKE_DISPLAY_MS milliseconds, then resumes normal GIF playback.
+
+static bool          _pokeActive  = false;
+static unsigned long _pokeStartMs = 0;
+#define POKE_DISPLAY_MS 5000
+
+// Ascending chime -- distinct from boot and touch melodies.
+static const char POKE_MELODY[] =
+    "poke:d=16,o=5,b=200:c6,e6,g6,c7";
+
+static void handlePoke(const char *sender, const char *text) {
+    _pokeActive  = true;
+    _pokeStartMs = millis();
+
+    // Show poke message on OLED
+    showText(">> Poke! <<", "", sender, text);
+
+    // Play notification sound
+    if (_buzzerVolume > 0) {
+        noTone(PIN_BUZZER);
+        rtttl::begin(PIN_BUZZER, POKE_MELODY);
+    }
+
+    Serial.printf("Poke from %s: %s\n", sender, text);
+}
+
+// ==========================================================================
+//  WebSocket helpers
+// ==========================================================================
+
+// Send (or re-send) device info to the backend.
+// Called on connect and whenever the device name changes.
+static void wsSendDeviceInfo() {
+    if (!_wsConnected) return;
+
+    JsonDocument doc;
+    doc["type"]    = "hello";
+    doc["id"]      = getDeviceId();
+    doc["name"]    = _deviceName;
+    doc["ip"]      = WiFi.localIP().toString();
+    doc["version"] = "1.0.0";
+
+    String msg;
+    serializeJson(doc, msg);
+    _wsClient.sendTXT(msg);
+}
+
+// WebSocket event handler (called by the WebSockets library).
+static void wsEvent(WStype_t type, uint8_t *payload, size_t length) {
+    switch (type) {
+        case WStype_DISCONNECTED:
+            _wsConnected = false;
+            Serial.println("[WS] Disconnected from backend");
+            break;
+
+        case WStype_CONNECTED:
+            _wsConnected = true;
+            Serial.println("[WS] Connected to backend");
+            wsSendDeviceInfo();
+            break;
+
+        case WStype_TEXT:
+        {
+            JsonDocument doc;
+            if (deserializeJson(doc, payload, length)) break;
+
+            const char *msgType = doc["type"];
+            if (!msgType) break;
+
+            if (strcmp(msgType, "poke") == 0) {
+                const char *sender = doc["sender"] | "Someone";
+                const char *text   = doc["text"]   | "Poke!";
+                handlePoke(sender, text);
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
 }
 
 // ==========================================================================
@@ -327,6 +615,7 @@ void loadSettings() {
 
 void setup() {
     Serial.begin(115200);
+    Serial.setDebugOutput(false);  // Suppress WiFi credentials in ESP-IDF logs
 
     // -- GPIO --
     pinMode(PIN_TOUCH, INPUT);
@@ -338,7 +627,7 @@ void setup() {
     clearFullGDDRAM();
     setDisplayInvert(false);
 
-    // -- Load saved settings (brightness, volume, speed) from NVS --
+    // -- Load saved settings (brightness, volume, speed, device name) --
     loadSettings();
     setDisplayBrightness(_brightness);  // apply contrast to hardware
 
@@ -348,17 +637,48 @@ void setup() {
     // -- LittleFS / GIF player --
     gifPlayerInit(&u8g2);
 
-    // -- WiFi via NetWizard --
+    // -- WiFi via NetWizard (NON_BLOCKING) --
     // On first boot (or if saved network is unavailable), NetWizard opens
-    // a captive portal AP named "QBIT".  Connect to it from a phone/laptop
-    // to configure WiFi credentials.  On subsequent boots it auto-connects.
+    // a captive portal AP named "QBIT".  After 10 seconds of waiting,
+    // GIF animation begins while the AP stays open.
     showText("[ Wi-Fi Setup ]",
              "",
              "Connect to 'QBIT'",
              "AP to set Wi-Fi.");
 
-    NW.setStrategy(NetWizardStrategy::BLOCKING);
+    volatile bool wifiConnected = false;
+    NW.onConnectionStatus([&wifiConnected](NetWizardConnectionStatus status) {
+        if (status == NetWizardConnectionStatus::CONNECTED) {
+            wifiConnected = true;
+        }
+    });
+
+    NW.setStrategy(NetWizardStrategy::NON_BLOCKING);
     NW.autoConnect("QBIT", "");
+
+    unsigned long wifiStartMs = millis();
+    bool animStarted = false;
+
+    while (!wifiConnected) {
+        NW.loop();
+
+        // After 10 seconds, start GIF animation while AP stays open
+        if (!animStarted && (millis() - wifiStartMs > 10000)) {
+            animStarted = true;
+            if (gifPlayerHasFiles()) {
+                gifPlayerBuildShuffleBag();
+                gifPlayerSetAutoAdvance(1);
+                gifPlayerSetFile(gifPlayerNextShuffle());
+            }
+        }
+
+        if (animStarted) {
+            gifPlayerTick();
+            handleTouch();
+        }
+
+        yield();
+    }
 
     // -- mDNS: http://qbit.local --
     if (MDNS.begin("qbit")) {
@@ -381,12 +701,28 @@ void setup() {
 
     Serial.println("Web server started: http://qbit.local (" + ip + ")");
 
-    // -- Auto-play: shuffle bag + auto-advance every 2 loops --
-    if (gifPlayerHasFiles()) {
+    // -- Connect to backend via WebSocket --
+    // API key is sent as a query parameter for device authentication.
+    String wsPath = String(WS_PATH) + "?key=" + WS_API_KEY;
+#if WS_PORT == 443
+    _wsClient.beginSSL(WS_HOST, WS_PORT, wsPath.c_str());
+#else
+    _wsClient.begin(WS_HOST, WS_PORT, wsPath.c_str());
+#endif
+    _wsClient.onEvent(wsEvent);
+    _wsClient.setReconnectInterval(WS_RECONNECT_MS);
+
+    // -- Local MQTT (if configured) --
+    if (_mqttEnabled && _mqttHost.length() > 0) {
+        mqttReconnect();
+    }
+
+    // -- Auto-play: shuffle bag + auto-advance every loop --
+    // If animation was already started during WiFi wait, skip re-init.
+    if (!animStarted && gifPlayerHasFiles()) {
         gifPlayerBuildShuffleBag();
         gifPlayerSetAutoAdvance(1);
         gifPlayerSetFile(gifPlayerNextShuffle());
-        // Speed is already restored from NVS in loadSettings()
     }
 }
 
@@ -400,6 +736,15 @@ static bool infoScreenShown = false;
 void loop() {
     ElegantOTA.loop();
     NW.loop();
+    _wsClient.loop();
+
+    // Local MQTT maintenance
+    if (_mqttEnabled) {
+        if (!_mqttClient.connected()) {
+            mqttReconnect();
+        }
+        _mqttClient.loop();
+    }
 
     // Advance any non-blocking melody in progress (touch coin sound, etc.)
     // When the melody ends, call noTone() to detach the LEDC channel so the
@@ -412,6 +757,15 @@ void loop() {
         noTone(PIN_BUZZER);
         _melodyWasPlaying = false;
     }
+
+    // Poke timeout -- return to normal playback after POKE_DISPLAY_MS.
+    if (_pokeActive && (millis() - _pokeStartMs > POKE_DISPLAY_MS)) {
+        _pokeActive = false;
+        infoScreenShown = false;  // force redraw on next iteration
+    }
+
+    // While poke message is on screen, skip touch and GIF rendering.
+    if (_pokeActive) return;
 
     // Touch sensor -- cycle to next GIF
     handleTouch();

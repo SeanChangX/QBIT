@@ -75,7 +75,7 @@ jobs:
               "bootloader.bin": 0x0,
               "partitions.bin": 0x8000,
               "firmware.bin":   0x10000,
-              "littlefs.bin":   0x190000,
+              "littlefs.bin":   0x210000,
           }
           parts = []
           for name, offset in flash_map.items():
