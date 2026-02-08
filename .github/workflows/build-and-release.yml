@@ -189,17 +189,23 @@ jobs:
           echo "Generated latest.json:"
           cat dist/latest.json
       
-      - name: Create or use tag
+      - name: Determine version and tag
         run: |
-          VERSION="${{ github.event.inputs.version || github.ref_name }}"
-          
-          # If manual dispatch with custom version, create the tag
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            git tag "$VERSION" || echo "Tag already exists"
-            git push origin "$VERSION" || echo "Tag push skipped (may already exist or manual dispatch)"
+          # Use provided version input or fall back to git ref
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="${{ github.ref_name }}"
           fi
-          
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          
+          # For workflow_dispatch with custom version, we need to create a local tag
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            git config user.email "github-actions@github.com"
+            git config user.name "GitHub Actions"
+            # Try to create and push tag
+            git tag -a "$VERSION" -m "Release $VERSION" 2>/dev/null || true
+            git push origin "$VERSION" 2>/dev/null || true
+          fi
       
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -213,5 +219,6 @@ jobs:
           tag_name: ${{ env.VERSION }}
           draft: false
           prerelease: false
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
