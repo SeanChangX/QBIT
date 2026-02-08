@@ -1,6 +1,8 @@
 // Configuration
 const CONFIG = {
     repo: 'SeanChangX/QBIT',
+    // GitHub release download URLs lack CORS; use proxy when fetch from another origin
+    corsProxy: 'https://corsproxy.io/?',
 };
 
 // UI elements
@@ -54,52 +56,62 @@ function toggleTheme() {
 }
 
 /**
+ * Fetch URL; use CORS proxy for GitHub release download URLs (they do not send CORS headers)
+ */
+async function fetchWithCors(url) {
+    const isGitHubRelease = /^https:\/\/github\.com\/.*\/releases\/download\//.test(url);
+    const target = isGitHubRelease ? CONFIG.corsProxy + encodeURIComponent(url) : url;
+    return fetch(target);
+}
+
+/**
  * Fetch latest firmware version from GitHub releases
  */
 async function loadLatestVersion() {
     try {
         ui.refreshBtn.disabled = true;
         ui.versionEl.textContent = 'Loading...';
-        
+        ui.timestampEl.textContent = 'Loading...';
+        ui.firmwareSizeEl.textContent = 'Loading...';
+        ui.firmwareMd5El.textContent = 'Loading...';
+
         let latestJson;
-        
-        // First, try GitHub raw endpoint (for deployed site)
+
+        // Try raw from main branch first (for dev or when published in repo)
         try {
             const rawUrl = `https://raw.githubusercontent.com/${CONFIG.repo}/main/releases/latest.json`;
             const response = await fetch(rawUrl);
             if (response.ok) {
                 latestJson = await response.json();
-                addLog(`[OK] Loaded from GitHub releases`);
+                addLog('[OK] Loaded from GitHub repo');
             } else {
-                throw new Error('Not found on main branch');
+                throw new Error('Not on main');
             }
-        } catch (githubError) {
-            // Fall back to GitHub API to get latest release
+        } catch (_) {
+            // Use GitHub API: release assets are not in repo tree; fetch via CORS proxy
             addLog('[INFO] Fetching latest release from API...');
             const apiUrl = `https://api.github.com/repos/${CONFIG.repo}/releases/latest`;
             const apiResponse = await fetch(apiUrl);
-            
+
             if (!apiResponse.ok) {
                 throw new Error(`GitHub API error: ${apiResponse.status}`);
             }
-            
+
             const release = await apiResponse.json();
             const latestJsonAsset = release.assets.find(a => a.name === 'latest.json');
-            
+
             if (!latestJsonAsset) {
                 throw new Error('latest.json not found in release assets');
             }
-            
-            // Download from GitHub raw with version-specific path
-            const rawAssetUrl = `https://raw.githubusercontent.com/${CONFIG.repo}/${release.tag_name}/releases/latest.json`;
-            const assetResponse = await fetch(rawAssetUrl);
+
+            const assetResponse = await fetchWithCors(latestJsonAsset.browser_download_url);
             if (!assetResponse.ok) {
                 throw new Error(`Failed to fetch latest.json: ${assetResponse.status}`);
             }
             latestJson = await assetResponse.json();
             addLog(`[OK] Loaded version ${latestJson.version}`);
         }
-        
+
         releaseData = latestJson;
         
         // Update UI
@@ -169,18 +181,16 @@ async function flashWithEspTools() {
         
         addLog('[OK] Device connected');
         
-        const firmwareUrl = releaseData.files['firmware.bin'].url;
+        const fwInfo = releaseData.files['firmware.bin'];
+        const firmwareUrl = fwInfo.url;
+        const fwFileName = fwInfo.name || 'firmware.bin';
         const eraseAll = ui.eraseAllCheckbox.checked;
-        
-        // Use GitHub raw content endpoint to bypass CORS
-        const fwFileName = releaseData.files['firmware.bin'].name || 'firmware.bin';
-        const rawUrl = `https://raw.githubusercontent.com/${CONFIG.repo}/${releaseData.version}/releases/${fwFileName}`;
-        
+
         addLog(`[URL] Firmware: ${fwFileName}`);
         addLog(`[CLEAR] Erase flash: ${eraseAll ? 'yes' : 'no'}`);
-        
+
         addLog('[DL] Downloading firmware...');
-        const firmwareResponse = await fetch(rawUrl);
+        const firmwareResponse = await fetchWithCors(firmwareUrl);
         if (!firmwareResponse.ok) {
             throw new Error(`Failed to download firmware: ${firmwareResponse.status}`);
         }
@@ -191,9 +201,7 @@ async function flashWithEspTools() {
         
         if (ui.verifyChecksumCheckbox.checked) {
             addLog('[CHK] Verifying MD5...');
-            // Simplified: display expected MD5
-            const expectedMd5 = releaseData.files['firmware.bin'].md5;
-            addLog(`[OK] Expected MD5: ${expectedMd5}`);
+            addLog(`[OK] Expected MD5: ${fwInfo.md5}`);
         }
         
         addLog('[FLASH] Starting flash...');
