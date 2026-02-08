@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -74,49 +77,11 @@ jobs:
         run: |
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           
-          # Initialize JSON structure
-          cat > dist/latest.json << 'JSONEOF'
-          {
-            "version": "VERSION",
-            "timestamp": "TIMESTAMP",
-            "files": {}
-          }
-          JSONEOF
-          
-          # Build JSON for each file that exists
-          FIRMWARE_DATA=""
-          LITTLEFS_DATA=""
-          BOOTLOADER_DATA=""
-          PARTITIONS_DATA=""
-          
-          if [ -f dist/firmware.bin ]; then
-            SIZE=$(stat -c%s dist/firmware.bin)
-            MD5=$(md5sum dist/firmware.bin | cut -d' ' -f1)
-            FIRMWARE_DATA="{\"url\": \"https://github.com/$REPOSITORY/releases/download/$VERSION/firmware.bin\", \"size\": $SIZE, \"md5\": \"$MD5\"}"
-          fi
-          
-          if [ -f dist/littlefs.bin ]; then
-            SIZE=$(stat -c%s dist/littlefs.bin)
-            MD5=$(md5sum dist/littlefs.bin | cut -d' ' -f1)
-            LITTLEFS_DATA="{\"url\": \"https://github.com/$REPOSITORY/releases/download/$VERSION/littlefs.bin\", \"size\": $SIZE, \"md5\": \"$MD5\"}"
-          fi
-          
-          if [ -f dist/bootloader.bin ]; then
-            SIZE=$(stat -c%s dist/bootloader.bin)
-            MD5=$(md5sum dist/bootloader.bin | cut -d' ' -f1)
-            BOOTLOADER_DATA="{\"url\": \"https://github.com/$REPOSITORY/releases/download/$VERSION/bootloader.bin\", \"size\": $SIZE, \"md5\": \"$MD5\"}"
-          fi
-          
-          if [ -f dist/partitions.bin ]; then
-            SIZE=$(stat -c%s dist/partitions.bin)
-            MD5=$(md5sum dist/partitions.bin | cut -d' ' -f1)
-            PARTITIONS_DATA="{\"url\": \"https://github.com/$REPOSITORY/releases/download/$VERSION/partitions.bin\", \"size\": $SIZE, \"md5\": \"$MD5\"}"
-          fi
-          
           # Use python to build clean JSON
           python3 << 'PYEOF'
           import json
           import os
+          import hashlib
           
           version = os.environ.get("VERSION")
           timestamp = os.environ.get("TIMESTAMP")
@@ -128,53 +93,19 @@ jobs:
               "files": {}
           }
           
-          # Add firmware.bin
-          if os.path.exists("dist/firmware.bin"):
-              size = os.path.getsize("dist/firmware.bin")
-              with open("dist/firmware.bin", "rb") as f:
-                  import hashlib
-                  md5 = hashlib.md5(f.read()).hexdigest()
-              data["files"]["firmware.bin"] = {
-                  "url": f"https://github.com/{repo}/releases/download/{version}/firmware.bin",
-                  "size": size,
-                  "md5": md5
-              }
-          
-          # Add littlefs.bin if exists
-          if os.path.exists("dist/littlefs.bin"):
-              size = os.path.getsize("dist/littlefs.bin")
-              with open("dist/littlefs.bin", "rb") as f:
-                  import hashlib
-                  md5 = hashlib.md5(f.read()).hexdigest()
-              data["files"]["littlefs.bin"] = {
-                  "url": f"https://github.com/{repo}/releases/download/{version}/littlefs.bin",
-                  "size": size,
-                  "md5": md5
-              }
-          
-          # Add bootloader.bin if exists
-          if os.path.exists("dist/bootloader.bin"):
-              size = os.path.getsize("dist/bootloader.bin")
-              with open("dist/bootloader.bin", "rb") as f:
-                  import hashlib
-                  md5 = hashlib.md5(f.read()).hexdigest()
-              data["files"]["bootloader.bin"] = {
-                  "url": f"https://github.com/{repo}/releases/download/{version}/bootloader.bin",
-                  "size": size,
-                  "md5": md5
-              }
-          
-          # Add partitions.bin if exists
-          if os.path.exists("dist/partitions.bin"):
-              size = os.path.getsize("dist/partitions.bin")
-              with open("dist/partitions.bin", "rb") as f:
-                  import hashlib
-                  md5 = hashlib.md5(f.read()).hexdigest()
-              data["files"]["partitions.bin"] = {
-                  "url": f"https://github.com/{repo}/releases/download/{version}/partitions.bin",
-                  "size": size,
-                  "md5": md5
-              }
+          # Add each binary file if it exists
+          files = ["firmware.bin", "littlefs.bin", "bootloader.bin", "partitions.bin"]
+          for filename in files:
+              filepath = f"dist/{filename}"
+              if os.path.exists(filepath):
+                  size = os.path.getsize(filepath)
+                  with open(filepath, "rb") as f:
+                      md5 = hashlib.md5(f.read()).hexdigest()
+                  data["files"][filename] = {
+                      "url": f"https://github.com/{repo}/releases/download/{version}/{filename}",
+                      "size": size,
+                      "md5": md5
+                  }
           
           with open("dist/latest.json", "w") as f:
               json.dump(data, f, indent=2)
@@ -183,10 +114,36 @@ jobs:
           echo "Generated latest.json:"
           cat dist/latest.json
       
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-artifacts
+          path: dist/
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Determine version
+        id: version
+        run: |
+          VERSION="${{ github.ref_name }}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-artifacts
+          path: dist/
+      
       - name: Create Release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
           files: dist/*
           generate_release_notes: true
         env:
