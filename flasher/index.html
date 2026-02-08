@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QBIT Firmware Flasher</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Google Material Icons -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+</head>
+<body>
+    <div class="header">
+        <div class="header-brand">
+            <span class="brand-accent">Q</span><span class="brand-text">BIT</span>
+            <span class="brand-sep"></span>
+            <span class="brand-sub">Flasher</span>
+        </div>
+        <button class="theme-toggle" id="themeBtn" aria-label="Toggle theme">&#9790;</button>
+    </div>
+
+    <!-- Firmware info -->
+    <div class="card">
+        <div class="card-title"><span class="material-icons icon-inline">info</span> Firmware Info</div>
+        <div class="info-item">
+            <span class="info-label"><span class="material-icons icon-small">tag</span> Version</span>
+            <span class="info-value" id="version">Loading...</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label"><span class="material-icons icon-small">storage</span> Size</span>
+            <span class="info-value" id="firmware-size">Loading...</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label"><span class="material-icons icon-small">schedule</span> Timestamp</span>
+            <span class="info-value" id="timestamp">Loading...</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label"><span class="material-icons icon-small">verified_user</span> MD5</span>
+            <span class="info-value mono small" id="firmware-md5">Loading...</span>
+        </div>
+        <button class="btn btn-secondary" id="refresh-btn"><span class="material-icons icon-inline">refresh</span> Refresh</button>
+    </div>
+
+    <!-- Flash options -->
+    <div class="card">
+        <div class="card-title"><span class="material-icons icon-inline">settings</span> Options</div>
+        <div class="setting">
+            <label class="checkbox-label">
+                <input type="checkbox" id="erase-all" checked>
+                <span><span class="material-icons icon-small">delete_sweep</span> Erase all Flash</span>
+            </label>
+        </div>
+        <div class="hint">Uncheck to preserve NVS settings</div>
+        <div class="setting">
+            <label class="checkbox-label">
+                <input type="checkbox" id="verify-checksum" checked>
+                <span><span class="material-icons icon-small">verified</span> Verify MD5</span>
+            </label>
+        </div>
+        <div class="hint">Ensure firmware integrity</div>
+    </div>
+
+    <!-- Flash button -->
+    <div class="card">
+        <div class="card-title"><span class="material-icons icon-inline">flash_on</span> Flash</div>
+        <button class="btn btn-primary" id="flash-btn"><span class="material-icons icon-inline">usb</span> Connect & Flash</button>
+        <div class="hint small">Requires Chrome/Edge 89+</div>
+    </div>
+
+    <!-- Progress -->
+    <div class="card" id="progress-card" style="display: none;">
+        <div class="card-title"><span class="material-icons icon-inline">hourglass_empty</span> Progress</div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <div style="text-align: center; margin: 6px 0;">
+            <span id="progress-text">0%</span>
+        </div>
+        <div class="log-box">
+            <div id="log-output" class="log-content"></div>
+        </div>
+    </div>
+
+    <!-- Result -->
+    <div class="card" id="result-card" style="display: none;">
+        <div class="card-title" id="result-title"><span class="material-icons icon-inline">check_circle</span> Result</div>
+        <div class="result-message" id="result-message"></div>
+        <button class="btn btn-secondary" id="reset-btn"><span class="material-icons icon-inline">restart_alt</span> Restart</button>
+    </div>
+
+    <div class="footer">QBIT Firmware Flasher</div>
+
+    <script src="script.js"></script>
+</body>
+</html>
