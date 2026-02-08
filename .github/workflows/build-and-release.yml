@@ -190,6 +190,10 @@ jobs:
         run: |
           VERSION=${{ github.ref_name }}
           
+          # Delete existing release if it exists
+          gh release delete "$VERSION" --yes 2>/dev/null || true
+          
+          # Create new release with assets
           gh release create "$VERSION" \
             dist/firmware.bin \
             dist/littlefs.bin \
