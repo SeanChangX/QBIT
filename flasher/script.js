@@ -63,39 +63,41 @@ async function loadLatestVersion() {
         
         let latestJson;
         
+        // First, try GitHub raw endpoint (for deployed site)
         try {
-            // Try to fetch local latest.json first (for local testing)
-            const localResponse = await fetch('./latest.json');
-            if (localResponse.ok) {
-                latestJson = await localResponse.json();
-                addLog(`[OK] Loaded local latest.json`);
+            const rawUrl = `https://raw.githubusercontent.com/${CONFIG.repo}/main/releases/latest.json`;
+            const response = await fetch(rawUrl);
+            if (response.ok) {
+                latestJson = await response.json();
+                addLog(`[OK] Loaded from GitHub releases`);
             } else {
-                throw new Error('Local latest.json not found');
+                throw new Error('Not found on main branch');
             }
-        } catch (localError) {
-            // Fall back to GitHub API + jsDelivr
-            addLog('[INFO] Fetching from GitHub...');
+        } catch (githubError) {
+            // Fall back to GitHub API to get latest release
+            addLog('[INFO] Fetching latest release from API...');
             const apiUrl = `https://api.github.com/repos/${CONFIG.repo}/releases/latest`;
-            const response = await fetch(apiUrl);
+            const apiResponse = await fetch(apiUrl);
             
-            if (!response.ok) {
-                throw new Error(`GitHub API error: ${response.status}`);
+            if (!apiResponse.ok) {
+                throw new Error(`GitHub API error: ${apiResponse.status}`);
             }
             
-            const release = await response.json();
+            const release = await apiResponse.json();
             const latestJsonAsset = release.assets.find(a => a.name === 'latest.json');
             
             if (!latestJsonAsset) {
                 throw new Error('latest.json not found in release assets');
             }
             
-            // Use GitHub raw content endpoint instead of jsDelivr
-            const rawUrl = `https://raw.githubusercontent.com/${CONFIG.repo}/${release.tag_name}/releases/latest.json`;
-            const latestJsonResponse = await fetch(rawUrl);
-            if (!latestJsonResponse.ok) {
-                throw new Error(`Failed to fetch latest.json: ${latestJsonResponse.status}`);
+            // Download from GitHub raw with version-specific path
+            const rawAssetUrl = `https://raw.githubusercontent.com/${CONFIG.repo}/${release.tag_name}/releases/latest.json`;
+            const assetResponse = await fetch(rawAssetUrl);
+            if (!assetResponse.ok) {
+                throw new Error(`Failed to fetch latest.json: ${assetResponse.status}`);
             }
-            latestJson = await latestJsonResponse.json();
+            latestJson = await assetResponse.json();
+            addLog(`[OK] Loaded version ${latestJson.version}`);
         }
         
         releaseData = latestJson;
@@ -110,7 +112,6 @@ async function loadLatestVersion() {
             ui.firmwareMd5El.textContent = fw.md5.substring(0, 16) + '...';
         }
         
-        addLog(`[OK] Successfully loaded version ${latestJson.version}`);
         ui.flashBtn.disabled = false;
         
     } catch (error) {
