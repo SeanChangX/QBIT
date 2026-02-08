@@ -55,18 +55,47 @@ jobs:
 
           PUBLISHED_AT=$(echo "$RELEASE_JSON" | jq -r '.published_at // empty')
           export PUBLISHED_AT
-          echo "Rewriting latest.json to use relative URLs and fix timestamp..."
+          echo "Rewriting latest.json and generating manifest.json..."
           python3 << 'PY'
           import json
           import os
+
           with open("tools/flasher/latest.json") as f:
               data = json.load(f)
           if not data.get("timestamp") and os.environ.get("PUBLISHED_AT"):
               data["timestamp"] = os.environ.get("PUBLISHED_AT")
           for key in data.get("files", {}):
-              data["files"][key]["url"] = data["files"][key].get("name", key)
+              data["files"][key]["url"] = key
           with open("tools/flasher/latest.json", "w") as f:
               json.dump(data, f, indent=2)
+
+          # Generate manifest.json for esp-web-tools
+          # Offsets from firmware/partitions.csv
+          flash_map = {
+              "bootloader.bin": 0x0,
+              "partitions.bin": 0x8000,
+              "firmware.bin":   0x10000,
+              "littlefs.bin":   0x190000,
+          }
+          parts = []
+          for name, offset in flash_map.items():
+              if name in data.get("files", {}):
+                  parts.append({"path": name, "offset": offset})
+
+          manifest = {
+              "name": "QBIT",
+              "version": data.get("version", "unknown"),
+              "new_install_prompt_erase": True,
+              "builds": [
+                  {
+                      "chipFamily": "ESP32-C3",
+                      "parts": parts,
+                  }
+              ]
+          }
+          with open("tools/flasher/manifest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+          print("manifest.json generated")
           PY
           echo "Publish dir ready:"
           ls -la "$DIR"

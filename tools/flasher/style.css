@@ -390,6 +390,17 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* Flash button row (esp-web-tools) */
+.flash-button-row {
+  margin-top: 4px;
+}
+.flash-button-row esp-web-install-button {
+  display: block;
+}
+.flash-button-row esp-web-install-button .btn {
+  margin-top: 0;
+}
+
 /* Device section: Connect + Flash + Serial */
 .card-device .device-connect-row {
   margin-bottom: 0;
