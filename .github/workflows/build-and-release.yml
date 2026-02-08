@@ -184,17 +184,17 @@ jobs:
           cat dist/latest.json
       
       - name: Create Release
-        uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            dist/firmware.bin
-            dist/littlefs.bin
-            dist/bootloader.bin
-            dist/partitions.bin
-            dist/latest.json
-          draft: false
-          prerelease: false
-          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=${{ github.ref_name }}
+          
+          gh release create "$VERSION" \
+            dist/firmware.bin \
+            dist/littlefs.bin \
+            dist/bootloader.bin \
+            dist/partitions.bin \
+            dist/latest.json \
+            --title "Release $VERSION" \
+            --generate-notes
