@@ -1,7 +1,6 @@
 // Configuration: latest.json and firmware are served from same origin (gh-pages deploy)
 // Real flashing via esptool-js (ES module from CDN)
-import { ESPLoader } from 'https://unpkg.com/esptool-js@0.5.7/lib/index.js';
-import { Transport } from 'https://unpkg.com/esptool-js@0.5.7/lib/webserial.js';
+import { ESPLoader, Transport } from 'https://esm.sh/esptool-js@0.5.7';
 
 const FLASH_BAUDRATE = 921600;
 
