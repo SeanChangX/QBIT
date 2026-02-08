@@ -33,4 +33,20 @@ extern void     setBuzzerVolume(uint8_t pct);
 extern uint8_t  getBuzzerVolume();
 extern void     saveSettings();
 
+// Device identity -- implemented by main.cpp.
+extern String getDeviceId();
+extern String getDeviceName();
+extern void   setDeviceName(const String &name);
+
+// Local MQTT settings -- implemented by main.cpp.
+extern String   getMqttHost();
+extern uint16_t getMqttPort();
+extern String   getMqttUser();
+extern String   getMqttPass();
+extern String   getMqttPrefix();
+extern bool     getMqttEnabled();
+extern void     setMqttConfig(const String &host, uint16_t port,
+                              const String &user, const String &pass,
+                              const String &prefix, bool enabled);
+
 #endif // WEB_DASHBOARD_H

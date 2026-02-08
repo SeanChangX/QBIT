@@ -5,6 +5,91 @@ function fmt(b) {
   return (b / 1048576).toFixed(1) + ' MB';
 }
 
+// Device info -- fetch ID and name, allow renaming
+(function () {
+  var devId = document.getElementById('devId');
+  var devName = document.getElementById('devName');
+  var btnDevSave = document.getElementById('btnDevSave');
+
+  fetch('/api/device').then(function (r) { return r.json(); }).then(function (d) {
+    devId.textContent = d.id;
+    devName.value = d.name;
+  }).catch(function () {});
+
+  btnDevSave.addEventListener('click', function () {
+    btnDevSave.disabled = true;
+    fetch('/api/device?name=' + encodeURIComponent(devName.value) + '&save=1', { method: 'POST' })
+      .then(function () {
+        btnDevSave.classList.add('saved');
+        btnDevSave.textContent = 'Saved';
+      })
+      .catch(function () {})
+      .finally(function () {
+        btnDevSave.disabled = false;
+        setTimeout(function () {
+          btnDevSave.classList.remove('saved');
+          btnDevSave.textContent = 'Save Name';
+        }, 2000);
+      });
+  });
+})();
+
+// MQTT settings -- fetch config and allow saving
+(function () {
+  var btnMqtt     = document.getElementById('btnMqtt');
+  var mqttHost    = document.getElementById('mqttHost');
+  var mqttPort    = document.getElementById('mqttPort');
+  var mqttUser    = document.getElementById('mqttUser');
+  var mqttPass    = document.getElementById('mqttPass');
+  var mqttPrefix  = document.getElementById('mqttPrefix');
+  var btnMqttSave = document.getElementById('btnMqttSave');
+  var _mqttOn = false;
+
+  function updateMqttBtn() {
+    btnMqtt.textContent = _mqttOn ? 'ON' : 'OFF';
+    btnMqtt.classList.toggle('muted', !_mqttOn);
+  }
+
+  fetch('/api/mqtt').then(function (r) { return r.json(); }).then(function (d) {
+    _mqttOn = d.enabled;
+    mqttHost.value   = d.host;
+    mqttPort.value   = d.port;
+    mqttUser.value   = d.user;
+    mqttPass.value   = d.pass;
+    mqttPrefix.value = d.prefix;
+    updateMqttBtn();
+  }).catch(function () {});
+
+  btnMqtt.addEventListener('click', function () {
+    _mqttOn = !_mqttOn;
+    updateMqttBtn();
+  });
+
+  btnMqttSave.addEventListener('click', function () {
+    btnMqttSave.disabled = true;
+    var params = 'host=' + encodeURIComponent(mqttHost.value)
+               + '&port=' + encodeURIComponent(mqttPort.value)
+               + '&user=' + encodeURIComponent(mqttUser.value)
+               + '&pass=' + encodeURIComponent(mqttPass.value)
+               + '&prefix=' + encodeURIComponent(mqttPrefix.value)
+               + '&enabled=' + (_mqttOn ? '1' : '0')
+               + '&save=1';
+    fetch('/api/mqtt?' + params, { method: 'POST' })
+      .then(function () {
+        btnMqttSave.classList.add('saved');
+        btnMqttSave.textContent = 'Saved';
+      })
+      .catch(function () {})
+      .finally(function () {
+        btnMqttSave.disabled = false;
+        setTimeout(function () {
+          btnMqttSave.classList.remove('saved');
+          btnMqttSave.textContent = 'Save MQTT';
+        }, 2000);
+      });
+  });
+})();
+
 // Settings controls -- fetch current values and send changes on input
 (function () {
   var rSpeed  = document.getElementById('rSpeed');

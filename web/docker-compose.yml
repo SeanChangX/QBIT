@@ -1,0 +1,26 @@
+services:
+  backend:
+    build: ./backend
+    image: seanchangx/qbit-backend:latest
+    container_name: qbit-backend
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "3001"
+    environment:
+      - PORT=3001
+      - DEVICE_API_KEY=${DEVICE_API_KEY:-}
+      - MAX_DEVICE_CONNECTIONS=${MAX_DEVICE_CONNECTIONS:-100}
+    volumes:
+      - qbit-data:/data
+
+  frontend:
+    build: ./frontend
+    image: seanchangx/qbit-frontend:latest
+    container_name: qbit-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+
+volumes:
+  qbit-data:

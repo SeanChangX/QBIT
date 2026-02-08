@@ -26,6 +26,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install platformio
       
+      - name: Inject build secrets
+        env:
+          QBIT_WS_HOST: ${{ secrets.QBIT_WS_HOST }}
+          QBIT_WS_API_KEY: ${{ secrets.QBIT_WS_API_KEY }}
+        run: |
+          SRC="firmware/src/main.cpp"
+          if [ -n "$QBIT_WS_HOST" ]; then
+            sed -i "s|^#define WS_HOST .*|#define WS_HOST         \"${QBIT_WS_HOST}\"|" "$SRC"
+            sed -i "s|^#define WS_PORT .*|#define WS_PORT         443|" "$SRC"
+            echo "Injected WS_HOST=${QBIT_WS_HOST}, WS_PORT=443"
+          fi
+          if [ -n "$QBIT_WS_API_KEY" ]; then
+            sed -i "s|^#define WS_API_KEY .*|#define WS_API_KEY      \"${QBIT_WS_API_KEY}\"|" "$SRC"
+            echo "Injected WS_API_KEY (hidden)"
+          fi
+
       - name: Build firmware
         run: |
           cd firmware

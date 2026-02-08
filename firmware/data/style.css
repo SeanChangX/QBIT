@@ -392,6 +392,44 @@ body {
 .light-mode .btn-del { border-color: rgba(198, 40, 40, .3); }
 .light-mode .btn-del:hover { background: rgba(198, 40, 40, .1); }
 
+/* Text input */
+.input-text {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: .85em;
+  font-family: inherit;
+  outline: none;
+  transition: border-color .2s;
+}
+.input-text:focus {
+  border-color: var(--red);
+}
+.setting-val-wide {
+  font-size: .82em;
+  color: var(--text-muted);
+  flex: 1;
+  font-family: monospace;
+  letter-spacing: .03em;
+}
+
+/* MQTT hint */
+.mqtt-hint {
+  font-size: .72em;
+  color: var(--text-muted);
+  padding: 6px 0 2px 0;
+  line-height: 1.5;
+}
+.mqtt-hint code {
+  background: var(--bg-accent);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: .95em;
+}
+
 .empty {
   color: var(--text-muted);
   font-style: italic;
