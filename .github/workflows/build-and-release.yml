@@ -1,0 +1,96 @@
+name: Build and Release Firmware
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:  # Allow manual trigger for testing
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+      
+      - name: Build firmware
+        run: |
+          cd firmware
+          platformio run -e seeed_xiao_esp32c3
+      
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp firmware/.pio/build/seeed_xiao_esp32c3/firmware.bin dist/firmware.bin
+          cp firmware/.pio/build/seeed_xiao_esp32c3/littlefs.bin dist/littlefs.bin
+          cp firmware/.pio/build/seeed_xiao_esp32c3/bootloader.bin dist/bootloader.bin
+          cp firmware/.pio/build/seeed_xiao_esp32c3/partitions.bin dist/partitions.bin
+          ls -lh dist/
+      
+      - name: Generate latest.json
+        env:
+          VERSION: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          FW_SIZE=$(stat -c%s dist/firmware.bin)
+          LFS_SIZE=$(stat -c%s dist/littlefs.bin)
+          BOOT_SIZE=$(stat -c%s dist/bootloader.bin)
+          PART_SIZE=$(stat -c%s dist/partitions.bin)
+          FW_MD5=$(md5sum dist/firmware.bin | cut -d' ' -f1)
+          LFS_MD5=$(md5sum dist/littlefs.bin | cut -d' ' -f1)
+          BOOT_MD5=$(md5sum dist/bootloader.bin | cut -d' ' -f1)
+          PART_MD5=$(md5sum dist/partitions.bin | cut -d' ' -f1)
+          
+          cat > dist/latest.json << EOF
+          {
+            "version": "$VERSION",
+            "timestamp": "$TIMESTAMP",
+            "firmware": {
+              "url": "https://github.com/$REPOSITORY/releases/download/$VERSION/firmware.bin",
+              "size": $FW_SIZE,
+              "md5": "$FW_MD5"
+            },
+            "littlefs": {
+              "url": "https://github.com/$REPOSITORY/releases/download/$VERSION/littlefs.bin",
+              "size": $LFS_SIZE,
+              "md5": "$LFS_MD5"
+            },
+            "bootloader": {
+              "url": "https://github.com/$REPOSITORY/releases/download/$VERSION/bootloader.bin",
+              "size": $BOOT_SIZE,
+              "md5": "$BOOT_MD5"
+            },
+            "partitions": {
+              "url": "https://github.com/$REPOSITORY/releases/download/$VERSION/partitions.bin",
+              "size": $PART_SIZE,
+              "md5": "$PART_MD5"
+            }
+          }
+          EOF
+          cat dist/latest.json
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/firmware.bin
+            dist/littlefs.bin
+            dist/bootloader.bin
+            dist/partitions.bin
+            dist/latest.json
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
