@@ -192,6 +192,7 @@ static void mqttReconnect() {
     _mqttLastReconnect = now;
 
     _mqttClient.setServer(_mqttHost.c_str(), _mqttPort);
+    _mqttClient.setBufferSize(1024);  // HA discovery payloads need >256 bytes
     _mqttClient.setCallback(mqttCallback);
 
     String clientId = "qbit-" + getDeviceId();
@@ -271,7 +272,8 @@ static void mqttPublishHADiscovery() {
         doc["dev"]          = devBlock;
         String payload;
         serializeJson(doc, payload);
-        _mqttClient.publish(topic.c_str(), payload.c_str(), true);
+        bool ok1 = _mqttClient.publish(topic.c_str(), payload.c_str(), true);
+        Serial.printf("[MQTT] HA discovery binary_sensor: %s (%u bytes)\n", ok1 ? "OK" : "FAIL", payload.length());
     }
 
     // --- Sensor: IP address ---
@@ -286,7 +288,8 @@ static void mqttPublishHADiscovery() {
         doc["dev"]          = devBlock;
         String payload;
         serializeJson(doc, payload);
-        _mqttClient.publish(topic.c_str(), payload.c_str(), true);
+        bool ok2 = _mqttClient.publish(topic.c_str(), payload.c_str(), true);
+        Serial.printf("[MQTT] HA discovery sensor: %s (%u bytes)\n", ok2 ? "OK" : "FAIL", payload.length());
     }
 
     // --- Button: poke trigger ---
@@ -310,7 +313,8 @@ static void mqttPublishHADiscovery() {
         doc["dev"]          = devBlock;
         String payload;
         serializeJson(doc, payload);
-        _mqttClient.publish(topic.c_str(), payload.c_str(), true);
+        bool ok3 = _mqttClient.publish(topic.c_str(), payload.c_str(), true);
+        Serial.printf("[MQTT] HA discovery button: %s (%u bytes)\n", ok3 ? "OK" : "FAIL", payload.length());
     }
 
     Serial.println("[MQTT] HA discovery config published");
@@ -823,7 +827,7 @@ static void handleClaimRequest(const char *userName) {
     _claimTouchStart = 0;
 
     // Show prompt on OLED
-    showText("[ Claim Request ]", "", userName, "Long-press to confirm");
+    showText("[ Claim Request ]", "", userName, "Hold to confirm");
 
     // Play notification sound
     if (_buzzerVolume > 0) {
