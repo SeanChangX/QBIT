@@ -331,6 +331,65 @@ static void handlePostMqtt(AsyncWebServerRequest *request) {
 }
 
 // ==========================================================================
+//  Handlers -- GPIO Pin Configuration API
+// ==========================================================================
+
+// Valid GPIOs for ESP32-C3 Super Mini
+static const uint8_t VALID_PINS[] = {0,1,2,3,4,5,6,7,8,9,10,20,21};
+static const uint8_t VALID_PINS_COUNT = sizeof(VALID_PINS) / sizeof(VALID_PINS[0]);
+
+static bool isValidPin(uint8_t pin) {
+    for (uint8_t i = 0; i < VALID_PINS_COUNT; i++) {
+        if (VALID_PINS[i] == pin) return true;
+    }
+    return false;
+}
+
+static void handleGetPins(AsyncWebServerRequest *request) {
+    String json = "{\"touch\":" + String(getPinTouch())
+                + ",\"buzzer\":" + String(getPinBuzzer())
+                + ",\"sda\":" + String(getPinSDA())
+                + ",\"scl\":" + String(getPinSCL()) + "}";
+    request->send(200, "application/json", json);
+}
+
+static void handlePostPins(AsyncWebServerRequest *request) {
+    if (!request->hasParam("touch") || !request->hasParam("buzzer") ||
+        !request->hasParam("sda")   || !request->hasParam("scl")) {
+        request->send(400, "application/json",
+                      "{\"error\":\"Missing pin parameters (touch, buzzer, sda, scl)\"}");
+        return;
+    }
+
+    uint8_t touch  = (uint8_t)request->getParam("touch")->value().toInt();
+    uint8_t buzzer = (uint8_t)request->getParam("buzzer")->value().toInt();
+    uint8_t sda    = (uint8_t)request->getParam("sda")->value().toInt();
+    uint8_t scl    = (uint8_t)request->getParam("scl")->value().toInt();
+
+    // Validate: all pins must be in the allowed set
+    if (!isValidPin(touch) || !isValidPin(buzzer) ||
+        !isValidPin(sda)   || !isValidPin(scl)) {
+        request->send(400, "application/json",
+                      "{\"error\":\"Invalid GPIO pin number\"}");
+        return;
+    }
+
+    // Validate: all 4 pins must be distinct
+    if (touch == buzzer || touch == sda || touch == scl ||
+        buzzer == sda   || buzzer == scl || sda == scl) {
+        request->send(400, "application/json",
+                      "{\"error\":\"All four pins must be different\"}");
+        return;
+    }
+
+    // Send response before reboot
+    request->send(200, "application/json", "{\"ok\":true,\"rebooting\":true}");
+
+    // Save and reboot (setPinConfig writes NVS then calls ESP.restart)
+    setPinConfig(touch, buzzer, sda, scl);
+}
+
+// ==========================================================================
 //  Init
 // ==========================================================================
 
@@ -355,4 +414,6 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/device",        HTTP_POST, handlePostDevice);
     server.on("/api/mqtt",          HTTP_GET,  handleGetMqtt);
     server.on("/api/mqtt",          HTTP_POST, handlePostMqtt);
+    server.on("/api/pins",          HTTP_GET,  handleGetPins);
+    server.on("/api/pins",          HTTP_POST, handlePostPins);
 }

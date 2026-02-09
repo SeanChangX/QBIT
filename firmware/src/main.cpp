@@ -18,6 +18,7 @@
 
 // Base64 decode helper (for bitmap poke)
 #include "mbedtls/base64.h"
+#include <new>  // placement new for U8G2 pin reconfiguration
 
 // --- Project-local headers ---
 #include "gif_types.h"
@@ -27,11 +28,22 @@
 #include "web_dashboard.h"
 
 // ==========================================================================
-//  Hardware pin definitions
+//  Hardware pin definitions (configurable via web dashboard, stored in NVS)
 // ==========================================================================
+// Defaults match the original hardcoded layout.  Users can reassign pins
+// through the web dashboard; changes are saved to NVS and applied on reboot.
+//
+// Valid GPIOs for ESP32-C3 Super Mini: 0-10, 20, 21.
 
-#define PIN_TOUCH   1  // TTP223 touch sensor (momentary HIGH on touch)
-#define PIN_BUZZER  2  // Passive buzzer
+static uint8_t _pinTouch  = 1;   // TTP223 touch sensor
+static uint8_t _pinBuzzer = 2;   // Passive buzzer
+static uint8_t _pinSDA    = 20;  // OLED I2C data
+static uint8_t _pinSCL    = 21;  // OLED I2C clock
+
+uint8_t getPinTouch()  { return _pinTouch; }
+uint8_t getPinBuzzer() { return _pinBuzzer; }
+uint8_t getPinSDA()    { return _pinSDA; }
+uint8_t getPinSCL()    { return _pinSCL; }
 
 // ==========================================================================
 //  Display
@@ -39,7 +51,8 @@
 // Hardware I2C for fast buffer transfer; U8G2_R0 as base orientation.
 // 180-degree rotation is applied in software (rotateBuffer180) to avoid
 // column-offset artifacts that some SSD1306 clones exhibit with U8G2_R2.
-//   SDA = GPIO20, SCL = GPIO21
+// SDA/SCL pins are read from NVS; the global object is reconstructed
+// via placement new in setup() before u8g2.begin().
 
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(
     U8G2_R0, /* reset= */ U8X8_PIN_NONE,
@@ -91,6 +104,18 @@ static bool             _wsConnected = false;
 
 static String _deviceId;
 static String _deviceName;
+
+// ==========================================================================
+//  WiFi reconnection monitoring
+// ==========================================================================
+// After initial connection, if WiFi drops and auto-reconnect fails within
+// WIFI_RECONNECT_TIMEOUT_MS, the AP captive portal is restarted so the
+// user can reconfigure.
+
+static bool          _wifiConnected = false;
+static unsigned long _wifiLostMs    = 0;
+static bool          _portalRestartedForReconnect = false;
+#define WIFI_RECONNECT_TIMEOUT_MS 30000
 
 String getDeviceId() {
     if (_deviceId.length() == 0) {
@@ -257,13 +282,13 @@ static void mqttPublishHADiscovery() {
     devBlock["name"]  = name;
     devBlock["mf"]    = "QBIT";
     devBlock["mdl"]   = "QBIT";
-    devBlock["sw"]    = "0.2.2";
+    devBlock["sw"]    = "0.2.3";
 
     // --- Binary sensor: online/offline status ---
     {
         String topic = "homeassistant/binary_sensor/qbit_" + idLow + "/status/config";
         JsonDocument doc;
-        doc["name"]         = name + " Status";
+        doc["name"]         = "Status";
         doc["uniq_id"]      = "qbit_" + idLow + "_status";
         doc["stat_t"]       = prefix + "/" + id + "/status";
         doc["pl_on"]        = "online";
@@ -280,7 +305,7 @@ static void mqttPublishHADiscovery() {
     {
         String topic = "homeassistant/sensor/qbit_" + idLow + "/ip/config";
         JsonDocument doc;
-        doc["name"]         = name + " IP";
+        doc["name"]         = "IP Address";
         doc["uniq_id"]      = "qbit_" + idLow + "_ip";
         doc["stat_t"]       = prefix + "/" + id + "/info";
         doc["val_tpl"]      = "{{ value_json.ip }}";
@@ -296,7 +321,7 @@ static void mqttPublishHADiscovery() {
     {
         String topic = "homeassistant/button/qbit_" + idLow + "/poke/config";
         JsonDocument doc;
-        doc["name"]         = "Poke " + name;
+        doc["name"]         = "Poke";
         doc["uniq_id"]      = "qbit_" + idLow + "_poke";
         doc["cmd_t"]        = prefix + "/" + id + "/command";
 
@@ -321,7 +346,7 @@ static void mqttPublishHADiscovery() {
     {
         String topic = "homeassistant/sensor/qbit_" + idLow + "/last_poke/config";
         JsonDocument doc;
-        doc["name"]         = name + " Last Poke";
+        doc["name"]         = "Last Poke";
         doc["uniq_id"]      = "qbit_" + idLow + "_last_poke";
         doc["stat_t"]       = prefix + "/" + id + "/poke";
         doc["val_tpl"]      = "{{ value_json.sender }}";
@@ -372,7 +397,7 @@ void setBuzzerVolume(uint8_t pct) {
     // If muted while a melody is playing, silence immediately
     if (_buzzerVolume == 0) {
         rtttl::stop();
-        noTone(PIN_BUZZER);
+        noTone(_pinBuzzer);
     }
 }
 
@@ -398,7 +423,29 @@ void saveSettings() {
     _prefs.putString("mqttPass", _mqttPass);
     _prefs.putString("mqttPfx",  _mqttPrefix);
     _prefs.putBool("mqttOn",     _mqttEnabled);
+    // GPIO pin assignments
+    _prefs.putUChar("pinTouch",  _pinTouch);
+    _prefs.putUChar("pinBuzzer", _pinBuzzer);
+    _prefs.putUChar("pinSDA",    _pinSDA);
+    _prefs.putUChar("pinSCL",    _pinSCL);
     Serial.println("Settings saved to NVS");
+}
+
+// Save new GPIO pin configuration to NVS and reboot.
+// Called from the web dashboard "Save Pins" button.
+void setPinConfig(uint8_t touch, uint8_t buzzer, uint8_t sda, uint8_t scl) {
+    if (!_prefsReady) return;
+    _pinTouch  = touch;
+    _pinBuzzer = buzzer;
+    _pinSDA    = sda;
+    _pinSCL    = scl;
+    _prefs.putUChar("pinTouch",  _pinTouch);
+    _prefs.putUChar("pinBuzzer", _pinBuzzer);
+    _prefs.putUChar("pinSDA",    _pinSDA);
+    _prefs.putUChar("pinSCL",    _pinSCL);
+    Serial.println("Pin config saved -- rebooting...");
+    delay(500);
+    ESP.restart();
 }
 
 // ==========================================================================
@@ -420,7 +467,7 @@ static unsigned long _claimTouchStart = 0;
 static unsigned long _claimStartMs = 0;
 
 void handleTouch() {
-    if (digitalRead(PIN_TOUCH) == HIGH) {
+    if (digitalRead(_pinTouch) == HIGH) {
         unsigned long now = millis();
 
         // --- Claim mode: detect long press ---
@@ -437,8 +484,8 @@ void handleTouch() {
             if (next.length() > 0) {
                 gifPlayerSetFile(next);
                 if (_buzzerVolume > 0) {
-                    noTone(PIN_BUZZER);  // detach LEDC before re-attach
-                    rtttl::begin(PIN_BUZZER, TOUCH_MELODY);
+                    noTone(_pinBuzzer);  // detach LEDC before re-attach
+                    rtttl::begin(_pinBuzzer, TOUCH_MELODY);
                 }
                 Serial.println("Touch -> switch to: " + next);
             }
@@ -599,7 +646,7 @@ void playBootAnimation() {
     uint8_t frameBuf[QGIF_FRAME_SIZE];
 
     if (_buzzerVolume > 0) {
-        rtttl::begin(PIN_BUZZER, BOOT_MELODY);
+        rtttl::begin(_pinBuzzer, BOOT_MELODY);
     }
 
     for (uint8_t f = 0; f < sys_scx_gif.frame_count; f++) {
@@ -615,7 +662,7 @@ void playBootAnimation() {
     }
 
     rtttl::stop();
-    noTone(PIN_BUZZER);
+    noTone(_pinBuzzer);
 }
 
 // ==========================================================================
@@ -623,8 +670,11 @@ void playBootAnimation() {
 // ==========================================================================
 
 void loadSettings() {
-    _prefs.begin("qbit", false);   // namespace "qbit", read-write
-    _prefsReady = true;
+    // NVS may already be open (pin config reads it early in setup)
+    if (!_prefsReady) {
+        _prefs.begin("qbit", false);
+        _prefsReady = true;
+    }
 
     // Read stored values (with sensible defaults for first boot)
     uint8_t  bright = _prefs.getUChar("bright", 0x80);
@@ -788,8 +838,8 @@ static void handlePoke(const char *sender, const char *text) {
 
     // Play notification sound
     if (_buzzerVolume > 0) {
-        noTone(PIN_BUZZER);
-        rtttl::begin(PIN_BUZZER, POKE_MELODY);
+        noTone(_pinBuzzer);
+        rtttl::begin(_pinBuzzer, POKE_MELODY);
     }
 
     // Notify MQTT
@@ -842,8 +892,8 @@ static void handlePokeBitmap(const char *sender, const char *text,
 
     // Play notification sound
     if (_buzzerVolume > 0) {
-        noTone(PIN_BUZZER);
-        rtttl::begin(PIN_BUZZER, POKE_MELODY);
+        noTone(_pinBuzzer);
+        rtttl::begin(_pinBuzzer, POKE_MELODY);
     }
 
     // Notify MQTT
@@ -869,8 +919,8 @@ static void handleClaimRequest(const char *userName) {
 
     // Play notification sound
     if (_buzzerVolume > 0) {
-        noTone(PIN_BUZZER);
-        rtttl::begin(PIN_BUZZER, CLAIM_MELODY);
+        noTone(_pinBuzzer);
+        rtttl::begin(_pinBuzzer, CLAIM_MELODY);
     }
 
     Serial.printf("Claim request from: %s\n", userName);
@@ -910,7 +960,7 @@ static void wsSendDeviceInfo() {
     doc["id"]      = getDeviceId();
     doc["name"]    = _deviceName;
     doc["ip"]      = WiFi.localIP().toString();
-    doc["version"] = "0.2.2";
+    doc["version"] = "0.2.3";
 
     String msg;
     serializeJson(doc, msg);
@@ -980,11 +1030,24 @@ void setup() {
     Serial.begin(115200);
     Serial.setDebugOutput(false);  // Suppress WiFi credentials in ESP-IDF logs
 
-    // -- GPIO --
-    pinMode(PIN_TOUCH, INPUT);
-    pinMode(PIN_BUZZER, OUTPUT);
+    // -- Open NVS and read GPIO pin config FIRST (before any hardware init) --
+    _prefs.begin("qbit", false);
+    _prefsReady = true;
+    _pinTouch  = _prefs.getUChar("pinTouch",  1);
+    _pinBuzzer = _prefs.getUChar("pinBuzzer", 2);
+    _pinSDA    = _prefs.getUChar("pinSDA",    20);
+    _pinSCL    = _prefs.getUChar("pinSCL",    21);
+    Serial.printf("GPIO pins: touch=%u buzzer=%u sda=%u scl=%u\n",
+                  _pinTouch, _pinBuzzer, _pinSDA, _pinSCL);
 
-    // -- Display --
+    // -- GPIO --
+    pinMode(_pinTouch, INPUT);
+    pinMode(_pinBuzzer, OUTPUT);
+
+    // -- Display (reconstruct U8G2 with NVS-configured I2C pins) --
+    new (&u8g2) U8G2_SSD1306_128X64_NONAME_F_HW_I2C(
+        U8G2_R0, /* reset= */ U8X8_PIN_NONE,
+        /* clock= */ _pinSCL, /* data= */ _pinSDA);
     u8g2.setBusClock(400000);
     u8g2.begin();
     clearFullGDDRAM();
@@ -1010,10 +1073,12 @@ void setup() {
              "Connect to 'QBIT'",
              "AP to set Wi-Fi.");
 
-    volatile bool wifiConnected = false;
-    NW.onConnectionStatus([&wifiConnected](NetWizardConnectionStatus status) {
+    NW.onConnectionStatus([](NetWizardConnectionStatus status) {
         if (status == NetWizardConnectionStatus::CONNECTED) {
-            wifiConnected = true;
+            _wifiConnected = true;
+        } else if (status == NetWizardConnectionStatus::CONNECTION_LOST ||
+                   status == NetWizardConnectionStatus::DISCONNECTED) {
+            _wifiConnected = false;
         }
     });
 
@@ -1023,7 +1088,7 @@ void setup() {
     unsigned long wifiStartMs = millis();
     bool animStarted = false;
 
-    while (!wifiConnected) {
+    while (!_wifiConnected) {
         NW.loop();
 
         // After 10 seconds, start GIF animation while AP stays open
@@ -1100,6 +1165,38 @@ void loop() {
     NW.loop();
     _wsClient.loop();
 
+    // --- WiFi reconnection monitoring ---
+    // If WiFi drops, wait for ESP32 auto-reconnect.  If it does not
+    // recover within WIFI_RECONNECT_TIMEOUT_MS, restart the AP portal
+    // so the user can reconfigure.
+    if (WiFi.status() != WL_CONNECTED) {
+        if (_wifiLostMs == 0) {
+            _wifiLostMs = millis();
+            if (_wifiLostMs == 0) _wifiLostMs = 1;  // avoid sentinel collision
+            _wifiConnected = false;
+            Serial.println("[WiFi] Connection lost, waiting for auto-reconnect...");
+        }
+        if (!_portalRestartedForReconnect &&
+            (millis() - _wifiLostMs > WIFI_RECONNECT_TIMEOUT_MS)) {
+            _portalRestartedForReconnect = true;
+            NW.startPortal();
+            showText("[ Wi-Fi Lost ]", "",
+                     "Connect to 'QBIT'",
+                     "AP to set Wi-Fi.");
+            Serial.println("[WiFi] Auto-reconnect timeout, restarting AP portal");
+        }
+    } else if (_wifiLostMs > 0) {
+        // WiFi reconnected (via auto-reconnect or user reconfigured portal)
+        _wifiConnected = true;
+        _wifiLostMs = 0;
+        if (_portalRestartedForReconnect) {
+            _portalRestartedForReconnect = false;
+            NW.stopPortal();
+            Serial.println("[WiFi] Reconnected, stopping AP portal");
+        }
+        infoScreenShown = false;  // force screen redraw
+    }
+
     // Local MQTT maintenance
     if (_mqttEnabled) {
         if (!_mqttClient.connected()) {
@@ -1116,7 +1213,7 @@ void loop() {
         rtttl::play();
         _melodyWasPlaying = true;
     } else if (_melodyWasPlaying) {
-        noTone(PIN_BUZZER);
+        noTone(_pinBuzzer);
         _melodyWasPlaying = false;
     }
 
@@ -1136,7 +1233,7 @@ void loop() {
         }
 
         // Detect long press completion
-        if (_claimTouchStart > 0 && digitalRead(PIN_TOUCH) == HIGH) {
+        if (_claimTouchStart > 0 && digitalRead(_pinTouch) == HIGH) {
             if (now - _claimTouchStart >= CLAIM_LONG_PRESS_MS) {
                 _claimPending = false;
                 _claimTouchStart = 0;

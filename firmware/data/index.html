@@ -102,6 +102,29 @@
     <button class="btn btn-save" id="btnSave">Save</button>
   </div>
 
+  <div class="card">
+    <div class="card-title">GPIO Pins</div>
+    <div class="setting">
+      <label class="setting-label">Touch</label>
+      <select id="pinTouch" class="input-select"></select>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Buzzer</label>
+      <select id="pinBuzzer" class="input-select"></select>
+    </div>
+    <div class="setting">
+      <label class="setting-label">OLED SDA</label>
+      <select id="pinSDA" class="input-select"></select>
+    </div>
+    <div class="setting">
+      <label class="setting-label">OLED SCL</label>
+      <select id="pinSCL" class="input-select"></select>
+    </div>
+    <div class="pin-hint">Changing pins will reboot the device.</div>
+    <div class="msg" id="pinMsg"></div>
+    <button class="btn btn-save" id="btnPinSave">Save Pins</button>
+  </div>
+
   <div class="card" id="fl">
     <div class="card-title">Files</div>
     <div class="empty">Loading...</div>

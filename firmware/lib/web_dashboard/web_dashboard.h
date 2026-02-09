@@ -49,4 +49,12 @@ extern void     setMqttConfig(const String &host, uint16_t port,
                               const String &user, const String &pass,
                               const String &prefix, bool enabled);
 
+// GPIO pin configuration -- implemented by main.cpp.
+extern uint8_t getPinTouch();
+extern uint8_t getPinBuzzer();
+extern uint8_t getPinSDA();
+extern uint8_t getPinSCL();
+extern void    setPinConfig(uint8_t touch, uint8_t buzzer,
+                            uint8_t sda, uint8_t scl);
+
 #endif // WEB_DASHBOARD_H
