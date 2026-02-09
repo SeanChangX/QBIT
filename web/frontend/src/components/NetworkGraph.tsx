@@ -55,7 +55,7 @@ export default function NetworkGraph({ devices, onSelectDevice }: Props) {
         nodes: {
           shape: 'dot',
           size: 22,
-          font: { color: '#ffffff', size: 13, face: 'Inter, sans-serif' },
+          font: { color: '#ffffff', size: 13, face: 'Inter, sans-serif', multi: 'html' },
           borderWidth: 2,
           shadow: { enabled: true, size: 6, color: 'rgba(0,0,0,0.3)' },
           color: {
@@ -122,13 +122,56 @@ export default function NetworkGraph({ devices, onSelectDevice }: Props) {
       }
     });
 
+    // Compute edge length based on uptime:
+    // Longer online = shorter edge (closer to hub).
+    // Range: 80 (longest online) to 250 (just connected).
+    const now = Date.now();
+    const uptimes = devices.map((d) => now - new Date(d.connectedAt).getTime());
+    const maxUptime = Math.max(...uptimes, 1);
+
     // Add or update device nodes
     devices.forEach((d) => {
-      if (currentIds.has(d.id)) {
-        nodes.update({ id: d.id, label: d.name });
+      // Build label: device name + optional claim info
+      let label = d.name;
+      if (d.claimedBy && d.claimedBy.userName) {
+        label += `\n${d.claimedBy.userName}`;
+      }
+
+      // Node config
+      const nodeConfig: Record<string, unknown> = {
+        id: d.id,
+        label,
+      };
+
+      // If claimed and has avatar, use circularImage shape
+      if (d.claimedBy && d.claimedBy.userAvatar) {
+        nodeConfig.shape = 'circularImage';
+        nodeConfig.image = d.claimedBy.userAvatar;
+        nodeConfig.size = 24;
+        nodeConfig.borderWidth = 2;
+        nodeConfig.color = {
+          border: '#d32f2f',
+          highlight: { border: '#ff4d4d' },
+          hover: { border: '#ff4d4d' },
+        };
       } else {
-        nodes.add({ id: d.id, label: d.name });
-        edges.add({ id: `edge-${d.id}`, from: HUB_ID, to: d.id });
+        // Reset to default dot shape (in case claim was removed)
+        nodeConfig.shape = 'dot';
+        nodeConfig.image = undefined;
+        nodeConfig.size = 22;
+      }
+
+      // Edge length: longer uptime = shorter edge (closer to hub)
+      const uptime = now - new Date(d.connectedAt).getTime();
+      const ratio = uptime / maxUptime; // 0..1, 1 = longest online
+      const edgeLength = 250 - ratio * 170; // 250 (newest) -> 80 (oldest)
+
+      if (currentIds.has(d.id)) {
+        nodes.update(nodeConfig);
+        edges.update({ id: `edge-${d.id}`, length: edgeLength });
+      } else {
+        nodes.add(nodeConfig);
+        edges.add({ id: `edge-${d.id}`, from: HUB_ID, to: d.id, length: edgeLength });
       }
     });
   }, [devices]);

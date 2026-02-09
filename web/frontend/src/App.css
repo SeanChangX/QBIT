@@ -78,6 +78,7 @@ body {
   gap: 0;
   user-select: none;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .brand-q {
@@ -119,6 +120,8 @@ body {
   background: rgba(255, 255, 255, 0.05);
   border-radius: 999px;
   padding: 3px;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .nav-tab {
@@ -149,8 +152,8 @@ body {
 /* -- Mobile navbar adjustments -- */
 @media (max-width: 520px) {
   .navbar {
-    gap: 6px;
-    padding: 6px 6px 6px 12px;
+    gap: 4px;
+    padding: 6px 6px 6px 10px;
     top: 8px;
   }
 
@@ -170,8 +173,13 @@ body {
   }
 
   .btn-logout {
-    padding: 4px 10px;
+    padding: 5px 7px;
     font-size: 0.65em;
+    min-width: unset;
+  }
+
+  .logout-text {
+    display: none;
   }
 
   .navbar-name {
@@ -181,6 +189,10 @@ body {
   .navbar-avatar {
     width: 24px;
     height: 24px;
+  }
+
+  .navbar-user {
+    gap: 4px;
   }
 }
 
@@ -294,6 +306,21 @@ body {
 .btn-logout:hover {
   background: rgba(255, 255, 255, 0.12);
   color: var(--text-primary);
+}
+
+.logout-icon {
+  display: none;
+  flex-shrink: 0;
+}
+
+.logout-text {
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .logout-icon {
+    display: block;
+  }
 }
 
 .btn-poke {
@@ -438,6 +465,95 @@ body {
 
 .poke-login-msg a:hover {
   text-decoration: underline;
+}
+
+/* -- Poke character count -- */
+.poke-char-count {
+  text-align: right;
+  font-size: 0.72em;
+  color: var(--text-muted);
+  margin-top: -10px;
+  margin-bottom: 12px;
+}
+
+/* -- Claim link in poke dialog -- */
+.btn-claim-link {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-top: 12px;
+  padding: 8px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.78em;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.btn-claim-link:hover {
+  color: var(--text-primary);
+  border-color: var(--red);
+}
+
+/* -- Claim dialog -- */
+.claim-description {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.claim-pending {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.claim-pending-icon {
+  font-size: 2.5em;
+  margin-bottom: 12px;
+  opacity: 0.6;
+}
+
+.claim-pending p {
+  color: var(--text-secondary);
+  font-size: 0.9em;
+  margin-bottom: 8px;
+}
+
+.claim-pending-hint {
+  color: var(--text-muted);
+  font-size: 0.82em;
+}
+
+.claim-error {
+  color: var(--red-light);
+  font-size: 0.82em;
+  margin-bottom: 10px;
+  padding: 8px;
+  background: rgba(244, 67, 54, 0.1);
+  border-radius: 6px;
+}
+
+/* -- Network page device count (bottom bar) -- */
+.network-device-count {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(24, 24, 24, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 6px 18px;
+  font-size: 0.78em;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  z-index: 10;
 }
 
 /* -- Device count badge -- */
@@ -660,4 +776,151 @@ body {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+/* Library toolbar (search + sort) */
+.library-toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+
+.library-search {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 12px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.85em;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.library-search:focus {
+  border-color: var(--red);
+}
+
+.library-search::placeholder {
+  color: var(--text-muted);
+}
+
+.library-sort {
+  padding: 8px 12px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.82em;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
+
+.library-sort:focus {
+  border-color: var(--red);
+}
+
+/* Library header actions */
+.library-header-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.btn-lib-action {
+  background: var(--bg-accent);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 0.78em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.btn-lib-action:hover {
+  background: var(--bg-hover);
+  border-color: var(--red);
+}
+
+.btn-lib-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-lib-action.btn-sm {
+  padding: 4px 10px;
+  font-size: 0.72em;
+}
+
+.btn-lib-action.btn-danger {
+  color: var(--red-light);
+  border-color: rgba(211, 47, 47, 0.3);
+}
+
+.btn-lib-action.btn-danger:hover {
+  background: rgba(211, 47, 47, 0.12);
+  border-color: var(--red);
+}
+
+/* Selection bar */
+.library-selection-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+
+.library-selection-count {
+  font-size: 0.82em;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.library-selection-spacer {
+  flex: 1;
+}
+
+/* Card selection state */
+.library-card.selected {
+  border-color: var(--red);
+  background: rgba(211, 47, 47, 0.06);
+}
+
+.library-card-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+}
+
+.library-card-checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--red);
+}
+
+/* Make library-card position relative for checkbox positioning */
+.library-card {
+  position: relative;
 }

@@ -44,6 +44,15 @@ static void handleFont(AsyncWebServerRequest *request) {
     serveFile(request, "/inter-latin.woff2", "font/woff2");
 }
 
+static void handleIcon(AsyncWebServerRequest *request) {
+    serveFile(request, "/icon.svg", "image/svg+xml");
+}
+
+static void handleFavicon(AsyncWebServerRequest *request) {
+    // Browsers auto-request /favicon.ico; redirect to SVG icon
+    request->redirect("/icon.svg");
+}
+
 // ==========================================================================
 //  Handlers -- REST API
 // ==========================================================================
@@ -328,6 +337,8 @@ static void handlePostMqtt(AsyncWebServerRequest *request) {
 void webDashboardInit(AsyncWebServer &server) {
     // Static assets (served from LittleFS data/ partition)
     server.on("/",                  HTTP_GET,  handleRoot);
+    server.on("/icon.svg",          HTTP_GET,  handleIcon);
+    server.on("/favicon.ico",       HTTP_GET,  handleFavicon);
     server.on("/style.css",         HTTP_GET,  handleCSS);
     server.on("/script.js",         HTTP_GET,  handleScript);
     server.on("/inter-latin.woff2", HTTP_GET,  handleFont);
