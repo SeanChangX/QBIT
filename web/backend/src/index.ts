@@ -67,7 +67,6 @@ const authLimiter = rateLimit({
 });
 
 app.use('/api/', apiLimiter);
-app.use('/auth/', authLimiter);
 
 // ---------------------------------------------------------------------------
 //  Sessions
@@ -340,6 +339,7 @@ setInterval(() => {
 
 app.get(
   '/auth/google',
+  authLimiter,
   passport.authenticate('google', { scope: ['profile', 'email'] })
 );
 
