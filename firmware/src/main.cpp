@@ -9,7 +9,6 @@
 #include <U8g2lib.h>
 #include <Wire.h>
 #include <NetWizard.h>
-#include <ElegantOTA.h>
 #include <ESPmDNS.h>
 #include <NonBlockingRtttl.h>
 #include <Preferences.h>
@@ -437,7 +436,7 @@ void handleTouch() {
 }
 
 // ==========================================================================
-//  Web server (shared by NetWizard, ElegantOTA, and web dashboard)
+//  Web server (shared by NetWizard and web dashboard)
 // ==========================================================================
 
 AsyncWebServer server(80);
@@ -1014,11 +1013,10 @@ void setup() {
     showText("[ Wi-Fi Connected ]",
              ip.c_str(),
              "http://qbit.local",
-             "OTA: /update");
+             "");
     delay(3000);
 
     // -- Start web services --
-    ElegantOTA.begin(&server);
     webDashboardInit(server);
     server.begin();
 
@@ -1057,7 +1055,6 @@ void setup() {
 static bool infoScreenShown = false;
 
 void loop() {
-    ElegantOTA.loop();
     NW.loop();
     _wsClient.loop();
 
@@ -1158,7 +1155,7 @@ void loop() {
         showText("Upload GIF at:",
                  "http://qbit.local",
                  "",
-                 "OTA: /update");
+                 "");
         infoScreenShown = true;
     }
 }
