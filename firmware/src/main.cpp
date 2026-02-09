@@ -257,7 +257,7 @@ static void mqttPublishHADiscovery() {
     devBlock["name"]  = name;
     devBlock["mf"]    = "QBIT";
     devBlock["mdl"]   = "QBIT";
-    devBlock["sw"]    = "1.0.0";
+    devBlock["sw"]    = "0.2.2";
 
     // --- Binary sensor: online/offline status ---
     {
@@ -315,6 +315,24 @@ static void mqttPublishHADiscovery() {
         serializeJson(doc, payload);
         bool ok3 = _mqttClient.publish(topic.c_str(), payload.c_str(), true);
         Serial.printf("[MQTT] HA discovery button: %s (%u bytes)\n", ok3 ? "OK" : "FAIL", payload.length());
+    }
+
+    // --- Sensor: last poke received ---
+    {
+        String topic = "homeassistant/sensor/qbit_" + idLow + "/last_poke/config";
+        JsonDocument doc;
+        doc["name"]         = name + " Last Poke";
+        doc["uniq_id"]      = "qbit_" + idLow + "_last_poke";
+        doc["stat_t"]       = prefix + "/" + id + "/poke";
+        doc["val_tpl"]      = "{{ value_json.sender }}";
+        doc["icon"]         = "mdi:message-text";
+        doc["json_attr_t"]  = prefix + "/" + id + "/poke";
+        doc["json_attr_tpl"] = "{{ {'sender': value_json.sender, 'message': value_json.text, 'time': value_json.time} | tojson }}";
+        doc["dev"]          = devBlock;
+        String payload;
+        serializeJson(doc, payload);
+        bool ok4 = _mqttClient.publish(topic.c_str(), payload.c_str(), true);
+        Serial.printf("[MQTT] HA discovery last_poke: %s (%u bytes)\n", ok4 ? "OK" : "FAIL", payload.length());
     }
 
     Serial.println("[MQTT] HA discovery config published");
@@ -744,6 +762,20 @@ static void showPokeBitmap() {
     u8g2.sendBuffer();
 }
 
+// Publish poke event to MQTT so Home Assistant can see it
+static void mqttPublishPokeEvent(const char *sender, const char *text) {
+    if (!_mqttEnabled || !_mqttClient.connected()) return;
+    String topic = _mqttPrefix + "/" + getDeviceId() + "/poke";
+    JsonDocument doc;
+    doc["sender"] = sender;
+    doc["text"]   = text;
+    doc["time"]   = millis() / 1000;  // uptime seconds as timestamp
+    String payload;
+    serializeJson(doc, payload);
+    _mqttClient.publish(topic.c_str(), payload.c_str(), true);
+    Serial.printf("[MQTT] Poke event published: %s -> %s\n", sender, text);
+}
+
 static void handlePoke(const char *sender, const char *text) {
     freePokeBitmaps();
     _pokeActive  = true;
@@ -759,6 +791,9 @@ static void handlePoke(const char *sender, const char *text) {
         noTone(PIN_BUZZER);
         rtttl::begin(PIN_BUZZER, POKE_MELODY);
     }
+
+    // Notify MQTT
+    mqttPublishPokeEvent(sender, text);
 
     Serial.printf("Poke from %s: %s\n", sender, text);
 }
@@ -810,6 +845,9 @@ static void handlePokeBitmap(const char *sender, const char *text,
         noTone(PIN_BUZZER);
         rtttl::begin(PIN_BUZZER, POKE_MELODY);
     }
+
+    // Notify MQTT
+    mqttPublishPokeEvent(sender, text);
 
     Serial.printf("Bitmap poke from %s: %s\n", sender, text);
 }
@@ -872,7 +910,7 @@ static void wsSendDeviceInfo() {
     doc["id"]      = getDeviceId();
     doc["name"]    = _deviceName;
     doc["ip"]      = WiFi.localIP().toString();
-    doc["version"] = "0.1.2";
+    doc["version"] = "0.2.2";
 
     String msg;
     serializeJson(doc, msg);
