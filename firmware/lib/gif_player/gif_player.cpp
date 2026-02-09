@@ -260,26 +260,33 @@ void gifPlayerTick() {
 
   // --- Idle animation playback (PROGMEM, between GIFs) ---
   if (_idlePlaying && _idleAnim) {
-    uint16_t delayMs = _idleAnim->delays[_idleFrame] / _speedDivisor;
-    if (delayMs < 1) delayMs = 1;
-    if (millis() - _idleLastFrameMs < delayMs) return;
-
-    memcpy_P(_idleFrameBuf, _idleAnim->frames[_idleFrame], QGIF_FRAME_SIZE);
-    gifRenderFrame(_display, _idleFrameBuf, _idleAnim->width, _idleAnim->height);
-
-    _idleLastFrameMs = millis();
-    _idleFrame++;
-    if (_idleFrame >= _idleAnim->frame_count) {
-      // Idle animation finished one loop -- switch to next GIF
+    // If a file change was requested externally (e.g. touch), interrupt
+    // the idle animation and fall through to the file-change handler.
+    if (_fileChanged) {
       _idlePlaying = false;
       _idleFrame   = 0;
-      String next = gifPlayerNextShuffle();
-      if (next.length() > 0) {
-        _requestedFile = next;
-        _fileChanged   = true;
+    } else {
+      uint16_t delayMs = _idleAnim->delays[_idleFrame] / _speedDivisor;
+      if (delayMs < 1) delayMs = 1;
+      if (millis() - _idleLastFrameMs < delayMs) return;
+
+      memcpy_P(_idleFrameBuf, _idleAnim->frames[_idleFrame], QGIF_FRAME_SIZE);
+      gifRenderFrame(_display, _idleFrameBuf, _idleAnim->width, _idleAnim->height);
+
+      _idleLastFrameMs = millis();
+      _idleFrame++;
+      if (_idleFrame >= _idleAnim->frame_count) {
+        // Idle animation finished one loop -- switch to next GIF
+        _idlePlaying = false;
+        _idleFrame   = 0;
+        String next = gifPlayerNextShuffle();
+        if (next.length() > 0) {
+          _requestedFile = next;
+          _fileChanged   = true;
+        }
       }
+      return;  // don't process normal GIF while idle is playing
     }
-    return;  // don't process normal GIF while idle is playing
   }
 
   // --- Handle pending file-change request ---

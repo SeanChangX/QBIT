@@ -282,7 +282,7 @@ static void mqttPublishHADiscovery() {
     devBlock["name"]  = name;
     devBlock["mf"]    = "QBIT";
     devBlock["mdl"]   = "QBIT";
-    devBlock["sw"]    = "0.2.3";
+    devBlock["sw"]    = "0.2.4";
 
     // --- Binary sensor: online/offline status ---
     {
@@ -726,10 +726,12 @@ static const char POKE_MELODY[] =
 // --- Bitmap poke data ---
 // When a bitmap poke is received, these buffers hold the pre-rendered
 // sender and text bitmaps for multi-language OLED display.
-static uint8_t *_pokeSenderBmp   = nullptr;
-static uint16_t _pokeSenderWidth = 0;
-static uint8_t *_pokeTextBmp     = nullptr;
-static uint16_t _pokeTextWidth   = 0;
+static uint8_t *_pokeSenderBmp    = nullptr;
+static uint16_t _pokeSenderWidth  = 0;
+static uint16_t _pokeSenderHeight = 0;
+static uint8_t *_pokeTextBmp      = nullptr;
+static uint16_t _pokeTextWidth    = 0;
+static uint16_t _pokeTextHeight   = 0;
 static bool     _pokeBitmapMode  = false;
 static int16_t  _pokeScrollOffset = 0;
 static unsigned long _pokeLastScrollMs = 0;
@@ -741,9 +743,11 @@ static unsigned long _pokeLastScrollMs = 0;
 static void freePokeBitmaps() {
     if (_pokeSenderBmp) { free(_pokeSenderBmp); _pokeSenderBmp = nullptr; }
     if (_pokeTextBmp)   { free(_pokeTextBmp);   _pokeTextBmp   = nullptr; }
-    _pokeSenderWidth = 0;
-    _pokeTextWidth   = 0;
-    _pokeBitmapMode  = false;
+    _pokeSenderWidth  = 0;
+    _pokeSenderHeight = 0;
+    _pokeTextWidth    = 0;
+    _pokeTextHeight   = 0;
+    _pokeBitmapMode   = false;
 }
 
 // Draw a 1-bit bitmap (SSD1306 page format) into the U8G2 buffer at given y offset.
@@ -786,7 +790,9 @@ static void showPokeBitmap() {
     u8g2.setFont(u8g2_font_6x13_tr);
     u8g2.drawStr(4, 13, ">> Poke! <<");
 
-    // Row 2 (y=15..27): sender name bitmap
+    // Row 2: sender name bitmap (placed right after header)
+    const int16_t senderY = 15;
+    uint16_t senderH = _pokeSenderHeight > 0 ? _pokeSenderHeight : 16;
     if (_pokeSenderBmp && _pokeSenderWidth > 0) {
         int16_t senderScroll = 0;
         if (_pokeSenderWidth > 128) {
@@ -794,10 +800,12 @@ static void showPokeBitmap() {
             if (senderScroll > (int16_t)(_pokeSenderWidth - 128))
                 senderScroll = _pokeSenderWidth - 128;
         }
-        drawBitmapToBuffer(_pokeSenderBmp, _pokeSenderWidth, 16, 15, senderScroll);
+        drawBitmapToBuffer(_pokeSenderBmp, _pokeSenderWidth, senderH, senderY, senderScroll);
     }
 
-    // Row 3-4 (y=32..55): message text bitmap
+    // Row 3-4: message text bitmap (placed after sender row)
+    const int16_t textY = senderY + senderH + 1;
+    uint16_t textH = _pokeTextHeight > 0 ? _pokeTextHeight : 16;
     if (_pokeTextBmp && _pokeTextWidth > 0) {
         int16_t textScroll = 0;
         if (_pokeTextWidth > 128) {
@@ -805,7 +813,7 @@ static void showPokeBitmap() {
             if (textScroll > (int16_t)(_pokeTextWidth - 128))
                 textScroll = _pokeTextWidth - 128;
         }
-        drawBitmapToBuffer(_pokeTextBmp, _pokeTextWidth, 16, 32, textScroll);
+        drawBitmapToBuffer(_pokeTextBmp, _pokeTextWidth, textH, textY, textScroll);
     }
 
     rotateBuffer180();
@@ -871,15 +879,28 @@ static void handlePokeBitmap(const char *sender, const char *text,
                               const char *textBmp64, uint16_t textW) {
     freePokeBitmaps();
 
-    // Decode sender bitmap
+    // Decode sender bitmap and compute actual height from data size.
+    // Bitmap is in SSD1306 page format: bytes = pages * width, height = pages * 8.
     size_t senderLen = 0;
     _pokeSenderBmp = decodeBase64Alloc(senderBmp64, &senderLen);
-    _pokeSenderWidth = (_pokeSenderBmp != nullptr) ? senderW : 0;
+    if (_pokeSenderBmp != nullptr && senderW > 0) {
+        _pokeSenderWidth  = senderW;
+        _pokeSenderHeight = (senderLen / senderW) * 8;
+    } else {
+        _pokeSenderWidth  = 0;
+        _pokeSenderHeight = 0;
+    }
 
-    // Decode text bitmap
+    // Decode text bitmap and compute actual height.
     size_t textLen = 0;
     _pokeTextBmp = decodeBase64Alloc(textBmp64, &textLen);
-    _pokeTextWidth = (_pokeTextBmp != nullptr) ? textW : 0;
+    if (_pokeTextBmp != nullptr && textW > 0) {
+        _pokeTextWidth  = textW;
+        _pokeTextHeight = (textLen / textW) * 8;
+    } else {
+        _pokeTextWidth  = 0;
+        _pokeTextHeight = 0;
+    }
 
     _pokeBitmapMode  = true;
     _pokeActive      = true;
@@ -960,7 +981,7 @@ static void wsSendDeviceInfo() {
     doc["id"]      = getDeviceId();
     doc["name"]    = _deviceName;
     doc["ip"]      = WiFi.localIP().toString();
-    doc["version"] = "0.2.3";
+    doc["version"] = "0.2.4";
 
     String msg;
     serializeJson(doc, msg);
