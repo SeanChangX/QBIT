@@ -17,9 +17,13 @@
 #include <WebSocketsClient.h>
 #include <PubSubClient.h>
 
+// Base64 decode helper (for bitmap poke)
+#include "mbedtls/base64.h"
+
 // --- Project-local headers ---
 #include "gif_types.h"
 #include "sys_scx.h"
+#include "sys_idle.h"
 #include "gif_player.h"
 #include "web_dashboard.h"
 
@@ -139,8 +143,9 @@ String getMqttPass()   { return _mqttPass; }
 String getMqttPrefix() { return _mqttPrefix; }
 bool   getMqttEnabled(){ return _mqttEnabled; }
 
-// Forward declaration
+// Forward declarations
 static void mqttReconnect();
+static void mqttPublishHADiscovery();
 
 void setMqttConfig(const String &host, uint16_t port,
                    const String &user, const String &pass,
@@ -223,10 +228,93 @@ static void mqttReconnect() {
         // Subscribe to command topic
         String cmdTopic = _mqttPrefix + "/" + getDeviceId() + "/command";
         _mqttClient.subscribe(cmdTopic.c_str());
+
+        // Publish Home Assistant MQTT discovery config
+        mqttPublishHADiscovery();
     } else {
         Serial.printf("[MQTT] Connection failed (rc=%d), retrying...\n",
                       _mqttClient.state());
     }
+}
+
+// ==========================================================================
+//  MQTT Home Assistant Discovery
+// ==========================================================================
+// Publishes auto-discovery config so HA automatically creates entities
+// for this QBIT device.  All payloads use retain=true.
+
+static void mqttPublishHADiscovery() {
+    String id    = getDeviceId();
+    String idLow = id;
+    idLow.toLowerCase();
+    String name  = _deviceName;
+    String prefix = _mqttPrefix;
+
+    // Shared device block for all entities
+    JsonDocument devBlock;
+    JsonArray ids = devBlock["ids"].to<JsonArray>();
+    ids.add("qbit_" + idLow);
+    devBlock["name"]  = name;
+    devBlock["mf"]    = "QBIT";
+    devBlock["mdl"]   = "QBIT";
+    devBlock["sw"]    = "1.0.0";
+
+    // --- Binary sensor: online/offline status ---
+    {
+        String topic = "homeassistant/binary_sensor/qbit_" + idLow + "/status/config";
+        JsonDocument doc;
+        doc["name"]         = name + " Status";
+        doc["uniq_id"]      = "qbit_" + idLow + "_status";
+        doc["stat_t"]       = prefix + "/" + id + "/status";
+        doc["pl_on"]        = "online";
+        doc["pl_off"]       = "offline";
+        doc["dev_cla"]      = "connectivity";
+        doc["dev"]          = devBlock;
+        String payload;
+        serializeJson(doc, payload);
+        _mqttClient.publish(topic.c_str(), payload.c_str(), true);
+    }
+
+    // --- Sensor: IP address ---
+    {
+        String topic = "homeassistant/sensor/qbit_" + idLow + "/ip/config";
+        JsonDocument doc;
+        doc["name"]         = name + " IP";
+        doc["uniq_id"]      = "qbit_" + idLow + "_ip";
+        doc["stat_t"]       = prefix + "/" + id + "/info";
+        doc["val_tpl"]      = "{{ value_json.ip }}";
+        doc["icon"]         = "mdi:ip-network";
+        doc["dev"]          = devBlock;
+        String payload;
+        serializeJson(doc, payload);
+        _mqttClient.publish(topic.c_str(), payload.c_str(), true);
+    }
+
+    // --- Button: poke trigger ---
+    {
+        String topic = "homeassistant/button/qbit_" + idLow + "/poke/config";
+        JsonDocument doc;
+        doc["name"]         = "Poke " + name;
+        doc["uniq_id"]      = "qbit_" + idLow + "_poke";
+        doc["cmd_t"]        = prefix + "/" + id + "/command";
+
+        // Build the payload_press as a JSON string
+        JsonDocument pressDoc;
+        pressDoc["command"] = "poke";
+        pressDoc["sender"]  = "Home Assistant";
+        pressDoc["text"]    = "Poke!";
+        String pressStr;
+        serializeJson(pressDoc, pressStr);
+        doc["pl_prs"]       = pressStr;
+
+        doc["icon"]         = "mdi:hand-wave";
+        doc["dev"]          = devBlock;
+        String payload;
+        serializeJson(doc, payload);
+        _mqttClient.publish(topic.c_str(), payload.c_str(), true);
+    }
+
+    Serial.println("[MQTT] HA discovery config published");
 }
 
 // ==========================================================================
@@ -303,9 +391,25 @@ static const char TOUCH_MELODY[] =
 static unsigned long _lastTouchMs = 0;
 #define TOUCH_DEBOUNCE_MS 300
 
+// Forward declarations for claim handling
+static bool _claimPending = false;
+static unsigned long _claimTouchStart = 0;
+#define CLAIM_LONG_PRESS_MS 2000
+#define CLAIM_TIMEOUT_MS    30000
+static unsigned long _claimStartMs = 0;
+
 void handleTouch() {
     if (digitalRead(PIN_TOUCH) == HIGH) {
         unsigned long now = millis();
+
+        // --- Claim mode: detect long press ---
+        if (_claimPending) {
+            if (_claimTouchStart == 0) {
+                _claimTouchStart = now;
+            }
+            return;  // handled in loop() for long-press detection
+        }
+
         if (now - _lastTouchMs > TOUCH_DEBOUNCE_MS) {
             _lastTouchMs = now;
             String next = gifPlayerNextShuffle();
@@ -316,6 +420,17 @@ void handleTouch() {
                     rtttl::begin(PIN_BUZZER, TOUCH_MELODY);
                 }
                 Serial.println("Touch -> switch to: " + next);
+            }
+        }
+    } else {
+        // Touch released -- reset claim touch tracking
+        if (_claimPending && _claimTouchStart > 0) {
+            // Short tap during claim = reject
+            unsigned long held = millis() - _claimTouchStart;
+            _claimTouchStart = 0;
+            if (held < CLAIM_LONG_PRESS_MS) {
+                // Not a long press, just ignore (don't reject on short tap,
+                // let them try again)
             }
         }
     }
@@ -495,8 +610,8 @@ void loadSettings() {
     uint8_t  vol    = _prefs.getUChar("volume", 90);
     uint16_t speed  = _prefs.getUShort("speed", 4);
 
-    // Device name (default: QBIT- + last 4 hex chars of MAC)
-    String defaultName = "QBIT-" + getDeviceId().substring(8);
+    // Device name (default: QBIT- + first 4 hex chars of MAC)
+    String defaultName = "QBIT-" + getDeviceId().substring(0, 4);
     _deviceName = _prefs.getString("devname", defaultName);
 
     // MQTT settings
@@ -537,11 +652,103 @@ static unsigned long _pokeStartMs = 0;
 static const char POKE_MELODY[] =
     "poke:d=16,o=5,b=200:c6,e6,g6,c7";
 
+// --- Bitmap poke data ---
+// When a bitmap poke is received, these buffers hold the pre-rendered
+// sender and text bitmaps for multi-language OLED display.
+static uint8_t *_pokeSenderBmp   = nullptr;
+static uint16_t _pokeSenderWidth = 0;
+static uint8_t *_pokeTextBmp     = nullptr;
+static uint16_t _pokeTextWidth   = 0;
+static bool     _pokeBitmapMode  = false;
+static int16_t  _pokeScrollOffset = 0;
+static unsigned long _pokeLastScrollMs = 0;
+#define POKE_SCROLL_INTERVAL_MS 30
+#define POKE_SCROLL_PX          2
+// Extended display time when scrolling
+#define POKE_SCROLL_DISPLAY_MS  8000
+
+static void freePokeBitmaps() {
+    if (_pokeSenderBmp) { free(_pokeSenderBmp); _pokeSenderBmp = nullptr; }
+    if (_pokeTextBmp)   { free(_pokeTextBmp);   _pokeTextBmp   = nullptr; }
+    _pokeSenderWidth = 0;
+    _pokeTextWidth   = 0;
+    _pokeBitmapMode  = false;
+}
+
+// Draw a 1-bit bitmap (SSD1306 page format) into the U8G2 buffer at given y offset.
+// bmpData is in page format: pages * width bytes, where pages = ceil(bmpHeight/8).
+// Only draws the portion visible within [0, 128) x-range, shifted by scrollX.
+static void drawBitmapToBuffer(const uint8_t *bmpData, uint16_t bmpWidth,
+                               uint16_t bmpHeight, int16_t yOffset, int16_t scrollX) {
+    uint8_t *buf = u8g2.getBufferPtr();
+    // U8G2 buffer layout: 8 pages of 128 bytes each (horizontal addressing)
+    // page N covers y = N*8 .. N*8+7
+
+    uint8_t bmpPages = (bmpHeight + 7) / 8;
+
+    for (int16_t screenX = 0; screenX < 128; screenX++) {
+        int16_t srcX = screenX + scrollX;
+        if (srcX < 0 || srcX >= (int16_t)bmpWidth) continue;
+
+        for (uint8_t bmpPage = 0; bmpPage < bmpPages; bmpPage++) {
+            uint8_t srcByte = bmpData[bmpPage * bmpWidth + srcX];
+            if (srcByte == 0) continue;
+
+            for (uint8_t bit = 0; bit < 8; bit++) {
+                if (srcByte & (1 << bit)) {
+                    int16_t pixelY = yOffset + bmpPage * 8 + bit;
+                    if (pixelY < 0 || pixelY >= 64) continue;
+
+                    uint8_t targetPage = pixelY / 8;
+                    uint8_t targetBit  = pixelY % 8;
+                    buf[targetPage * 128 + screenX] |= (1 << targetBit);
+                }
+            }
+        }
+    }
+}
+
+static void showPokeBitmap() {
+    u8g2.clearBuffer();
+
+    // Row 1 (y=0..12): ">> Poke! <<" using built-in font
+    u8g2.setFont(u8g2_font_6x13_tr);
+    u8g2.drawStr(4, 13, ">> Poke! <<");
+
+    // Row 2 (y=15..27): sender name bitmap
+    if (_pokeSenderBmp && _pokeSenderWidth > 0) {
+        int16_t senderScroll = 0;
+        if (_pokeSenderWidth > 128) {
+            senderScroll = _pokeScrollOffset;
+            if (senderScroll > (int16_t)(_pokeSenderWidth - 128))
+                senderScroll = _pokeSenderWidth - 128;
+        }
+        drawBitmapToBuffer(_pokeSenderBmp, _pokeSenderWidth, 16, 15, senderScroll);
+    }
+
+    // Row 3-4 (y=32..55): message text bitmap
+    if (_pokeTextBmp && _pokeTextWidth > 0) {
+        int16_t textScroll = 0;
+        if (_pokeTextWidth > 128) {
+            textScroll = _pokeScrollOffset;
+            if (textScroll > (int16_t)(_pokeTextWidth - 128))
+                textScroll = _pokeTextWidth - 128;
+        }
+        drawBitmapToBuffer(_pokeTextBmp, _pokeTextWidth, 16, 32, textScroll);
+    }
+
+    rotateBuffer180();
+    u8g2.sendBuffer();
+}
+
 static void handlePoke(const char *sender, const char *text) {
+    freePokeBitmaps();
     _pokeActive  = true;
     _pokeStartMs = millis();
+    _pokeScrollOffset = 0;
+    _pokeLastScrollMs = millis();
 
-    // Show poke message on OLED
+    // Show poke message on OLED (text-only fallback for MQTT pokes)
     showText(">> Poke! <<", "", sender, text);
 
     // Play notification sound
@@ -551,6 +758,101 @@ static void handlePoke(const char *sender, const char *text) {
     }
 
     Serial.printf("Poke from %s: %s\n", sender, text);
+}
+
+// Decode base64 and allocate buffer. Returns nullptr on failure.
+static uint8_t* decodeBase64Alloc(const char *b64, size_t *outLen) {
+    size_t b64Len = strlen(b64);
+    size_t maxOut = (b64Len * 3) / 4 + 4;
+    uint8_t *buf = (uint8_t *)malloc(maxOut);
+    if (!buf) return nullptr;
+
+    size_t actualLen = 0;
+    int ret = mbedtls_base64_decode(buf, maxOut, &actualLen,
+                                     (const unsigned char *)b64, b64Len);
+    if (ret != 0) {
+        free(buf);
+        return nullptr;
+    }
+    *outLen = actualLen;
+    return buf;
+}
+
+static void handlePokeBitmap(const char *sender, const char *text,
+                              const char *senderBmp64, uint16_t senderW,
+                              const char *textBmp64, uint16_t textW) {
+    freePokeBitmaps();
+
+    // Decode sender bitmap
+    size_t senderLen = 0;
+    _pokeSenderBmp = decodeBase64Alloc(senderBmp64, &senderLen);
+    _pokeSenderWidth = (_pokeSenderBmp != nullptr) ? senderW : 0;
+
+    // Decode text bitmap
+    size_t textLen = 0;
+    _pokeTextBmp = decodeBase64Alloc(textBmp64, &textLen);
+    _pokeTextWidth = (_pokeTextBmp != nullptr) ? textW : 0;
+
+    _pokeBitmapMode  = true;
+    _pokeActive      = true;
+    _pokeStartMs     = millis();
+    _pokeScrollOffset = 0;
+    _pokeLastScrollMs = millis();
+
+    // Render initial frame
+    showPokeBitmap();
+
+    // Play notification sound
+    if (_buzzerVolume > 0) {
+        noTone(PIN_BUZZER);
+        rtttl::begin(PIN_BUZZER, POKE_MELODY);
+    }
+
+    Serial.printf("Bitmap poke from %s: %s\n", sender, text);
+}
+
+// ==========================================================================
+//  Claim handling
+// ==========================================================================
+
+static const char CLAIM_MELODY[] =
+    "claim:d=8,o=5,b=180:e,g,b";
+
+static void handleClaimRequest(const char *userName) {
+    _claimPending   = true;
+    _claimStartMs   = millis();
+    _claimTouchStart = 0;
+
+    // Show prompt on OLED
+    showText("[ Claim Request ]", "", userName, "Long-press to confirm");
+
+    // Play notification sound
+    if (_buzzerVolume > 0) {
+        noTone(PIN_BUZZER);
+        rtttl::begin(PIN_BUZZER, CLAIM_MELODY);
+    }
+
+    Serial.printf("Claim request from: %s\n", userName);
+}
+
+static void wsSendClaimConfirm() {
+    if (!_wsConnected) return;
+    JsonDocument doc;
+    doc["type"] = "claim_confirm";
+    String msg;
+    serializeJson(doc, msg);
+    _wsClient.sendTXT(msg);
+    Serial.println("Claim confirmed");
+}
+
+static void wsSendClaimReject() {
+    if (!_wsConnected) return;
+    JsonDocument doc;
+    doc["type"] = "claim_reject";
+    String msg;
+    serializeJson(doc, msg);
+    _wsClient.sendTXT(msg);
+    Serial.println("Claim rejected (timeout)");
 }
 
 // ==========================================================================
@@ -563,11 +865,11 @@ static void wsSendDeviceInfo() {
     if (!_wsConnected) return;
 
     JsonDocument doc;
-    doc["type"]    = "hello";
+    doc["type"]    = "device.register";
     doc["id"]      = getDeviceId();
     doc["name"]    = _deviceName;
     doc["ip"]      = WiFi.localIP().toString();
-    doc["version"] = "1.0.0";
+    doc["version"] = "0.1.2";
 
     String msg;
     serializeJson(doc, msg);
@@ -599,7 +901,27 @@ static void wsEvent(WStype_t type, uint8_t *payload, size_t length) {
             if (strcmp(msgType, "poke") == 0) {
                 const char *sender = doc["sender"] | "Someone";
                 const char *text   = doc["text"]   | "Poke!";
-                handlePoke(sender, text);
+
+                // Check for bitmap data (multi-language rendering)
+                if (doc["senderBitmap"].is<const char*>() && doc["textBitmap"].is<const char*>()) {
+                    const char *senderBmp = doc["senderBitmap"];
+                    uint16_t senderW      = doc["senderBitmapWidth"] | 0;
+                    const char *textBmp   = doc["textBitmap"];
+                    uint16_t textW        = doc["textBitmapWidth"] | 0;
+
+                    if (senderW > 0 && textW > 0) {
+                        handlePokeBitmap(sender, text, senderBmp, senderW, textBmp, textW);
+                    } else {
+                        handlePoke(sender, text);
+                    }
+                } else {
+                    handlePoke(sender, text);
+                }
+            }
+
+            if (strcmp(msgType, "claim_request") == 0) {
+                const char *userName = doc["userName"] | "Unknown";
+                handleClaimRequest(userName);
             }
             break;
         }
@@ -636,6 +958,7 @@ void setup() {
 
     // -- LittleFS / GIF player --
     gifPlayerInit(&u8g2);
+    gifPlayerSetIdleAnimation(&sys_idle_gif);
 
     // -- WiFi via NetWizard (NON_BLOCKING) --
     // On first boot (or if saved network is unavailable), NetWizard opens
@@ -758,10 +1081,64 @@ void loop() {
         _melodyWasPlaying = false;
     }
 
-    // Poke timeout -- return to normal playback after POKE_DISPLAY_MS.
-    if (_pokeActive && (millis() - _pokeStartMs > POKE_DISPLAY_MS)) {
-        _pokeActive = false;
-        infoScreenShown = false;  // force redraw on next iteration
+    // --- Claim mode handling ---
+    if (_claimPending) {
+        unsigned long now = millis();
+
+        // Timeout
+        if (now - _claimStartMs > CLAIM_TIMEOUT_MS) {
+            _claimPending = false;
+            _claimTouchStart = 0;
+            wsSendClaimReject();
+            showText("[ Claim Timeout ]", "", "Request expired.", "");
+            delay(1500);
+            infoScreenShown = false;
+            return;
+        }
+
+        // Detect long press completion
+        if (_claimTouchStart > 0 && digitalRead(PIN_TOUCH) == HIGH) {
+            if (now - _claimTouchStart >= CLAIM_LONG_PRESS_MS) {
+                _claimPending = false;
+                _claimTouchStart = 0;
+                wsSendClaimConfirm();
+                showText("[ Claimed! ]", "", "Device bound.", "");
+                delay(2000);
+                infoScreenShown = false;
+                return;
+            }
+        }
+
+        handleTouch();
+        return;  // skip normal loop while claim is pending
+    }
+
+    // Poke timeout -- return to normal playback.
+    if (_pokeActive) {
+        unsigned long elapsed = millis() - _pokeStartMs;
+        unsigned long timeout = _pokeBitmapMode &&
+            ((_pokeSenderWidth > 128) || (_pokeTextWidth > 128))
+            ? POKE_SCROLL_DISPLAY_MS : POKE_DISPLAY_MS;
+
+        if (elapsed > timeout) {
+            _pokeActive = false;
+            freePokeBitmaps();
+            infoScreenShown = false;  // force redraw on next iteration
+        } else if (_pokeBitmapMode) {
+            // Animate bitmap scrolling
+            unsigned long now = millis();
+            if (now - _pokeLastScrollMs >= POKE_SCROLL_INTERVAL_MS) {
+                _pokeLastScrollMs = now;
+                uint16_t maxWidth = max(_pokeSenderWidth, _pokeTextWidth);
+                if (maxWidth > 128) {
+                    _pokeScrollOffset += POKE_SCROLL_PX;
+                    if (_pokeScrollOffset > (int16_t)(maxWidth - 128)) {
+                        _pokeScrollOffset = 0;  // wrap around
+                    }
+                    showPokeBitmap();
+                }
+            }
+        }
     }
 
     // While poke message is on screen, skip touch and GIF rendering.

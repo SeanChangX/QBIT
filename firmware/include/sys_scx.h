@@ -1,20 +1,20 @@
 #ifndef SYS_SCX_H
-        #define SYS_SCX_H
+#define SYS_SCX_H
 
-        #include <stdint.h>
-        #include <pgmspace.h>
+#include <stdint.h>
+#include <pgmspace.h>
 
-        // Definition of data structure for GIF
-        #ifndef ANIMATED_GIF_DEFINED
-        #define ANIMATED_GIF_DEFINED
-        typedef struct {
-            const uint8_t frame_count;      // Number of frames
-            const uint16_t width;           // GIF width
-            const uint16_t height;          // GIF height
-            const uint16_t* delays;         // Pointer to array of delays
-            const uint8_t (* frames)[1024]; // Pointer to array of frame data
-        } AnimatedGIF;
-        #endif // ANIMATED_GIF_DEFINED
+// Definition of data structure for GIF
+#ifndef ANIMATED_GIF_DEFINED
+#define ANIMATED_GIF_DEFINED
+typedef struct {
+    const uint8_t frame_count;
+    const uint16_t width;
+    const uint16_t height;
+    const uint16_t* delays;
+    const uint8_t (* frames)[1024];
+} AnimatedGIF;
+#endif // ANIMATED_GIF_DEFINED
 
 #define SYS_SCX_FRAME_COUNT 200
 #define SYS_SCX_WIDTH 128

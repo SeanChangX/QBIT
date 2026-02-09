@@ -29,6 +29,13 @@ static uint8_t  _shufflePos   = 0;   // next index to hand out
 static uint8_t  _loopCount       = 0;
 static uint8_t  _loopsPerGif     = 0; // 0 = disabled
 
+// --- Idle animation (PROGMEM, played between GIFs) ---
+static const AnimatedGIF *_idleAnim       = nullptr;
+static bool               _idlePlaying    = false;
+static uint8_t            _idleFrame      = 0;
+static unsigned long      _idleLastFrameMs = 0;
+static uint8_t            _idleFrameBuf[QGIF_FRAME_SIZE];
+
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
@@ -227,6 +234,10 @@ void gifPlayerSetAutoAdvance(uint8_t loopsPerGif) {
   _loopsPerGif = loopsPerGif;
 }
 
+void gifPlayerSetIdleAnimation(const AnimatedGIF *idle) {
+  _idleAnim = idle;
+}
+
 void gifPlayerSetFile(const String &filename) {
   _requestedFile = filename;
   _fileChanged   = true;
@@ -246,6 +257,30 @@ uint16_t gifPlayerGetSpeed() {
 
 void gifPlayerTick() {
   if (!_display) return;
+
+  // --- Idle animation playback (PROGMEM, between GIFs) ---
+  if (_idlePlaying && _idleAnim) {
+    uint16_t delayMs = _idleAnim->delays[_idleFrame] / _speedDivisor;
+    if (delayMs < 1) delayMs = 1;
+    if (millis() - _idleLastFrameMs < delayMs) return;
+
+    memcpy_P(_idleFrameBuf, _idleAnim->frames[_idleFrame], QGIF_FRAME_SIZE);
+    gifRenderFrame(_display, _idleFrameBuf, _idleAnim->width, _idleAnim->height);
+
+    _idleLastFrameMs = millis();
+    _idleFrame++;
+    if (_idleFrame >= _idleAnim->frame_count) {
+      // Idle animation finished one loop -- switch to next GIF
+      _idlePlaying = false;
+      _idleFrame   = 0;
+      String next = gifPlayerNextShuffle();
+      if (next.length() > 0) {
+        _requestedFile = next;
+        _fileChanged   = true;
+      }
+    }
+    return;  // don't process normal GIF while idle is playing
+  }
 
   // --- Handle pending file-change request ---
   if (_fileChanged) {
@@ -280,10 +315,19 @@ void gifPlayerTick() {
     // Auto-advance to next shuffled GIF after N full loops
     if (_loopsPerGif > 0 && _loopCount >= _loopsPerGif) {
       _loopCount = 0;
-      String next = gifPlayerNextShuffle();
-      if (next.length() > 0) {
-        _requestedFile = next;
-        _fileChanged   = true;
+
+      // If idle animation is configured, play it before the next GIF
+      if (_idleAnim) {
+        _idlePlaying     = true;
+        _idleFrame       = 0;
+        _idleLastFrameMs = 0;  // render first frame immediately
+      } else {
+        // No idle animation, advance directly
+        String next = gifPlayerNextShuffle();
+        if (next.length() > 0) {
+          _requestedFile = next;
+          _fileChanged   = true;
+        }
       }
     }
   }
