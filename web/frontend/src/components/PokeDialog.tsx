@@ -6,6 +6,7 @@ interface Props {
   user: User | null;
   onPoke: (targetId: string, text: string, bitmapData?: BitmapPayload) => void;
   onClaim: (device: Device) => void;
+  onUnclaim: (device: Device) => void;
   onClose: () => void;
   isLoggedIn: boolean;
   apiUrl: string;
@@ -97,6 +98,7 @@ export default function PokeDialog({
   user,
   onPoke,
   onClaim,
+  onUnclaim,
   onClose,
   isLoggedIn,
   apiUrl,
@@ -177,7 +179,14 @@ export default function PokeDialog({
               {sending ? 'Sending...' : 'Send Poke'}
             </button>
 
-            {!device.claimedBy && (
+            {device.claimedBy ? (
+              <button
+                className="btn-claim-link unclaim"
+                onClick={() => onUnclaim(device)}
+              >
+                Unclaim this device
+              </button>
+            ) : (
               <button
                 className="btn-claim-link"
                 onClick={() => onClaim(device)}

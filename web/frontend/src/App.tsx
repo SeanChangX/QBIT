@@ -77,6 +77,29 @@ export default function App() {
     []
   );
 
+  // Unclaim a device
+  const handleUnclaim = useCallback(
+    async (device: Device) => {
+      if (!confirm(`Unclaim ${device.name}?`)) return;
+      try {
+        const res = await fetch(`${API_URL}/api/claim/${device.id}`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          alert(data.error || 'Failed to unclaim');
+          return;
+        }
+      } catch {
+        alert('Network error');
+        return;
+      }
+      setSelectedDevice(null);
+    },
+    []
+  );
+
   // Handle device click: show options (poke / claim)
   const handleDeviceSelect = useCallback((device: Device) => {
     setSelectedDevice(device);
@@ -121,6 +144,7 @@ export default function App() {
             setSelectedDevice(null);
             setClaimDevice(device);
           }}
+          onUnclaim={handleUnclaim}
           onClose={() => setSelectedDevice(null)}
           isLoggedIn={!!user}
           apiUrl={API_URL}

@@ -496,6 +496,14 @@ body {
   color: var(--text-primary);
   border-color: var(--red);
 }
+.btn-claim-link.unclaim {
+  color: var(--red);
+  border-color: var(--red);
+}
+.btn-claim-link.unclaim:hover {
+  background: var(--red);
+  color: #fff;
+}
 
 /* -- Claim dialog -- */
 .claim-description {
