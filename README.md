@@ -1,44 +1,96 @@
+<p align="right"><a href="README.zh-TW.md">繁體中文</a></p>
+
+<div align="center">
+
 # QBIT
 
-An open-source ESP32-C3 desktop companion robot and personal IoT avatar.
+**An open-source ESP32-C3 desktop companion robot and personal IoT avatar.**
+
+[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-blue.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+[![Platform](https://img.shields.io/badge/Platform-ESP32--C3-green.svg)](#hardware-requirements)
+[![Framework](https://img.shields.io/badge/Framework-Arduino-00979D.svg)](https://www.arduino.cc/)
+[![Firmware](https://img.shields.io/badge/Firmware-v0.2.4-orange.svg)](#firmware-build-from-source)
+[![Web Platform](https://img.shields.io/badge/Web-qbit.labxcloud.com-purple.svg)](https://qbit.labxcloud.com)
+
+<br>
 
 [![Assembly Video](https://img.youtube.com/vi/pUKB8I10Yfk/maxresdefault.jpg)](https://youtu.be/pUKB8I10Yfk)
 
-> Click the image above to watch the assembly video on YouTube.
+*Click the image above to watch the assembly video on YouTube.*
 
-| Network | Poke |
-|---|---|
-| ![Network](docs/images/Network.png) | ![Poke](docs/images/Poke.png) |
+</div>
 
-| Flash | Library |
-|---|---|
-| ![Flash](docs/images/Flash.png) | ![Library](docs/images/Library.png) |
+<br>
+
+<table>
+<tr>
+<td width="50%" align="center">
+<img src="docs/images/Network.png" alt="Network" width="100%">
+<br><strong>Network</strong><br>Real-time device graph
+</td>
+<td width="50%" align="center">
+<img src="docs/images/Poke.png" alt="Poke" width="100%">
+<br><strong>Poke</strong><br>Send messages to devices
+</td>
+</tr>
+<tr>
+<td width="50%" align="center">
+<img src="docs/images/Flash.png" alt="Flash" width="100%">
+<br><strong>Flash</strong><br>Browser-based firmware flasher
+</td>
+<td width="50%" align="center">
+<img src="docs/images/Library.png" alt="Library" width="100%">
+<br><strong>Library</strong><br>Community animation repository
+</td>
+</tr>
+</table>
+
+<br>
+
+<div align="center">
+
+[**Getting Started**](#getting-started) &#8226;
+[**Hardware**](#hardware-requirements) &#8226;
+[**Web Platform**](#web-platform) &#8226;
+[**MQTT**](#mqtt--home-assistant) &#8226;
+[**Self-Hosting**](#self-hosting-the-web-platform) &#8226;
+[**Build from Source**](#firmware-build-from-source)
+
+</div>
 
 ---
 
-## Table of Contents
+## Hardware Requirements
 
-- [Getting Started](#getting-started)
-  - [Flash Firmware](#flash-firmware)
-  - [Initial Wi-Fi Setup](#initial-wi-fi-setup)
-  - [Device Dashboard](#device-dashboard)
-- [Web Platform](#web-platform)
-  - [Network](#network)
-  - [Flash](#flash)
-  - [Library](#library)
-- [Animation Format (.qgif)](#animation-format-qgif)
-- [MQTT & Home Assistant](#mqtt--home-assistant)
-- [Device Claiming](#device-claiming)
-- [Self-Hosting the Web Platform](#self-hosting-the-web-platform)
-  - [Prerequisites](#prerequisites)
-  - [Architecture](#architecture)
-  - [Environment Variables](#environment-variables)
-  - [Local Development](#local-development)
-  - [Production Deployment](#production-deployment)
-  - [GitHub Actions CI/CD](#github-actions-cicd)
-- [Firmware Build from Source](#firmware-build-from-source)
-- [Tools](#tools)
-- [License](#license)
+### Components
+
+| Component | Specification | Notes |
+|---|---|---|
+| MCU | ESP32-C3 Super Mini (e.g. Seeed XIAO ESP32-C3) | Valid GPIOs: 0-10, 20, 21 |
+| OLED Display | SSD1306 128x64, I2C, address 0x3C | SH1106-compatible clones also supported |
+| Touch Sensor | TTP223 capacitive touch module | Digital output (HIGH when touched) |
+| Buzzer | Passive buzzer | Driven via PWM (LEDC) |
+
+### Wiring
+
+Default pin assignments for the ESP32-C3 Super Mini. All pins can be reassigned through the web dashboard at `http://qbit.local` and are stored in NVS (persistent across reboots; changes require a reboot to take effect).
+
+| Function | Default GPIO | Direction | Connection |
+|---|---|---|---|
+| Touch Sensor (TTP223) | GPIO 1 | Input | TTP223 OUT -> GPIO 1 |
+| Buzzer | GPIO 2 | Output | GPIO 2 -> Buzzer +, Buzzer - -> GND |
+| OLED SDA | GPIO 20 | I2C Data | SSD1306 SDA -> GPIO 20 |
+| OLED SCL | GPIO 21 | I2C Clock | SSD1306 SCL -> GPIO 21 |
+
+Power connections:
+
+| Component | VCC | GND |
+|---|---|---|
+| SSD1306 OLED | 3.3V | GND |
+| TTP223 Touch Sensor | 3.3V | GND |
+| Passive Buzzer | -- | GND |
+
+The I2C bus runs at 400 kHz. No external pull-up resistors are needed if the OLED module has built-in pull-ups (most breakout boards do).
 
 ---
 
@@ -85,7 +137,7 @@ From the dashboard you can:
 
 The QBIT web platform can be self-hosted and provides a central interface for monitoring and interacting with all your online QBIT devices.
 
-If you use the official firmware, your device will automatically connect to the official server:  
+If you use the official firmware, your device will automatically connect to the official server:
 [https://qbit.labxcloud.com](https://qbit.labxcloud.com)
 
 If you prefer, you can deploy your own web platform and backend on your own server, and configure the firmware to connect to your custom domain.
@@ -100,19 +152,13 @@ Clicking a device node opens a poke dialog where logged-in users can:
 - **Claim** -- bind a device to your account (see [Device Claiming](#device-claiming)). Claimed devices show the owner's name and avatar on the graph node.
 - **Unclaim** -- remove your ownership of a claimed device.
 
-![Network Page](docs/images/Network.png)
-
 ### Flash
 
 The Flash page embeds the browser-based firmware flasher, allowing users to flash their QBIT directly from the web platform without visiting a separate site.
 
-![Flash Tab](docs/images/Flash.png)
-
 ### Library
 
 The Library page is a community-driven repository of .qgif animation files.
-
-![Library Page](docs/images/Library.png)
 
 ---
 
@@ -120,7 +166,9 @@ The Library page is a community-driven repository of .qgif animation files.
 
 QBIT uses a custom binary animation format (`.qgif`) optimized for the 128x64 monochrome OLED. The format stores 1-bit monochrome frames with per-frame delay values.
 
-Binary layout:
+<details>
+<summary><strong>Binary layout</strong></summary>
+<br>
 
 | Offset | Type | Description |
 |---|---|---|
@@ -129,6 +177,8 @@ Binary layout:
 | 3-4 | uint16 LE | Height (pixels) |
 | 5+ | uint16 LE[] | Per-frame delay (ms), one per frame |
 | ... | uint8[] | Frame data: 1024 bytes per frame (128x64 / 8), row-major |
+
+</details>
 
 ### Converting GIFs
 
@@ -175,7 +225,9 @@ Once connected, the device publishes HA discovery payloads that automatically cr
 | Poke | Button | Send a poke message to the device |
 | Last Poke | Sensor | Last received poke (sender name, message text as attributes) |
 
-MQTT topics used (default prefix `qbit`):
+<details>
+<summary><strong>MQTT topics</strong> (default prefix <code>qbit</code>)</summary>
+<br>
 
 | Topic | Description |
 |---|---|
@@ -183,6 +235,8 @@ MQTT topics used (default prefix `qbit`):
 | `qbit/<id>/info` | Device info JSON (`id`, `name`, `ip`) |
 | `qbit/<id>/command` | Command input (subscribe). Accepts `{"command":"poke","sender":"...","text":"..."}` |
 | `qbit/<id>/poke` | Poke event output (published when a poke is received from any source) |
+
+</details>
 
 ---
 
@@ -213,7 +267,9 @@ Click a claimed device on the Network page and select "Unclaim this device". Onl
 - A domain name with DNS managed by Cloudflare (or any reverse proxy that provides TLS)
 - A Google Cloud project with OAuth 2.0 credentials
 
-### Architecture
+<details>
+<summary><strong>Architecture</strong></summary>
+<br>
 
 ```
 Internet
@@ -233,6 +289,8 @@ Internet
 ```
 
 Only the frontend container exposes a port to the host. The backend communicates with the frontend container via the Docker internal network. External traffic reaches the services through your reverse proxy or Cloudflare Tunnel.
+
+</details>
 
 ### Environment Variables
 
