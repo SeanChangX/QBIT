@@ -764,6 +764,13 @@ body {
   min-height: 80px;
 }
 
+.library-card-preview-inner {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .library-card-preview canvas {
   image-rendering: pixelated;
   max-width: 100%;

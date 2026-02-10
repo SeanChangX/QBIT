@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface Session {
   socketId: string;
@@ -96,7 +96,10 @@ export default function App() {
     }
   }, []);
 
+  const sessionCheckDone = useRef(false);
   useEffect(() => {
+    if (sessionCheckDone.current) return;
+    sessionCheckDone.current = true;
     let cancelled = false;
     fetch('/api/sessions', { credentials: 'include' })
       .then((r) => {

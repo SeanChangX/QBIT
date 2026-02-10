@@ -2,6 +2,28 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import QgifPreview from './QgifPreview';
 import type { User } from '../types';
 
+function LazyLibraryPreview({ apiUrl, id }: { apiUrl: string; id: string }) {
+  const [inView, setInView] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([e]) => {
+        if (e?.isIntersecting) setInView(true);
+      },
+      { rootMargin: '100px', threshold: 0 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className="library-card-preview-inner">
+      {inView ? <QgifPreview src={`${apiUrl}/api/library/${id}/raw`} /> : null}
+    </div>
+  );
+}
+
 interface LibraryItem {
   id: string;
   filename: string;
@@ -454,7 +476,7 @@ export default function LibraryPage({ user, apiUrl }: Props) {
                 </div>
               )}
               <div className="library-card-preview">
-                <QgifPreview src={`${apiUrl}/api/library/${item.id}/raw`} />
+                <LazyLibraryPreview apiUrl={apiUrl} id={item.id} />
               </div>
               <div className="library-card-info">
                 <div className="library-card-name">{item.filename}</div>

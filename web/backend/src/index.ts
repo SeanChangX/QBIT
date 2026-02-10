@@ -56,7 +56,15 @@ app.use(express.json());
 
 const apiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 60,                  // 60 requests per minute per IP
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
+
+const libraryLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 300, // library list + many /raw previews per page
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
@@ -64,12 +72,13 @@ const apiLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 15,                  // 15 login attempts per 5 min per IP
+  max: 15,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many login attempts, please try again later.' },
 });
 
+app.use('/api/library', libraryLimiter);
 app.use('/api/', apiLimiter);
 
 // ---------------------------------------------------------------------------
@@ -301,6 +310,9 @@ function extractPublicIp(request: IncomingMessage): string {
   return request.socket.remoteAddress || '';
 }
 
+const bannedDeviceLogLast = new Map<string, number>();
+const BANNED_DEVICE_LOG_INTERVAL_MS = 5 * 60 * 1000; // log at most once per device per 5 min
+
 wss.on('connection', (ws, request: IncomingMessage) => {
   let deviceId: string | null = null;
   const publicIp = extractPublicIp(request);
@@ -312,7 +324,12 @@ wss.on('connection', (ws, request: IncomingMessage) => {
       if (msg.type === 'device.register' && msg.id) {
         deviceId = msg.id;
         if (isBannedDevice(msg.id)) {
-          console.warn(`Device WS rejected: banned device ${msg.id}`);
+          const now = Date.now();
+          const last = bannedDeviceLogLast.get(msg.id) ?? 0;
+          if (now - last >= BANNED_DEVICE_LOG_INTERVAL_MS) {
+            bannedDeviceLogLast.set(msg.id, now);
+            console.warn(`Device WS rejected: banned device ${msg.id}`);
+          }
           ws.close();
           return;
         }
