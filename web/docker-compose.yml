@@ -9,10 +9,14 @@ services:
     env_file: .env
     expose:
       - "3001"
+      - "3002"
+    ports:
+      # 3002 = admin (restrict to internal network via firewall; do not expose to internet)
+      - "3002:3002"
     environment:
       - PORT=3001
       - ADMIN_PORT=3002
-      - ADMIN_HOST=127.0.0.1
+      - ADMIN_HOST=0.0.0.0
       - DEVICE_API_KEY=${DEVICE_API_KEY:-}
       - MAX_DEVICE_CONNECTIONS=${MAX_DEVICE_CONNECTIONS:-100}
     volumes:
