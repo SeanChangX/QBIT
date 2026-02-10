@@ -5,8 +5,28 @@ interface Session {
   userId: string;
   displayName: string;
   email: string;
+  avatar?: string;
   ip: string;
   connectedAt: string;
+}
+
+interface KnownUser {
+  userId: string;
+  displayName: string;
+  email: string;
+  avatar: string;
+  firstSeen: string;
+  lastSeen: string;
+  status: 'online' | 'offline';
+}
+
+interface Claim {
+  deviceId: string;
+  deviceName: string | null;
+  userId: string;
+  userName: string;
+  userAvatar: string;
+  claimedAt: string;
 }
 
 interface Device {
@@ -65,6 +85,8 @@ export default function App() {
   const ADMIN_PASSWORD_MIN_LEN = 8;
   const ADMIN_PASSWORD_MAX_LEN = 128;
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [users, setUsers] = useState<KnownUser[]>([]);
+  const [claims, setClaims] = useState<Claim[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [bans, setBans] = useState<BannedList>({ userIds: [], ips: [], deviceIds: [] });
   const [loading, setLoading] = useState(false);
@@ -76,12 +98,16 @@ export default function App() {
     setError(null);
     if (showLoading) setLoading(true);
     try {
-      const [s, d, b] = await Promise.all([
+      const [s, u, c, d, b] = await Promise.all([
         load<Session[]>('/api/sessions'),
+        load<KnownUser[]>('/api/users'),
+        load<Claim[]>('/api/claims'),
         load<Device[]>('/api/devices'),
         load<BannedList>('/api/bans'),
       ]);
       setSessions(s);
+      setUsers(u);
+      setClaims(c);
       setDevices(d);
       setBans(b);
     } catch (e) {
@@ -405,7 +431,95 @@ export default function App() {
 
         <section className="section">
           <div className="section-header-row">
-            <h2 className="section-title">Online sessions (users)</h2>
+            <h2 className="section-title">Users (all who have logged in)</h2>
+            <div className="section-actions">
+              {loading && <span className="admin-loading">Updating...</span>}
+              <button className="btn btn-ghost" onClick={() => refresh(true)} disabled={loading}>
+                Refresh
+              </button>
+            </div>
+          </div>
+          <div className="admin-scroll-list">
+            {users.length === 0 && !loading && (
+              <div className="empty-msg">No users yet</div>
+            )}
+            {users.map((u) => (
+              <div key={u.userId} className="admin-user-row">
+                {u.avatar ? (
+                  <img
+                    src={u.avatar}
+                    alt=""
+                    className="admin-avatar"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                ) : (
+                  <span className="admin-avatar-placeholder" />
+                )}
+                <div className="admin-user-info">
+                  <span className="admin-user-name">{u.displayName}</span>
+                  <span className="admin-user-email">{u.email}</span>
+                  <span className="admin-user-meta">
+                    {u.status === 'online' ? (
+                      <span className="admin-status-online">Online</span>
+                    ) : (
+                      <span className="admin-status-offline">Offline</span>
+                    )}
+                    {' · Last seen '}
+                    {new Date(u.lastSeen).toLocaleString()}
+                  </span>
+                </div>
+                <div className="admin-user-actions">
+                  <button
+                    className="btn btn-danger"
+                    onClick={() => handleBanSessionUser(u.userId)}
+                  >
+                    Ban user
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="section-header-row">
+            <h2 className="section-title">Claims (device ownership)</h2>
+            <div className="section-actions">
+              {loading && <span className="admin-loading">Updating...</span>}
+              <button className="btn btn-ghost" onClick={() => refresh(true)} disabled={loading}>
+                Refresh
+              </button>
+            </div>
+          </div>
+          <div className="admin-scroll-list">
+            {claims.length === 0 && !loading && (
+              <div className="empty-msg">No claims</div>
+            )}
+            {claims.map((c) => (
+              <div key={c.deviceId} className="admin-claim-row">
+                {c.userAvatar ? (
+                  <img
+                    src={c.userAvatar}
+                    alt=""
+                    className="admin-avatar"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                ) : (
+                  <span className="admin-avatar-placeholder" />
+                )}
+                <div className="admin-claim-info">
+                  <span className="admin-claim-device">{c.deviceName || c.deviceId}</span>
+                  <span className="admin-claim-user">Claimed by {c.userName}</span>
+                  <span className="admin-claim-meta">{new Date(c.claimedAt).toLocaleString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="section-header-row">
+            <h2 className="section-title">Online sessions (current connections)</h2>
             <div className="section-actions">
               {loading && <span className="admin-loading">Updating...</span>}
               <button className="btn btn-ghost" onClick={() => refresh(true)} disabled={loading}>
@@ -417,6 +531,7 @@ export default function App() {
             <table className="admin-table">
               <thead>
                 <tr>
+                  <th></th>
                   <th>Name</th>
                   <th>Email</th>
                   <th>User ID</th>
@@ -428,11 +543,23 @@ export default function App() {
               <tbody>
                 {sessions.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={6} className="empty-msg">No sessions</td>
+                    <td colSpan={7} className="empty-msg">No sessions</td>
                   </tr>
                 )}
                 {sessions.map((s) => (
                   <tr key={s.socketId}>
+                    <td>
+                      {s.avatar ? (
+                        <img
+                          src={s.avatar}
+                          alt=""
+                          className="admin-table-avatar"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
+                      ) : (
+                        <span className="admin-avatar-placeholder admin-table-avatar-placeholder" />
+                      )}
+                    </td>
                     <td>{s.displayName}</td>
                     <td>{s.email}</td>
                     <td><code style={{ fontSize: '0.85em' }}>{s.userId}</code></td>

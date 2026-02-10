@@ -250,6 +250,85 @@ function removeBan(userId?: string, ip?: string, deviceId?: string): void {
   saveBanned(list);
 }
 
+// ---------------------------------------------------------------------------
+//  Known users (all who have ever logged in; persisted for admin)
+// ---------------------------------------------------------------------------
+
+const USERS_JSON = path.join(LIBRARY_DIR, 'users.json');
+
+interface KnownUser {
+  userId: string;
+  displayName: string;
+  email: string;
+  avatar: string;
+  firstSeen: string;
+  lastSeen: string;
+  status: 'online' | 'offline';
+}
+
+const knownUsersMap = new Map<string, KnownUser>();
+
+function loadKnownUsers(): void {
+  try {
+    const data = fs.readFileSync(USERS_JSON, 'utf-8');
+    const arr = JSON.parse(data) as KnownUser[];
+    knownUsersMap.clear();
+    for (const u of arr) {
+      if (u?.userId) knownUsersMap.set(u.userId, u);
+    }
+  } catch {
+    knownUsersMap.clear();
+  }
+}
+
+function saveKnownUsers(): void {
+  const arr = Array.from(knownUsersMap.values()).sort(
+    (a, b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime()
+  );
+  fs.writeFileSync(USERS_JSON, JSON.stringify(arr, null, 2));
+}
+
+function upsertKnownUser(userId: string, data: { displayName: string; email: string; avatar: string }): void {
+  const now = new Date().toISOString();
+  const existing = knownUsersMap.get(userId);
+  knownUsersMap.set(userId, {
+    userId,
+    displayName: data.displayName,
+    email: data.email,
+    avatar: data.avatar,
+    firstSeen: existing?.firstSeen ?? now,
+    lastSeen: now,
+    status: 'online',
+  });
+  saveKnownUsers();
+}
+
+function setKnownUserOffline(userId: string): void {
+  const u = knownUsersMap.get(userId);
+  if (u) {
+    u.status = 'offline';
+    u.lastSeen = new Date().toISOString();
+    saveKnownUsers();
+  }
+}
+
+function getKnownUsersList(): KnownUser[] {
+  const onlineIds = new Set(Array.from(onlineUsers.values()).map((u) => u.userId));
+  const now = new Date().toISOString();
+  const out: KnownUser[] = [];
+  for (const u of knownUsersMap.values()) {
+    const isOnline = onlineIds.has(u.userId);
+    out.push({
+      ...u,
+      status: isOnline ? 'online' : 'offline',
+      lastSeen: isOnline ? now : u.lastSeen,
+    });
+  }
+  return out.sort((a, b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime());
+}
+
+loadKnownUsers();
+
 // Pending claim requests (deviceId -> user info, waiting for device confirmation)
 interface PendingClaim {
   userId: string;
@@ -312,7 +391,8 @@ function extractPublicIp(request: IncomingMessage): string {
 }
 
 const bannedDeviceLogLast = new Map<string, number>();
-const BANNED_DEVICE_LOG_INTERVAL_MS = 5 * 60 * 1000; // log at most once per device per 5 min
+const bannedUserLogLast = new Map<string, number>();
+const BANNED_DEVICE_LOG_INTERVAL_MS = 5 * 60 * 1000; // log at most once per device/user per 5 min
 
 wss.on('connection', (ws, request: IncomingMessage) => {
   let deviceId: string | null = null;
@@ -504,7 +584,7 @@ app.post('/api/poke', (req, res) => {
 
   device.ws.send(JSON.stringify(pokePayload));
 
-  console.log(`Poke: ${user.displayName} -> ${device.name}: ${text}`);
+  console.log(`Poke: ${user.displayName} -> ${device.name}`);
   res.json({ ok: true });
 });
 
@@ -539,7 +619,7 @@ app.post('/api/poke/user', (req, res) => {
     const s = io.sockets.sockets.get(sid);
     if (s) s.emit('poke', payload);
   }
-  console.log(`Poke user: ${sender.displayName} -> ${targetUserId}: ${textStr}`);
+  console.log(`Poke user: ${sender.displayName} -> ${targetUserId}`);
   res.json({ ok: true });
 });
 
@@ -1074,6 +1154,7 @@ function getSessionsList(): Array<{
   userId: string;
   displayName: string;
   email: string;
+  avatar: string;
   ip: string;
   connectedAt: string;
 }> {
@@ -1082,6 +1163,7 @@ function getSessionsList(): Array<{
     userId: u.userId,
     displayName: u.displayName,
     email: u.email,
+    avatar: u.avatar || '',
     ip: u.ip,
     connectedAt: u.connectedAt.toISOString(),
   }));
@@ -1120,7 +1202,13 @@ io.on('connection', (socket) => {
   if (passportUser && passportUser.id) {
     if (isBanned(passportUser.id, clientIp)) {
       socket.disconnect(true);
-      console.log(`Banned user/IP rejected: ${passportUser.displayName} / ${clientIp}`);
+      const banKey = `${passportUser.id}:${clientIp}`;
+      const now = Date.now();
+      const last = bannedUserLogLast.get(banKey) ?? 0;
+      if (now - last >= BANNED_DEVICE_LOG_INTERVAL_MS) {
+        bannedUserLogLast.set(banKey, now);
+        console.log(`Banned user/IP rejected: ${passportUser.displayName} / ${clientIp}`);
+      }
       return;
     }
     onlineUsers.set(socket.id, {
@@ -1132,7 +1220,12 @@ io.on('connection', (socket) => {
       ip: clientIp,
       connectedAt: new Date(),
     });
-    console.log(`User online: ${passportUser.displayName} (${passportUser.email})`);
+    upsertKnownUser(passportUser.id, {
+      displayName: passportUser.displayName || 'Unknown',
+      email: passportUser.email || '',
+      avatar: passportUser.avatar || '',
+    });
+    console.log(`User online: ${passportUser.displayName}`);
     broadcastOnlineUsers();
   }
 
@@ -1140,6 +1233,7 @@ io.on('connection', (socket) => {
     const user = onlineUsers.get(socket.id);
     if (user) {
       onlineUsers.delete(socket.id);
+      setKnownUserOffline(user.userId);
       console.log(`User offline: ${user.displayName}`);
       broadcastOnlineUsers();
     }
@@ -1172,16 +1266,14 @@ adminApp.use(
   })
 );
 
-// Rate limit admin API to mitigate brute force (per IP).
-const adminLimiter = rateLimit({
+// Strict rate limit only for login (brute-force protection). Other admin routes (sessions, devices, bans, polled every 10s) are not limited.
+const adminLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Try again later.' },
 });
-adminApp.use('/api/', adminLimiter);
-
 const FAILED_LOGIN_DELAY_MS = 800;
 const ADMIN_USERNAME_MAX_LEN = 64;
 const ADMIN_PASSWORD_MIN_LEN = 8;
@@ -1199,7 +1291,7 @@ function adminAuth(req: express.Request, res: express.Response, next: express.Ne
 }
 
 // Login: POST /api/admin/login { username, password } -> set session, httpOnly cookie
-adminApp.post('/api/admin/login', (req, res) => {
+adminApp.post('/api/admin/login', adminLoginLimiter, (req, res) => {
   if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
     return res.status(200).json({ ok: true });
   }
@@ -1238,8 +1330,22 @@ adminApp.post('/api/admin/logout', (req, res) => {
 adminApp.get('/api/sessions', adminAuth, (_req, res) => {
   res.json(getSessionsList());
 });
+adminApp.get('/api/users', adminAuth, (_req, res) => {
+  res.json(getKnownUsersList());
+});
 adminApp.get('/api/devices', adminAuth, (_req, res) => {
   res.json(getDeviceList());
+});
+adminApp.get('/api/claims', adminAuth, (_req, res) => {
+  const list = Object.entries(claims).map(([deviceId, c]) => ({
+    deviceId,
+    deviceName: devices.get(deviceId)?.name ?? null,
+    userId: c.userId,
+    userName: c.userName,
+    userAvatar: c.userAvatar,
+    claimedAt: c.claimedAt,
+  }));
+  res.json(list);
 });
 adminApp.get('/api/bans', adminAuth, (_req, res) => {
   res.json(loadBanned());

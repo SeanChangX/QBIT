@@ -493,6 +493,99 @@ body {
   min-height: 120px;
 }
 
+/* Scrollable lists for users and claims */
+.admin-scroll-list {
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 0;
+}
+.admin-scroll-list .empty-msg {
+  padding: 24px;
+}
+
+.admin-user-row,
+.admin-claim-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9em;
+}
+.admin-user-row:last-child,
+.admin-claim-row:last-child {
+  border-bottom: none;
+}
+.admin-user-row:hover,
+.admin-claim-row:hover {
+  background: var(--bg-hover);
+}
+
+.admin-avatar,
+.admin-avatar-placeholder {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+.admin-avatar-placeholder {
+  display: inline-block;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+}
+
+.admin-user-info,
+.admin-claim-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.admin-user-name,
+.admin-claim-device {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.admin-user-email,
+.admin-claim-user {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+.admin-user-meta,
+.admin-claim-meta {
+  color: var(--text-muted);
+  font-size: 0.82em;
+}
+.admin-status-online {
+  color: #4caf50;
+  font-weight: 500;
+}
+.admin-status-offline {
+  color: var(--text-muted);
+}
+.admin-user-actions {
+  flex-shrink: 0;
+}
+
+.admin-table-avatar,
+.admin-table-avatar-placeholder {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-block;
+  vertical-align: middle;
+  object-fit: cover;
+}
+.admin-table-avatar-placeholder {
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+}
+
 .empty-msg {
   color: var(--text-muted);
   font-size: 0.9em;
