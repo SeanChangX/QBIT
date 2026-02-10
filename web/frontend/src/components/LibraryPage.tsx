@@ -2,8 +2,29 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import QgifPreview from './QgifPreview';
 import type { User } from '../types';
 
+const MAX_CONCURRENT_RAW = 8;
+const rawQueue: Array<() => void> = [];
+let rawInFlight = 0;
+
+function runWithConcurrencyLimit<T>(fn: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      rawInFlight++;
+      fn()
+        .then(resolve, reject)
+        .finally(() => {
+          rawInFlight--;
+          if (rawQueue.length > 0) rawQueue.shift()!();
+        });
+    };
+    if (rawInFlight < MAX_CONCURRENT_RAW) run();
+    else rawQueue.push(run);
+  });
+}
+
 function LazyLibraryPreview({ apiUrl, id }: { apiUrl: string; id: string }) {
   const [inView, setInView] = useState(false);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = ref.current;
@@ -17,9 +38,29 @@ function LazyLibraryPreview({ apiUrl, id }: { apiUrl: string; id: string }) {
     obs.observe(el);
     return () => obs.disconnect();
   }, []);
+  useEffect(() => {
+    if (!inView || blobUrl) return;
+    const url = `${apiUrl}/api/library/${id}/raw`;
+    let cancelled = false;
+    runWithConcurrencyLimit(() => fetch(url).then((r) => r.arrayBuffer()))
+      .then((buf) => {
+        if (cancelled) return;
+        const blob = new Blob([buf], { type: 'application/octet-stream' });
+        setBlobUrl(URL.createObjectURL(blob));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [inView, apiUrl, id, blobUrl]);
+  useEffect(() => {
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [blobUrl]);
   return (
     <div ref={ref} className="library-card-preview-inner">
-      {inView ? <QgifPreview src={`${apiUrl}/api/library/${id}/raw`} /> : null}
+      {blobUrl ? <QgifPreview src={blobUrl} /> : null}
     </div>
   );
 }

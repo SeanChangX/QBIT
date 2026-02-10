@@ -60,11 +60,12 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
+  skip: (req) => req.originalUrl?.startsWith('/api/library') === true, // library has its own limit
 });
 
 const libraryLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 300, // library list + many /raw previews per page
+  max: 300, // library list + many /raw previews per page (incl. unauthenticated users)
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
