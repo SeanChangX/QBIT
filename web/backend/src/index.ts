@@ -1133,6 +1133,7 @@ io.on('connection', (socket) => {
 // ---------------------------------------------------------------------------
 
 const adminApp = express();
+adminApp.set('trust proxy', 1); // trust nginx / reverse proxy (needed for rate-limit + secure cookie)
 adminApp.use(express.json());
 
 const adminSessionSecret = (process.env.ADMIN_SESSION_SECRET || process.env.SESSION_SECRET || 'admin-secret-change').trim();
