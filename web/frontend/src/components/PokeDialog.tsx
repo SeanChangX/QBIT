@@ -128,7 +128,7 @@ export default function PokeDialog({
 
   return (
     <div className="poke-overlay" onClick={onClose}>
-      <div className="poke-dialog" onClick={(e) => e.stopPropagation()}>
+      <div className="poke-dialog poke-dialog-offset" onClick={(e) => e.stopPropagation()}>
         <div className="poke-header">
           <span className="poke-title">Poke: {device.name}</span>
           <button className="poke-close" onClick={onClose}>

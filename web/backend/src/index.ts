@@ -21,6 +21,8 @@ import { setupAuth, AppUser } from './auth';
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const ADMIN_PORT = parseInt(process.env.ADMIN_PORT || '3002', 10);
 const ADMIN_HOST = process.env.ADMIN_HOST || '127.0.0.1';
+const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || '').trim();
+const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || '').trim();
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://qbit.labxcloud.com';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'qbit-secret-change-me';
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || '.labxcloud.com';
@@ -189,14 +191,20 @@ const BANNED_JSON = path.join(LIBRARY_DIR, 'banned.json');
 interface BannedList {
   userIds: string[];
   ips: string[];
+  deviceIds: string[];
 }
 
 function loadBanned(): BannedList {
   try {
     const data = fs.readFileSync(BANNED_JSON, 'utf-8');
-    return JSON.parse(data);
+    const parsed = JSON.parse(data);
+    return {
+      userIds: parsed.userIds ?? [],
+      ips: parsed.ips ?? [],
+      deviceIds: parsed.deviceIds ?? [],
+    };
   } catch {
-    return { userIds: [], ips: [] };
+    return { userIds: [], ips: [], deviceIds: [] };
   }
 }
 
@@ -211,17 +219,24 @@ function isBanned(userId?: string, ip?: string): boolean {
   return false;
 }
 
-function addBan(userId?: string, ip?: string): void {
+function isBannedDevice(deviceId: string): boolean {
+  const list = loadBanned();
+  return list.deviceIds.includes(deviceId);
+}
+
+function addBan(userId?: string, ip?: string, deviceId?: string): void {
   const list = loadBanned();
   if (userId && !list.userIds.includes(userId)) list.userIds.push(userId);
   if (ip && !list.ips.includes(ip)) list.ips.push(ip);
+  if (deviceId && !list.deviceIds.includes(deviceId)) list.deviceIds.push(deviceId);
   saveBanned(list);
 }
 
-function removeBan(userId?: string, ip?: string): void {
+function removeBan(userId?: string, ip?: string, deviceId?: string): void {
   const list = loadBanned();
   if (userId) list.userIds = list.userIds.filter((id) => id !== userId);
   if (ip) list.ips = list.ips.filter((i) => i !== ip);
+  if (deviceId) list.deviceIds = list.deviceIds.filter((id) => id !== deviceId);
   saveBanned(list);
 }
 
@@ -296,7 +311,11 @@ wss.on('connection', (ws, request: IncomingMessage) => {
 
       if (msg.type === 'device.register' && msg.id) {
         deviceId = msg.id;
-
+        if (isBannedDevice(msg.id)) {
+          console.warn(`Device WS rejected: banned device ${msg.id}`);
+          ws.close();
+          return;
+        }
         // If device reconnects, close the stale socket
         const existing = devices.get(msg.id);
         if (existing && existing.ws !== ws) {
@@ -434,6 +453,11 @@ app.post('/api/poke', (req, res) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ error: 'Login required to poke' });
   }
+  const user = req.user as AppUser;
+  const clientIp = (req as any).ip || req.socket?.remoteAddress || '';
+  if (isBanned(user.id, clientIp)) {
+    return res.status(403).json({ error: 'Account or IP is banned' });
+  }
 
   const { targetId, text, senderBitmap, senderBitmapWidth, textBitmap, textBitmapWidth } = req.body;
   if (!targetId || !text) {
@@ -444,8 +468,6 @@ app.post('/api/poke', (req, res) => {
   if (!device) {
     return res.status(404).json({ error: 'Device not found or offline' });
   }
-
-  const user = req.user as AppUser;
   const pokePayload: Record<string, unknown> = {
     type: 'poke',
     sender: user.displayName || 'Anonymous',
@@ -473,12 +495,16 @@ app.post('/api/poke/user', (req, res) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ error: 'Login required to poke' });
   }
+  const sender = req.user as AppUser;
+  const clientIp = (req as any).ip || req.socket?.remoteAddress || '';
+  if (isBanned(sender.id, clientIp)) {
+    return res.status(403).json({ error: 'Account or IP is banned' });
+  }
   const { targetUserId, text } = req.body;
   if (!targetUserId || !text) {
     return res.status(400).json({ error: 'Missing targetUserId or text' });
   }
-  const sender = req.user as AppUser;
-  const textStr = String(text).substring(0, 100);
+  const textStr = String(text).substring(0, 25);
   const targetSocketIds: string[] = [];
   for (const u of onlineUsers.values()) {
     if (u.userId === targetUserId) targetSocketIds.push(u.socketId);
@@ -1055,6 +1081,15 @@ function disconnectUserSockets(userId: string): void {
   broadcastOnlineUsers();
 }
 
+function disconnectDevice(deviceId: string): void {
+  const dev = devices.get(deviceId);
+  if (dev) {
+    dev.ws.close();
+    devices.delete(deviceId);
+    broadcastDevices();
+  }
+}
+
 io.on('connection', (socket) => {
   // Send current device and user lists on connect
   socket.emit('devices:update', getDeviceList());
@@ -1094,33 +1129,115 @@ io.on('connection', (socket) => {
 });
 
 // ---------------------------------------------------------------------------
-//  Admin server (internal only, separate port)
+//  Admin server (session-based auth, httpOnly cookie, safe for public-facing)
 // ---------------------------------------------------------------------------
 
 const adminApp = express();
 adminApp.use(express.json());
 
-adminApp.get('/api/sessions', (_req, res) => {
+const adminSessionSecret = (process.env.ADMIN_SESSION_SECRET || process.env.SESSION_SECRET || 'admin-secret-change').trim();
+const adminSessionMaxAge = 24 * 60 * 60 * 1000; // 24 hours
+
+adminApp.use(
+  session({
+    secret: adminSessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    name: 'qbit_admin_sid',
+    cookie: {
+      httpOnly: true,
+      secure: !isLocalDev,
+      sameSite: 'lax',
+      maxAge: adminSessionMaxAge,
+    },
+  })
+);
+
+// Rate limit admin API to mitigate brute force (per IP).
+const adminLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Try again later.' },
+});
+adminApp.use('/api/', adminLimiter);
+
+const FAILED_LOGIN_DELAY_MS = 800;
+const ADMIN_USERNAME_MAX_LEN = 64;
+const ADMIN_PASSWORD_MIN_LEN = 8;
+const ADMIN_PASSWORD_MAX_LEN = 128;
+
+function adminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
+    return next();
+  }
+  const s = req.session as { admin?: boolean } | undefined;
+  if (s?.admin === true) {
+    return next();
+  }
+  res.status(401).json({ error: 'Login required' });
+}
+
+// Login: POST /api/admin/login { username, password } -> set session, httpOnly cookie
+adminApp.post('/api/admin/login', (req, res) => {
+  if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
+    return res.status(200).json({ ok: true });
+  }
+  const { username, password } = req.body || {};
+  const user = (typeof username === 'string' ? username : '').trim();
+  const pass = typeof password === 'string' ? password : '';
+  if (user.length === 0 || user.length > ADMIN_USERNAME_MAX_LEN ||
+      pass.length < ADMIN_PASSWORD_MIN_LEN || pass.length > ADMIN_PASSWORD_MAX_LEN) {
+    setTimeout(() => {
+      res.status(401).json({ error: 'Invalid username or password' });
+    }, FAILED_LOGIN_DELAY_MS);
+    return;
+  }
+  const valid = user === ADMIN_USERNAME && pass === ADMIN_PASSWORD;
+  if (!valid) {
+    setTimeout(() => {
+      res.status(401).json({ error: 'Invalid username or password' });
+    }, FAILED_LOGIN_DELAY_MS);
+    return;
+  }
+  (req.session as { admin?: boolean }).admin = true;
+  req.session.save((err) => {
+    if (err) return res.status(500).json({ error: 'Session error' });
+    res.status(200).json({ ok: true });
+  });
+});
+
+// Logout: POST /api/admin/logout -> destroy session
+adminApp.post('/api/admin/logout', (req, res) => {
+  req.session.destroy(() => {
+    res.clearCookie('qbit_admin_sid', { path: '/' });
+    res.status(200).json({ ok: true });
+  });
+});
+
+adminApp.get('/api/sessions', adminAuth, (_req, res) => {
   res.json(getSessionsList());
 });
-adminApp.get('/api/devices', (_req, res) => {
+adminApp.get('/api/devices', adminAuth, (_req, res) => {
   res.json(getDeviceList());
 });
-adminApp.get('/api/bans', (_req, res) => {
+adminApp.get('/api/bans', adminAuth, (_req, res) => {
   res.json(loadBanned());
 });
-adminApp.post('/api/ban', (req, res) => {
-  const { userId, ip } = req.body || {};
-  if (!userId && !ip) {
-    return res.status(400).json({ error: 'Missing userId or ip' });
+adminApp.post('/api/ban', adminAuth, (req, res) => {
+  const { userId, ip, deviceId } = req.body || {};
+  if (!userId && !ip && !deviceId) {
+    return res.status(400).json({ error: 'Missing userId, ip or deviceId' });
   }
-  addBan(userId, ip);
+  addBan(userId, ip, deviceId);
   if (userId) disconnectUserSockets(userId);
+  if (deviceId) disconnectDevice(deviceId);
   res.json({ ok: true });
 });
-adminApp.delete('/api/ban', (req, res) => {
-  const { userId, ip } = req.body || {};
-  removeBan(userId, ip);
+adminApp.delete('/api/ban', adminAuth, (req, res) => {
+  const { userId, ip, deviceId } = req.body || {};
+  removeBan(userId, ip, deviceId);
   res.json({ ok: true });
 });
 

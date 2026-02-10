@@ -1,5 +1,5 @@
-
-# Frontend:  http://localhost:3000
+# Dev: frontend runs Vite with hot reload (no rebuild on code change).
+# Frontend:  http://localhost:5173  (Vite HMR)
 # Backend:   http://localhost:3001
 # Admin:     http://localhost:3002
 
@@ -18,30 +18,37 @@ services:
       - PORT=3001
       - ADMIN_PORT=3002
       - ADMIN_HOST=0.0.0.0
+      # Admin UI login. Password must be 8-128 chars. Empty = no auth in dev.
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - SESSION_SECRET=dev-secret-local-only
       - COOKIE_DOMAIN=localhost
-      - FRONTEND_URL=http://localhost:3000
+      - FRONTEND_URL=http://localhost:5173
       - DEVICE_API_KEY=dev-test-key
       - MAX_DEVICE_CONNECTIONS=50
-      # Google OAuth -- fill these in for login testing,
-      # or leave empty to skip (poke will require login).
+      # Google OAuth; callback must match the URL you use (e.g. http://localhost:5173).
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
-      - GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
+      - GOOGLE_CALLBACK_URL=http://localhost:5173/auth/google/callback
     volumes:
       - qbit-data:/data
 
   frontend:
     build:
       context: .
-      dockerfile: frontend/Dockerfile
+      dockerfile: frontend/Dockerfile.dev
     image: seanchangx/qbit-frontend:dev
     container_name: qbit-frontend-dev
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "5173:5173"
     volumes:
-      - ./nginx.dev.conf:/etc/nginx/conf.d/default.conf
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_PROXY_TARGET=http://backend:3001
+    depends_on:
+      - backend
 
 volumes:
   qbit-data:

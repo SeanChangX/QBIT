@@ -1,0 +1,15 @@
+# Development Dockerfile: run Vite dev server with hot reload.
+# Build context must be web/ (parent of frontend/). Use: context: ., dockerfile: frontend/Dockerfile.dev
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+
+COPY frontend/ ./
+
+EXPOSE 5173
+
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

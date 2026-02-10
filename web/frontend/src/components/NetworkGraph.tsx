@@ -13,6 +13,7 @@ function userNodeId(userId: string): string {
 interface Props {
   devices: Device[];
   onlineUsers: OnlineUser[];
+  currentUserId: string | null;
   onSelectDevice: (device: Device) => void;
   onSelectUser: (user: OnlineUser) => void;
 }
@@ -20,6 +21,7 @@ interface Props {
 export default function NetworkGraph({
   devices,
   onlineUsers,
+  currentUserId,
   onSelectDevice,
   onSelectUser,
 }: Props) {
@@ -30,6 +32,7 @@ export default function NetworkGraph({
 
   const devicesRef = useRef(devices);
   const onlineUsersRef = useRef(onlineUsers);
+  const currentUserIdRef = useRef(currentUserId);
   const onSelectDeviceRef = useRef(onSelectDevice);
   const onSelectUserRef = useRef(onSelectUser);
   useEffect(() => {
@@ -38,6 +41,9 @@ export default function NetworkGraph({
   useEffect(() => {
     onlineUsersRef.current = onlineUsers;
   }, [onlineUsers]);
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
   useEffect(() => {
     onSelectDeviceRef.current = onSelectDevice;
   }, [onSelectDevice]);
@@ -107,12 +113,13 @@ export default function NetworkGraph({
       }
     );
 
-    // Click handler -- open poke dialog for device nodes or user poke for user nodes
+    // Click handler -- open poke dialog for device nodes or user poke for user nodes (self not clickable)
     networkRef.current.on('click', (params: { nodes: string[] }) => {
       if (params.nodes.length === 0 || params.nodes[0] === HUB_ID) return;
       const id = params.nodes[0];
       if (id.startsWith(USER_NODE_PREFIX)) {
         const userId = id.slice(USER_NODE_PREFIX.length);
+        if (userId === currentUserIdRef.current) return;
         const onlineUser = onlineUsersRef.current.find((u) => u.userId === userId);
         if (onlineUser) onSelectUserRef.current(onlineUser);
       } else {

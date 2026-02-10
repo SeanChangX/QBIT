@@ -5,15 +5,22 @@ interface Props {
   target: OnlineUser;
   onPoke: (targetUserId: string, text: string) => Promise<void>;
   onClose: () => void;
+  isLoggedIn: boolean;
+  apiUrl: string;
 }
 
 const QUICK_MESSAGES = [
   { label: 'Hi!', text: 'Hi!' },
+  { label: 'LOL', text: 'LOL' },
+  { label: '<3', text: '<3' },
   { label: 'Poke!', text: 'Poke!' },
   { label: ':)', text: ':)' },
+  { label: 'GG', text: 'GG' },
 ];
 
-export default function UserPokeDialog({ target, onPoke, onClose }: Props) {
+const MAX_LENGTH = 25;
+
+export default function UserPokeDialog({ target, onPoke, onClose, isLoggedIn, apiUrl }: Props) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
 
@@ -30,46 +37,54 @@ export default function UserPokeDialog({ target, onPoke, onClose }: Props) {
 
   return (
     <div className="poke-overlay" onClick={onClose}>
-      <div className="poke-dialog" onClick={(e) => e.stopPropagation()}>
+      <div className="poke-dialog poke-dialog-offset" onClick={(e) => e.stopPropagation()}>
         <div className="poke-header">
           <span className="poke-title">Poke: {target.displayName}</span>
           <button className="poke-close" onClick={onClose}>
             &times;
           </button>
         </div>
-        <input
-          className="poke-input"
-          type="text"
-          placeholder="Type a message..."
-          maxLength={100}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') send(text);
-          }}
-        />
-        <div className="poke-char-count">
-          {text.length}/100
-        </div>
-        <div className="poke-quick">
-          {QUICK_MESSAGES.map((q) => (
+        {!isLoggedIn ? (
+          <div className="poke-login-msg">
+            <a href={`${apiUrl}/auth/google`}>Login</a> to send a poke.
+          </div>
+        ) : (
+          <>
+            <input
+              className="poke-input"
+              type="text"
+              placeholder="Type a message..."
+              maxLength={MAX_LENGTH}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') send(text);
+              }}
+            />
+            <div className="poke-char-count">
+              {text.length}/{MAX_LENGTH}
+            </div>
+            <div className="poke-quick">
+              {QUICK_MESSAGES.map((q) => (
+                <button
+                  key={q.text}
+                  className="poke-quick-btn"
+                  onClick={() => send(q.text)}
+                  disabled={sending}
+                >
+                  {q.label}
+                </button>
+              ))}
+            </div>
             <button
-              key={q.text}
-              className="poke-quick-btn"
-              onClick={() => send(q.text)}
-              disabled={sending}
+              className="btn btn-poke"
+              onClick={() => send(text)}
+              disabled={!text.trim() || sending}
             >
-              {q.label}
+              {sending ? 'Sending...' : 'Send Poke'}
             </button>
-          ))}
-        </div>
-        <button
-          className="btn btn-poke"
-          onClick={() => send(text)}
-          disabled={!text.trim() || sending}
-        >
-          {sending ? 'Sending...' : 'Send Poke'}
-        </button>
+          </>
+        )}
       </div>
     </div>
   );

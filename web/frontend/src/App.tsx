@@ -18,6 +18,7 @@ interface PokeNotification {
   id: number;
   from: string;
   text: string;
+  exiting?: boolean;
 }
 
 export default function App() {
@@ -56,9 +57,17 @@ export default function App() {
 
     s.on('poke', (data: { from: string; text: string }) => {
       const id = ++notificationIdRef.current;
-      setNotifications((prev) => [...prev, { id, from: data.from, text: data.text }]);
+      setNotifications((prev) => {
+        const next = [...prev, { id, from: data.from, text: data.text }];
+        return next.slice(-3);
+      });
       setTimeout(() => {
-        setNotifications((prev) => prev.filter((n) => n.id !== id));
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === id ? { ...n, exiting: true } : n))
+        );
+        setTimeout(() => {
+          setNotifications((prev) => prev.filter((n) => n.id !== id));
+        }, 300);
       }, 5000);
     });
 
@@ -157,8 +166,7 @@ export default function App() {
     []
   );
 
-  const otherUsers = onlineUsers.filter((u) => u.userId !== user?.id);
-  const hasNetworkNodes = devices.length > 0 || otherUsers.length > 0;
+  const hasNetworkNodes = devices.length > 0 || onlineUsers.length > 0;
 
   return (
     <div className="app">
@@ -182,7 +190,8 @@ export default function App() {
             ) : (
               <NetworkGraph
                 devices={devices}
-                onlineUsers={otherUsers}
+                onlineUsers={onlineUsers}
+                currentUserId={user?.id ?? null}
                 onSelectDevice={handleDeviceSelect}
                 onSelectUser={handleUserSelect}
               />
@@ -192,9 +201,9 @@ export default function App() {
                 {devices.length > 0 && (
                   <span>{devices.length} device{devices.length !== 1 ? 's' : ''}</span>
                 )}
-                {devices.length > 0 && otherUsers.length > 0 && ' · '}
-                {otherUsers.length > 0 && (
-                  <span>{otherUsers.length} user{otherUsers.length !== 1 ? 's' : ''}</span>
+                {devices.length > 0 && onlineUsers.length > 0 && ' · '}
+                {onlineUsers.length > 0 && (
+                  <span>{onlineUsers.length} user{onlineUsers.length !== 1 ? 's' : ''}</span>
                 )}
                 {' online'}
               </div>
@@ -224,6 +233,8 @@ export default function App() {
           target={selectedUser}
           onPoke={handleUserPoke}
           onClose={() => setSelectedUser(null)}
+          isLoggedIn={!!user}
+          apiUrl={API_URL}
         />
       )}
       {claimDevice && (
@@ -236,7 +247,10 @@ export default function App() {
       )}
       <div className="poke-notifications" aria-live="polite">
         {notifications.map((n) => (
-          <div key={n.id} className="poke-notification">
+          <div
+            key={n.id}
+            className={`poke-notification ${n.exiting ? 'poke-notification-exit' : 'poke-notification-enter'}`}
+          >
             <div className="poke-notification-from">Poke from {n.from}</div>
             <div className="poke-notification-text">{n.text}</div>
           </div>
