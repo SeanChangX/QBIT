@@ -301,23 +301,33 @@ cp .env.example .env
 
 | 變數 | 說明 |
 |---|---|
-| `GOOGLE_CLIENT_ID` | 來自 Google Cloud Console 的 OAuth 2.0 用戶端 ID |
+| `GOOGLE_CLIENT_ID` | Google Cloud Console 的 OAuth 2.0 用戶端 ID |
 | `GOOGLE_CLIENT_SECRET` | OAuth 2.0 用戶端密鑰 |
 | `GOOGLE_CALLBACK_URL` | OAuth 回呼 URL，例如 `https://yourdomain.com/auth/google/callback` |
-| `SESSION_SECRET` | 用於工作階段加密的隨機字串（至少 32 字元） |
+| `SESSION_SECRET` | 工作階段加密用隨機字串（至少 32 字元） |
 | `COOKIE_DOMAIN` | Cookie 父網域，例如 `.yourdomain.com` |
-| `FRONTEND_URL` | 完整前端 URL（用於 CORS），例如 `https://yourdomain.com` |
-| `DEVICE_API_KEY` | 後端與 ESP32 韌體之間的共用密鑰 |
+| `FRONTEND_URL` | 完整前端 URL（CORS 用），例如 `https://yourdomain.com` |
+
+| 變數 | 說明 |
+|---|---|
+| `DEVICE_API_KEY` | 後端與 ESP32 韌體共用密鑰，須與韌體內 `WS_API_KEY` 一致 |
 | `MAX_DEVICE_CONNECTIONS` | 最大同時裝置 WebSocket 連線數（預設：100） |
 
-產生安全的隨機值：
+| 變數 | 說明 |
+|---|---|
+| `ADMIN_USERNAME` | Admin 登入帳號（1–64 字元）。留空則關閉 admin 登入驗證。 |
+| `ADMIN_PASSWORD` | Admin 登入密碼（8–128 字元）。 |
+| `ADMIN_SESSION_SECRET` | Admin session cookie 簽章用密鑰。未設則使用 `SESSION_SECRET`。 |
+
+產生安全的隨機值（可複用於 SESSION_SECRET、DEVICE_API_KEY、ADMIN_SESSION_SECRET 等）：
 
 ```bash
-openssl rand -hex 32   # 用於 SESSION_SECRET
-openssl rand -hex 32   # 用於 DEVICE_API_KEY
+openssl rand -hex 32
 ```
 
-`DEVICE_API_KEY` 的值必須與編譯至韌體中的 `WS_API_KEY` 一致。使用 GitHub Actions CI 時，此值會透過 `QBIT_WS_API_KEY` Repository Secret 自動注入。
+**密碼含特殊字元時：** 請用 `.env` 檔，並用雙引號包住值；內容中的 `\` 與 `"` 需跳脫（例如 `ADMIN_PASSWORD="my\"pass"`）。避免在 shell 用單引號匯出。
+
+使用 GitHub Actions CI 時，`DEVICE_API_KEY` 會透過 `QBIT_WS_API_KEY` Repository Secret 自動注入。
 
 ### 本機開發
 
@@ -330,9 +340,6 @@ docker compose -f docker-compose.dev.yml up --build
 |---|---|
 | 前端 | http://localhost:3000 |
 | 後端 API | http://localhost:3001 |
-| 健康檢查 | http://localhost:3001/health |
-
-健康檢查端點會回傳人類可讀的 ASCII 表格儀表板，顯示伺服器狀態、已連線裝置（含區域/公開 IP）、綁定資訊、線上使用者及素材庫檔案數。附加 `?format=json` 可取得 JSON 格式輸出。
 
 若要在本機使用 Google OAuth，請在 Google Cloud Console 的「已授權的重新導向 URI」中新增 `http://localhost:3000/auth/google/callback`。
 
@@ -343,15 +350,18 @@ cd web
 docker compose up --build -d
 ```
 
-此指令會啟動前端（對主機開放連接埠 3000）及後端（僅限內部）容器。將反向代理或 Cloudflare Tunnel 指向連接埠 3000 的前端服務。前端的 Nginx 設定會在內部處理所有 API、驗證、WebSocket 及 Socket.io 流量的代理轉發至後端。
+此指令會啟動前端（對主機開放連接埠 3000）及後端（僅限內部）容器。將反向代理或 Cloudflare Tunnel 指向連接埠 3000 的前端服務。前端的 Nginx 設定會在內部處理所有 API、驗證、WebSocket 及 Socket.io 流量的代理轉發至後端。**對外僅開放 port 3000；**後端不直接對網際網路暴露。
 
 驗證部署：
 
 ```bash
-docker compose ps           # 兩個容器都應為執行中
-docker compose logs backend # 應顯示 "QBIT backend listening on port 3001"
-curl http://localhost:3000/health  # 伺服器狀態儀表板
+docker compose ps             # 兩個容器都應為執行中
+docker compose logs backend   # 應顯示 "QBIT backend listening on port 3001"
 ```
+
+### 健康檢查
+
+在伺服器上執行：`docker exec qbit-frontend curl -s http://backend:3001/health`。
 
 ### GitHub Actions CI/CD
 

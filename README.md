@@ -307,15 +307,25 @@ cp .env.example .env
 | `SESSION_SECRET` | Random string (at least 32 chars) for session encryption |
 | `COOKIE_DOMAIN` | Parent domain for cookies, e.g. `.yourdomain.com` |
 | `FRONTEND_URL` | Full frontend URL for CORS, e.g. `https://yourdomain.com` |
-| `DEVICE_API_KEY` | Shared secret between backend and ESP32 firmware |
+
+| Variable | Description |
+|---|---|
+| `DEVICE_API_KEY` | Shared secret between backend and ESP32 firmware. Must match `WS_API_KEY` in firmware. |
 | `MAX_DEVICE_CONNECTIONS` | Max simultaneous device WebSocket connections (default: 100) |
 
-Generate secure random values:
+| Variable | Description |
+|---|---|
+| `ADMIN_USERNAME` | Admin login username (1–64 chars). Leave empty to disable admin auth. |
+| `ADMIN_PASSWORD` | Admin login password (8–128 chars). |
+| `ADMIN_SESSION_SECRET` | Secret for signing admin session cookie. Defaults to `SESSION_SECRET` if unset. |
+
+Generate secure random values (use for SESSION_SECRET, DEVICE_API_KEY, ADMIN_SESSION_SECRET, etc.):
 
 ```bash
-openssl rand -hex 32   # for SESSION_SECRET
-openssl rand -hex 32   # for DEVICE_API_KEY
+openssl rand -hex 32
 ```
+
+**Passwords with special characters:** Use the `.env` file and wrap values in double quotes. Escape backslash `\` and double quote `"` inside the value (e.g. `ADMIN_PASSWORD="my\"pass"`). Avoid single quotes in the shell when exporting.
 
 The `DEVICE_API_KEY` value must match the `WS_API_KEY` compiled into the firmware. When using GitHub Actions CI, this is injected automatically via the `QBIT_WS_API_KEY` repository secret.
 
@@ -330,9 +340,6 @@ docker compose -f docker-compose.dev.yml up --build
 |---|---|
 | Frontend | http://localhost:3000 |
 | Backend API | http://localhost:3001 |
-| Health check | http://localhost:3001/health |
-
-The health check endpoint returns a human-readable ASCII table dashboard showing server status, connected devices (with local/public IPs), claims, online users, and library file count. Append `?format=json` for JSON output.
 
 For Google OAuth to work locally, add `http://localhost:3000/auth/google/callback` to the Authorized Redirect URIs in Google Cloud Console.
 
@@ -343,15 +350,18 @@ cd web
 docker compose up --build -d
 ```
 
-This starts the frontend (exposed on port 3000) and backend (internal only) containers. Point your reverse proxy or Cloudflare Tunnel to the frontend service on port 3000. The frontend Nginx configuration handles proxying all API, auth, WebSocket, and Socket.io traffic to the backend internally.
+This starts the frontend (exposed on port 3000) and backend (internal only) containers. Point your reverse proxy or Cloudflare Tunnel to the frontend service on port 3000. The frontend Nginx configuration handles proxying all API, auth, WebSocket, and Socket.io traffic to the backend internally. **Only port 3000 is intended for external access;** the backend is not exposed to the internet.
 
 Verify the deployment:
 
 ```bash
-docker compose ps           # both containers should be running
-docker compose logs backend # should show "QBIT backend listening on port 3001"
-curl http://localhost:3000/health  # server status dashboard
+docker compose ps             # both containers should be running
+docker compose logs backend   # should show "QBIT backend listening on port 3001"
 ```
+
+### Health check
+
+From the server: `docker exec qbit-frontend curl -s http://backend:3001/health`.
 
 ### GitHub Actions CI/CD
 
