@@ -1,0 +1,257 @@
+/* Same theme as main frontend */
+:root {
+  --bg-primary: #0e0e0e;
+  --bg-secondary: #181818;
+  --bg-accent: #242424;
+  --bg-hover: #2c2c2c;
+  --text-primary: #ffffff;
+  --text-secondary: #e0e0e0;
+  --text-muted: #888888;
+  --red: #d32f2f;
+  --red-light: #ff4d4d;
+  --border: #333333;
+  --radius: 10px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.navbar {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 8px 8px 16px;
+  background: rgba(24, 24, 24, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  max-width: calc(100vw - 16px);
+}
+
+.navbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  user-select: none;
+}
+
+.brand-q {
+  font-weight: 700;
+  font-size: 1.2em;
+  color: var(--red);
+  letter-spacing: 0.04em;
+}
+
+.brand-bit {
+  font-weight: 700;
+  font-size: 1.2em;
+  color: var(--text-primary);
+  letter-spacing: 0.04em;
+}
+
+.admin-badge {
+  font-size: 0.75em;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-left: 8px;
+}
+
+.main {
+  flex: 1;
+  padding: 80px 24px 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.section {
+  margin-bottom: 32px;
+}
+
+.section-title {
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  letter-spacing: 0.02em;
+}
+
+.admin-table-wrap {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-table th {
+  background: var(--bg-accent);
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.78em;
+}
+
+.admin-table tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-table tr:hover td {
+  background: var(--bg-hover);
+}
+
+.btn {
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 0.85em;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn-danger {
+  background: var(--red);
+  color: white;
+}
+
+.btn-danger:hover {
+  background: var(--red-light);
+}
+
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.btn-ghost:hover {
+  color: var(--text-primary);
+  border-color: var(--red);
+}
+
+.ban-form {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.ban-form input {
+  padding: 8px 12px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.9em;
+  font-family: inherit;
+  width: 200px;
+}
+
+.ban-form input::placeholder {
+  color: var(--text-muted);
+}
+
+.ban-form input:focus {
+  outline: none;
+  border-color: var(--red);
+}
+
+.bans-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ban-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.9em;
+}
+
+.ban-item span {
+  color: var(--text-secondary);
+}
+
+.ban-item code {
+  color: var(--red-light);
+  font-size: 0.9em;
+}
+
+.refresh-row {
+  padding: 12px 16px;
+  background: var(--bg-accent);
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.refresh-row .btn {
+  font-size: 0.82em;
+}
+
+.empty-msg {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  padding: 24px;
+  text-align: center;
+}

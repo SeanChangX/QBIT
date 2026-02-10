@@ -17,3 +17,11 @@ export interface User {
   email: string;
   avatar: string;
 }
+
+export interface OnlineUser {
+  userId: string;
+  displayName: string;
+  avatar?: string;
+  connectedAt: string;
+  socketIds: string[];
+}

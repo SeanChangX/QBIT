@@ -1,17 +1,23 @@
 
 # Frontend:  http://localhost:3000
 # Backend:   http://localhost:3001
+# Admin:     http://localhost:3002
 
 services:
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     image: seanchangx/qbit-backend:dev
     container_name: qbit-backend-dev
     restart: unless-stopped
     ports:
       - "3001:3001"
+      - "3002:3002"
     environment:
       - PORT=3001
+      - ADMIN_PORT=3002
+      - ADMIN_HOST=0.0.0.0
       - SESSION_SECRET=dev-secret-local-only
       - COOKIE_DOMAIN=localhost
       - FRONTEND_URL=http://localhost:3000
@@ -26,7 +32,9 @@ services:
       - qbit-data:/data
 
   frontend:
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     image: seanchangx/qbit-frontend:dev
     container_name: qbit-frontend-dev
     restart: unless-stopped

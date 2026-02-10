@@ -1,6 +1,8 @@
 services:
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     image: seanchangx/qbit-backend:latest
     container_name: qbit-backend
     restart: unless-stopped
@@ -9,13 +11,17 @@ services:
       - "3001"
     environment:
       - PORT=3001
+      - ADMIN_PORT=3002
+      - ADMIN_HOST=127.0.0.1
       - DEVICE_API_KEY=${DEVICE_API_KEY:-}
       - MAX_DEVICE_CONNECTIONS=${MAX_DEVICE_CONNECTIONS:-100}
     volumes:
       - qbit-data:/data
 
   frontend:
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     image: seanchangx/qbit-frontend:latest
     container_name: qbit-frontend
     restart: unless-stopped

@@ -4,21 +4,32 @@ import Navbar from './components/Navbar';
 import NetworkGraph from './components/NetworkGraph';
 import PokeDialog from './components/PokeDialog';
 import type { BitmapPayload } from './components/PokeDialog';
+import UserPokeDialog from './components/UserPokeDialog';
 import ClaimDialog from './components/ClaimDialog';
 import FlashPage from './components/FlashPage';
 import LibraryPage from './components/LibraryPage';
-import type { Device, User } from './types';
+import type { Device, User, OnlineUser } from './types';
 
 export type Page = 'network' | 'flash' | 'library';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+interface PokeNotification {
+  id: number;
+  from: string;
+  text: string;
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>('network');
   const [devices, setDevices] = useState<Device[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+  const [selectedUser, setSelectedUser] = useState<OnlineUser | null>(null);
   const [claimDevice, setClaimDevice] = useState<Device | null>(null);
+  const [notifications, setNotifications] = useState<PokeNotification[]>([]);
+  const notificationIdRef = useRef(0);
   const socketRef = useRef<Socket | null>(null);
 
   // Fetch current user on mount
@@ -29,7 +40,7 @@ export default function App() {
       .catch(() => setUser(null));
   }, []);
 
-  // Socket.io connection for real-time device updates
+  // Socket.io connection for real-time device and user updates
   useEffect(() => {
     const s = io(API_URL || window.location.origin, {
       withCredentials: true,
@@ -37,6 +48,18 @@ export default function App() {
 
     s.on('devices:update', (data: Device[]) => {
       setDevices(data);
+    });
+
+    s.on('users:update', (data: OnlineUser[]) => {
+      setOnlineUsers(data);
+    });
+
+    s.on('poke', (data: { from: string; text: string }) => {
+      const id = ++notificationIdRef.current;
+      setNotifications((prev) => [...prev, { id, from: data.from, text: data.text }]);
+      setTimeout(() => {
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+      }, 5000);
     });
 
     socketRef.current = s;
@@ -105,15 +128,52 @@ export default function App() {
     setSelectedDevice(device);
   }, []);
 
+  // Handle user click: show user poke dialog
+  const handleUserSelect = useCallback((onlineUser: OnlineUser) => {
+    setSelectedUser(onlineUser);
+  }, []);
+
+  // Send poke to an online user
+  const handleUserPoke = useCallback(
+    async (targetUserId: string, text: string) => {
+      try {
+        const res = await fetch(`${API_URL}/api/poke/user`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ targetUserId, text }),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          alert(data.error || 'Failed to send poke');
+          return;
+        }
+      } catch {
+        alert('Network error');
+        return;
+      }
+      setSelectedUser(null);
+    },
+    []
+  );
+
+  const otherUsers = onlineUsers.filter((u) => u.userId !== user?.id);
+  const hasNetworkNodes = devices.length > 0 || otherUsers.length > 0;
+
   return (
     <div className="app">
       <Navbar user={user} apiUrl={API_URL} page={page} setPage={setPage} />
       <main className="main">
         {page === 'network' && (
           <>
-            {devices.length === 0 ? (
+            {!hasNetworkNodes ? (
               <div className="empty-state">
-                <div className="empty-icon">&#9211;</div>
+                <div className="empty-icon" aria-hidden>
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+                    <line x1="12" y1="2" x2="12" y2="12" />
+                  </svg>
+                </div>
                 <p>No QBIT devices online</p>
                 <p className="empty-sub">
                   Devices will appear here when they connect.
@@ -122,12 +182,21 @@ export default function App() {
             ) : (
               <NetworkGraph
                 devices={devices}
+                onlineUsers={otherUsers}
                 onSelectDevice={handleDeviceSelect}
+                onSelectUser={handleUserSelect}
               />
             )}
-            {devices.length > 0 && (
+            {hasNetworkNodes && (
               <div className="network-device-count">
-                {devices.length} device{devices.length !== 1 ? 's' : ''} online
+                {devices.length > 0 && (
+                  <span>{devices.length} device{devices.length !== 1 ? 's' : ''}</span>
+                )}
+                {devices.length > 0 && otherUsers.length > 0 && ' · '}
+                {otherUsers.length > 0 && (
+                  <span>{otherUsers.length} user{otherUsers.length !== 1 ? 's' : ''}</span>
+                )}
+                {' online'}
               </div>
             )}
           </>
@@ -150,6 +219,13 @@ export default function App() {
           apiUrl={API_URL}
         />
       )}
+      {selectedUser && (
+        <UserPokeDialog
+          target={selectedUser}
+          onPoke={handleUserPoke}
+          onClose={() => setSelectedUser(null)}
+        />
+      )}
       {claimDevice && (
         <ClaimDialog
           device={claimDevice}
@@ -158,6 +234,14 @@ export default function App() {
           onClaimed={() => setClaimDevice(null)}
         />
       )}
+      <div className="poke-notifications" aria-live="polite">
+        {notifications.map((n) => (
+          <div key={n.id} className="poke-notification">
+            <div className="poke-notification-from">Poke from {n.from}</div>
+            <div className="poke-notification-text">{n.text}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -152,7 +152,6 @@ export default function PokeDialog({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') send(text);
               }}
-              autoFocus
             />
             <div className="poke-char-count">
               {text.length}/25

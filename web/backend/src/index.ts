@@ -19,6 +19,8 @@ import { setupAuth, AppUser } from './auth';
 // ---------------------------------------------------------------------------
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
+const ADMIN_PORT = parseInt(process.env.ADMIN_PORT || '3002', 10);
+const ADMIN_HOST = process.env.ADMIN_HOST || '127.0.0.1';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://qbit.labxcloud.com';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'qbit-secret-change-me';
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || '.labxcloud.com';
@@ -177,6 +179,51 @@ function saveClaims() {
 }
 
 claims = loadClaims();
+
+// ---------------------------------------------------------------------------
+//  Ban list (admin)
+// ---------------------------------------------------------------------------
+
+const BANNED_JSON = path.join(LIBRARY_DIR, 'banned.json');
+
+interface BannedList {
+  userIds: string[];
+  ips: string[];
+}
+
+function loadBanned(): BannedList {
+  try {
+    const data = fs.readFileSync(BANNED_JSON, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return { userIds: [], ips: [] };
+  }
+}
+
+function saveBanned(list: BannedList) {
+  fs.writeFileSync(BANNED_JSON, JSON.stringify(list, null, 2));
+}
+
+function isBanned(userId?: string, ip?: string): boolean {
+  const list = loadBanned();
+  if (userId && list.userIds.includes(userId)) return true;
+  if (ip && list.ips.includes(ip)) return true;
+  return false;
+}
+
+function addBan(userId?: string, ip?: string): void {
+  const list = loadBanned();
+  if (userId && !list.userIds.includes(userId)) list.userIds.push(userId);
+  if (ip && !list.ips.includes(ip)) list.ips.push(ip);
+  saveBanned(list);
+}
+
+function removeBan(userId?: string, ip?: string): void {
+  const list = loadBanned();
+  if (userId) list.userIds = list.userIds.filter((id) => id !== userId);
+  if (ip) list.ips = list.ips.filter((i) => i !== ip);
+  saveBanned(list);
+}
 
 // Pending claim requests (deviceId -> user info, waiting for device confirmation)
 interface PendingClaim {
@@ -343,13 +390,20 @@ app.get(
   passport.authenticate('google', { scope: ['profile', 'email'] })
 );
 
-app.get(
-  '/auth/google/callback',
-  passport.authenticate('google', { failureRedirect: FRONTEND_URL }),
-  (_req, res) => {
-    res.redirect(FRONTEND_URL);
-  }
-);
+app.get('/auth/google/callback', (req, res, next) => {
+  passport.authenticate('google', (err: Error | null, user: AppUser | false) => {
+    if (err) return next(err);
+    if (!user) return res.redirect(FRONTEND_URL);
+    const clientIp = (req as any).ip || req.socket?.remoteAddress || '';
+    if (isBanned(user.id, clientIp)) {
+      return res.redirect(FRONTEND_URL + '?banned=1');
+    }
+    req.logIn(user, (loginErr: Error | undefined) => {
+      if (loginErr) return next(loginErr);
+      res.redirect(FRONTEND_URL);
+    });
+  })(req, res, next);
+});
 
 app.get('/auth/me', (req, res) => {
   if (req.isAuthenticated()) {
@@ -411,6 +465,37 @@ app.post('/api/poke', (req, res) => {
   device.ws.send(JSON.stringify(pokePayload));
 
   console.log(`Poke: ${user.displayName} -> ${device.name}: ${text}`);
+  res.json({ ok: true });
+});
+
+// User-to-user poke (send to online web user by userId)
+app.post('/api/poke/user', (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: 'Login required to poke' });
+  }
+  const { targetUserId, text } = req.body;
+  if (!targetUserId || !text) {
+    return res.status(400).json({ error: 'Missing targetUserId or text' });
+  }
+  const sender = req.user as AppUser;
+  const textStr = String(text).substring(0, 100);
+  const targetSocketIds: string[] = [];
+  for (const u of onlineUsers.values()) {
+    if (u.userId === targetUserId) targetSocketIds.push(u.socketId);
+  }
+  if (targetSocketIds.length === 0) {
+    return res.status(404).json({ error: 'User not found or offline' });
+  }
+  const payload = {
+    from: sender.displayName || 'Anonymous',
+    fromUserId: sender.id,
+    text: textStr,
+  };
+  for (const sid of targetSocketIds) {
+    const s = io.sockets.sockets.get(sid);
+    if (s) s.emit('poke', payload);
+  }
+  console.log(`Poke user: ${sender.displayName} -> ${targetUserId}: ${textStr}`);
   res.json({ ok: true });
 });
 
@@ -902,27 +987,100 @@ interface OnlineUser {
   userId: string;
   displayName: string;
   email: string;
+  avatar: string;
+  ip: string;
   connectedAt: Date;
 }
 
 const onlineUsers = new Map<string, OnlineUser>();
 
-io.on('connection', (socket) => {
-  // Send current device list on connect
-  socket.emit('devices:update', getDeviceList());
+type OnlineUserPublic = {
+  userId: string;
+  displayName: string;
+  avatar?: string;
+  connectedAt: string;
+  socketIds: string[];
+};
 
-  // Track authenticated users
-  const req = socket.request as any;
-  const passportUser = req?.session?.passport?.user as AppUser | undefined;
+function getOnlineUsersList(): OnlineUserPublic[] {
+  const byUserId = new Map<string, OnlineUserPublic>();
+  for (const u of onlineUsers.values()) {
+    const existing = byUserId.get(u.userId);
+    if (existing) {
+      existing.socketIds.push(u.socketId);
+    } else {
+      byUserId.set(u.userId, {
+        userId: u.userId,
+        displayName: u.displayName,
+        avatar: u.avatar || undefined,
+        connectedAt: u.connectedAt.toISOString(),
+        socketIds: [u.socketId],
+      });
+    }
+  }
+  return Array.from(byUserId.values());
+}
+
+function broadcastOnlineUsers() {
+  io.emit('users:update', getOnlineUsersList());
+}
+
+function getSessionsList(): Array<{
+  socketId: string;
+  userId: string;
+  displayName: string;
+  email: string;
+  ip: string;
+  connectedAt: string;
+}> {
+  return Array.from(onlineUsers.values()).map((u) => ({
+    socketId: u.socketId,
+    userId: u.userId,
+    displayName: u.displayName,
+    email: u.email,
+    ip: u.ip,
+    connectedAt: u.connectedAt.toISOString(),
+  }));
+}
+
+function disconnectUserSockets(userId: string): void {
+  const toDisconnect = Array.from(onlineUsers.entries())
+    .filter(([, u]) => u.userId === userId)
+    .map(([sid]) => sid);
+  for (const sid of toDisconnect) {
+    const s = io.sockets.sockets.get(sid);
+    if (s) s.disconnect(true);
+    onlineUsers.delete(sid);
+  }
+  broadcastOnlineUsers();
+}
+
+io.on('connection', (socket) => {
+  // Send current device and user lists on connect
+  socket.emit('devices:update', getDeviceList());
+  socket.emit('users:update', getOnlineUsersList());
+
+  const req = socket.request as IncomingMessage;
+  const clientIp = extractPublicIp(req);
+  const passportUser = (socket.request as any)?.session?.passport?.user as AppUser | undefined;
+
   if (passportUser && passportUser.id) {
+    if (isBanned(passportUser.id, clientIp)) {
+      socket.disconnect(true);
+      console.log(`Banned user/IP rejected: ${passportUser.displayName} / ${clientIp}`);
+      return;
+    }
     onlineUsers.set(socket.id, {
       socketId: socket.id,
       userId: passportUser.id,
       displayName: passportUser.displayName || 'Unknown',
       email: passportUser.email || '',
+      avatar: passportUser.avatar || '',
+      ip: clientIp,
       connectedAt: new Date(),
     });
     console.log(`User online: ${passportUser.displayName} (${passportUser.email})`);
+    broadcastOnlineUsers();
   }
 
   socket.on('disconnect', () => {
@@ -930,14 +1088,66 @@ io.on('connection', (socket) => {
     if (user) {
       onlineUsers.delete(socket.id);
       console.log(`User offline: ${user.displayName}`);
+      broadcastOnlineUsers();
     }
   });
 });
 
 // ---------------------------------------------------------------------------
-//  Start server
+//  Admin server (internal only, separate port)
+// ---------------------------------------------------------------------------
+
+const adminApp = express();
+adminApp.use(express.json());
+
+adminApp.get('/api/sessions', (_req, res) => {
+  res.json(getSessionsList());
+});
+adminApp.get('/api/devices', (_req, res) => {
+  res.json(getDeviceList());
+});
+adminApp.get('/api/bans', (_req, res) => {
+  res.json(loadBanned());
+});
+adminApp.post('/api/ban', (req, res) => {
+  const { userId, ip } = req.body || {};
+  if (!userId && !ip) {
+    return res.status(400).json({ error: 'Missing userId or ip' });
+  }
+  addBan(userId, ip);
+  if (userId) disconnectUserSockets(userId);
+  res.json({ ok: true });
+});
+adminApp.delete('/api/ban', (req, res) => {
+  const { userId, ip } = req.body || {};
+  removeBan(userId, ip);
+  res.json({ ok: true });
+});
+
+const adminStaticDir = path.join(__dirname, '..', 'static', 'admin');
+if (fs.existsSync(adminStaticDir)) {
+  adminApp.use(express.static(adminStaticDir));
+  adminApp.get('*', (_req, res) => {
+    res.sendFile(path.join(adminStaticDir, 'index.html'));
+  });
+} else {
+  adminApp.get('/', (_req, res) => {
+    res.send(
+      '<p>Admin UI not built. Build the admin app and place output in backend/static/admin.</p>'
+    );
+  });
+}
+
+const adminHttpServer = createServer(adminApp);
+
+// ---------------------------------------------------------------------------
+//  Start servers
 // ---------------------------------------------------------------------------
 
 httpServer.listen(PORT, () => {
   console.log(`QBIT backend listening on port ${PORT}`);
+});
+
+adminHttpServer.listen(ADMIN_PORT, ADMIN_HOST, () => {
+  console.log(`Admin server on http://${ADMIN_HOST}:${ADMIN_PORT} (internal only)`);
 });
