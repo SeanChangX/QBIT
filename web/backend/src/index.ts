@@ -626,10 +626,7 @@ app.post('/api/poke/user', (req, res) => {
 // ---------------------------------------------------------------------------
 //  Device claiming
 // ---------------------------------------------------------------------------
-
-app.get('/api/claims', (_req, res) => {
-  res.json(claims);
-});
+// GET /api/claims is only on admin app (3002) with adminAuth. Do not expose here (3000 is public).
 
 app.post('/api/claim', (req, res) => {
   if (!req.isAuthenticated()) {
