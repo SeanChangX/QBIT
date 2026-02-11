@@ -133,7 +133,7 @@ router.get('/:id/download', (req, res) => {
   const filePath = libraryService.getFilePath(item.id);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File missing' });
 
-  // Sanitised Content-Disposition (Sec 15 fix)
+  // Sanitised Content-Disposition to avoid header injection
   res.setHeader('Content-Disposition', libraryService.contentDisposition(item.filename));
   res.setHeader('Content-Type', 'application/octet-stream');
   fs.createReadStream(filePath).pipe(res);

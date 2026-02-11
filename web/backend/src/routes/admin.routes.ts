@@ -41,7 +41,7 @@ function adminAuth(req: Request, res: Response, next: NextFunction): void {
 }
 
 // ---------------------------------------------------------------------------
-//  Timing-safe string comparison
+//  Constant-time comparison for admin token
 // ---------------------------------------------------------------------------
 
 function timingSafeCompare(a: string, b: string): boolean {
