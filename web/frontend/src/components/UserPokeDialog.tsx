@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { OnlineUser } from '../types';
 
 interface Props {
@@ -24,6 +24,25 @@ export default function UserPokeDialog({ target, onPoke, onClose, isLoggedIn, ap
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
 
+  // Guard: ignore overlay clicks for a short period after opening
+  const readyRef = useRef(false);
+  const pointerOnOverlayRef = useRef(false);
+  useEffect(() => {
+    const timer = setTimeout(() => { readyRef.current = true; }, 300);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const handleOverlayPointerDown = useCallback((e: React.PointerEvent) => {
+    pointerOnOverlayRef.current = e.target === e.currentTarget;
+  }, []);
+
+  const handleOverlayClick = useCallback((e: React.MouseEvent) => {
+    if (e.target !== e.currentTarget) return;
+    if (!readyRef.current) return;
+    if (!pointerOnOverlayRef.current) return;
+    onClose();
+  }, [onClose]);
+
   const send = useCallback(
     async (msg: string) => {
       if (!msg.trim() || sending) return;
@@ -36,8 +55,8 @@ export default function UserPokeDialog({ target, onPoke, onClose, isLoggedIn, ap
   );
 
   return (
-    <div className="poke-overlay" onClick={onClose}>
-      <div className="poke-dialog poke-dialog-offset" onClick={(e) => e.stopPropagation()}>
+    <div className="poke-overlay" onPointerDown={handleOverlayPointerDown} onClick={handleOverlayClick}>
+      <div className="poke-dialog poke-dialog-offset">
         <div className="poke-header">
           <span className="poke-title">Poke: {target.displayName}</span>
           <button className="poke-close" onClick={onClose}>

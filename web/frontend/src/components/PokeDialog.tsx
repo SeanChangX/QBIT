@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Device, User } from '../types';
 
 interface Props {
@@ -106,6 +106,27 @@ export default function PokeDialog({
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
 
+  // Guard: ignore overlay clicks for a short period after opening to prevent
+  // the original tap (that selected the node) from immediately closing the dialog.
+  const readyRef = useRef(false);
+  const pointerOnOverlayRef = useRef(false);
+  useEffect(() => {
+    const timer = setTimeout(() => { readyRef.current = true; }, 300);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Only close when both pointerdown AND click happen on the overlay itself
+  const handleOverlayPointerDown = useCallback((e: React.PointerEvent) => {
+    pointerOnOverlayRef.current = e.target === e.currentTarget;
+  }, []);
+
+  const handleOverlayClick = useCallback((e: React.MouseEvent) => {
+    if (e.target !== e.currentTarget) return;  // click was inside dialog
+    if (!readyRef.current) return;              // guard period
+    if (!pointerOnOverlayRef.current) return;   // pointer started elsewhere
+    onClose();
+  }, [onClose]);
+
   const send = useCallback(async (msg: string) => {
     if (!msg.trim() || sending) return;
     setSending(true);
@@ -127,8 +148,8 @@ export default function PokeDialog({
   }, [sending, user, device.id, onPoke]);
 
   return (
-    <div className="poke-overlay" onClick={onClose}>
-      <div className="poke-dialog poke-dialog-offset" onClick={(e) => e.stopPropagation()}>
+    <div className="poke-overlay" onPointerDown={handleOverlayPointerDown} onClick={handleOverlayClick}>
+      <div className="poke-dialog poke-dialog-offset">
         <div className="poke-header">
           <span className="poke-title">Poke: {device.name}</span>
           <button className="poke-close" onClick={onClose}>
