@@ -18,11 +18,11 @@ export const helmetMiddleware = helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", 'https://static.cloudflareinsights.com'],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       imgSrc: ["'self'", 'data:', 'https://*.googleusercontent.com'],
-      connectSrc: ["'self'", 'wss:', 'ws:'],
-      fontSrc: ["'self'"],
+      connectSrc: ["'self'", 'wss:', 'ws:', 'https://cloudflareinsights.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
     },
