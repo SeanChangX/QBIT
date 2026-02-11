@@ -1,15 +1,32 @@
-FROM node:20-alpine AS build
+# Build context must be the web/ directory (parent of backend/ and admin/).
+
+# Stage 1: backend TypeScript build
+FROM node:20.18-alpine3.21 AS backend-build
 WORKDIR /app
-COPY package.json package-lock.json* ./
+RUN apk add --no-cache python3 make g++
+COPY backend/package.json backend/package-lock.json* ./
 RUN npm install
-COPY tsconfig.json ./
-COPY src/ ./src/
+COPY backend/tsconfig.json ./
+COPY backend/src/ ./src/
 RUN npx tsc
 
-FROM node:20-alpine
+# Stage 2: admin UI build (outputs to /backend/static/admin from vite config)
+FROM node:20.18-alpine3.21 AS admin-build
+WORKDIR /admin
+COPY admin/package.json admin/package-lock.json* ./
+RUN npm install
+COPY admin/ ./
+RUN npm run build
+
+# Stage 3: runtime image
+FROM node:20.18-alpine3.21
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev
-COPY --from=build /app/dist/ ./dist/
+ENV NODE_ENV=production
+# better-sqlite3 requires native compilation on Alpine
+RUN apk add --no-cache python3 make g++
+COPY backend/package.json backend/package-lock.json* ./
+RUN npm install --omit=dev && apk del python3 make g++
+COPY --from=backend-build /app/dist/ ./dist/
+COPY --from=admin-build /backend/static/admin ./static/admin/
 EXPOSE 3001
 CMD ["node", "dist/index.js"]

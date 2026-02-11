@@ -46,6 +46,11 @@ void gifPlayerSetSpeed(uint16_t divisor);
 // Return the current playback speed divisor.
 uint16_t gifPlayerGetSpeed();
 
+// Set a PROGMEM idle animation to play between each random GIF.
+// The idle animation plays once after each GIF finishes its loops,
+// before the next GIF starts.  Pass nullptr to disable.
+void gifPlayerSetIdleAnimation(const AnimatedGIF *idle);
+
 // Non-blocking tick -- call from loop().
 // Renders the next frame when timing is due.
 void gifPlayerTick();

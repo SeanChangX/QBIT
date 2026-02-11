@@ -1,21 +1,38 @@
+# Production compose. Expose only 3000 (frontend) to the internet.
+# Backend 3001 is for API; 3002 is admin UI (bind to internal network only in production).
+
 services:
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     image: seanchangx/qbit-backend:latest
     container_name: qbit-backend
     restart: unless-stopped
     env_file: .env
     expose:
       - "3001"
+      - "3002"
+    ports:
+      # Admin UI (sessions, devices, ban). Restrict 3002 to internal/VPN; do not expose to internet.
+      - "3002:3002"
     environment:
       - PORT=3001
+      - ADMIN_PORT=3002
+      - ADMIN_HOST=0.0.0.0
+      # Admin login (Basic auth). If both set, admin UI shows login modal. Password: 8-128 chars.
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      # Device WebSocket auth; must match firmware WS_API_KEY.
       - DEVICE_API_KEY=${DEVICE_API_KEY:-}
       - MAX_DEVICE_CONNECTIONS=${MAX_DEVICE_CONNECTIONS:-100}
     volumes:
       - qbit-data:/data
 
   frontend:
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     image: seanchangx/qbit-frontend:latest
     container_name: qbit-frontend
     restart: unless-stopped

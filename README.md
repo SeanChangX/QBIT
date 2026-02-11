@@ -1,31 +1,94 @@
+<p align="right"><a href="README.zh-TW.md">繁體中文</a></p>
+
+<div align="center">
+
 # QBIT
 
-An open-source ESP32-C3 desktop companion robot and personal IoT avatar.
+**An open-source ESP32-C3 desktop companion robot and personal IoT avatar.**
 
-![QBIT Thumbnail](docs/images/Thumbnail.jpg)
+[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-blue.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+[![Platform](https://img.shields.io/badge/Platform-ESP32--C3-green.svg)](#hardware-requirements)
+[![Web Platform](https://img.shields.io/badge/Web-qbit.labxcloud.com-purple.svg)](https://qbit.labxcloud.com)
+
+<br>
+
+[![Assembly Video](https://img.youtube.com/vi/pUKB8I10Yfk/maxresdefault.jpg)](https://youtu.be/pUKB8I10Yfk)
+
+*Click the image above to watch the assembly video on YouTube.*
+
+</div>
+
+<br>
+
+<table>
+<tr>
+<td width="50%" align="center">
+<img src="docs/images/Network.png" alt="Network" width="100%">
+<br><strong>Network</strong><br>Real-time device graph
+</td>
+<td width="50%" align="center">
+<img src="docs/images/Poke.png" alt="Poke" width="100%">
+<br><strong>Poke</strong><br>Send messages to devices
+</td>
+</tr>
+<tr>
+<td width="50%" align="center">
+<img src="docs/images/Flash.png" alt="Flash" width="100%">
+<br><strong>Flash</strong><br>Browser-based firmware flasher
+</td>
+<td width="50%" align="center">
+<img src="docs/images/Library.png" alt="Library" width="100%">
+<br><strong>Library</strong><br>Community animation repository
+</td>
+</tr>
+</table>
+
+<br>
+
+<div align="center">
+
+[**Getting Started**](#getting-started) &#8226;
+[**Hardware**](#hardware-requirements) &#8226;
+[**Web Platform**](#web-platform) &#8226;
+[**MQTT**](#mqtt--home-assistant) &#8226;
+[**Self-Hosting**](#self-hosting-the-web-platform) &#8226;
+[**Build from Source**](#firmware-build-from-source)
+
+</div>
 
 ---
 
-## Table of Contents
+## Hardware Requirements
 
-- [Getting Started](#getting-started)
-  - [Flash Firmware](#flash-firmware)
-  - [Initial Wi-Fi Setup](#initial-wi-fi-setup)
-  - [Device Dashboard](#device-dashboard)
-- [Web Platform](#web-platform)
-  - [Network](#network)
-  - [Flash](#flash)
-  - [Library](#library)
-- [Animation Format (.qgif)](#animation-format-qgif)
-- [Self-Hosting the Web Platform](#self-hosting-the-web-platform)
-  - [Prerequisites](#prerequisites)
-  - [Architecture](#architecture)
-  - [Environment Variables](#environment-variables)
-  - [Local Development](#local-development)
-  - [Production Deployment](#production-deployment)
-  - [GitHub Actions CI/CD](#github-actions-cicd)
-- [Firmware Build from Source](#firmware-build-from-source)
-- [License](#license)
+### Components
+
+| Component | Specification | Notes |
+|---|---|---|
+| MCU | ESP32-C3 Super Mini (e.g. Seeed XIAO ESP32-C3) | Valid GPIOs: 0-10, 20, 21 |
+| OLED Display | SSD1306 128x64, I2C, address 0x3C | SH1106-compatible clones also supported |
+| Touch Sensor | TTP223 capacitive touch module | Digital output (HIGH when touched) |
+| Buzzer | Passive buzzer | Driven via PWM (LEDC) |
+
+### Wiring
+
+Default pin assignments for the ESP32-C3 Super Mini. All pins can be reassigned through the web dashboard at `http://qbit.local` and are stored in NVS (persistent across reboots; changes require a reboot to take effect).
+
+| Function | Default GPIO | Direction | Connection |
+|---|---|---|---|
+| Touch Sensor (TTP223) | GPIO 1 | Input | TTP223 OUT -> GPIO 1 |
+| Buzzer | GPIO 2 | Output | GPIO 2 -> Buzzer +, Buzzer - -> GND |
+| OLED SDA | GPIO 20 | I2C Data | SSD1306 SDA -> GPIO 20 |
+| OLED SCL | GPIO 21 | I2C Clock | SSD1306 SCL -> GPIO 21 |
+
+Power connections:
+
+| Component | VCC | GND |
+|---|---|---|
+| SSD1306 OLED | 3.3V | GND |
+| TTP223 Touch Sensor | 3.3V | GND |
+| Passive Buzzer | -- | GND |
+
+The I2C bus runs at 400 kHz. No external pull-up resistors are needed if the OLED module has built-in pull-ups (most breakout boards do).
 
 ---
 
@@ -39,9 +102,6 @@ The easiest way to flash QBIT firmware is through the browser-based flasher. No 
 2. Connect your QBIT board via USB.
 3. Click **Connect & Flash** and select the serial port.
 4. The flasher will write the bootloader, partition table, firmware, and filesystem image automatically.
-
-<!-- Screenshot: Flash page -->
-<!-- ![Flash Page](docs/images/flash-page.png) -->
 
 ### Initial Wi-Fi Setup
 
@@ -64,11 +124,10 @@ http://qbit.local
 
 From the dashboard you can:
 
-- View the unique device ID
-- Set a custom display name
+- View the unique device ID and set a custom display name
 - Adjust display brightness, buzzer volume, and animation playback speed
 - Upload and manage .qgif animation files
-- Configure a local MQTT broker connection for home automation
+- Configure a local MQTT broker connection for home automation (see [MQTT & Home Assistant](#mqtt--home-assistant))
 
 ---
 
@@ -76,37 +135,28 @@ From the dashboard you can:
 
 The QBIT web platform can be self-hosted and provides a central interface for monitoring and interacting with all your online QBIT devices.
 
-If you use the official firmware, your device will automatically connect to the official server:  
+If you use the official firmware, your device will automatically connect to the official server:
 [https://qbit.labxcloud.com](https://qbit.labxcloud.com)
 
 If you prefer, you can deploy your own web platform and backend on your own server, and configure the firmware to connect to your custom domain.
 
 ### Network
 
-The Network page shows all currently connected QBIT devices as an interactive graph powered by [vis-js/vis-network](https://github.com/visjs/vis-network). Each node displays the device name. Clicking a device node opens a poke dialog where logged-in users can send a text message to the device. The QBIT OLED will display the message and play a notification sound.
+The Network page shows all currently connected QBIT devices as an interactive graph powered by [vis-js/vis-network](https://github.com/visjs/vis-network). Each node displays the device name. Devices that have been online longer are drawn closer to the central hub. The current number of online devices is displayed at the bottom.
 
-<!-- Screenshot: Network page -->
-<!-- ![Network Page](docs/images/network-page.png) -->
+Clicking a device node opens a poke dialog where logged-in users can:
+
+- **Poke** -- send a text message (up to 25 characters) to the device. Both the sender name and message text are rendered as 1-bit bitmaps on the web to support multi-language display (including CJK and emoji) on the monochrome OLED. If the text exceeds the screen width, it scrolls horizontally.
+- **Claim** -- bind a device to your account (see [Device Claiming](#device-claiming)). Claimed devices show the owner's name and avatar on the graph node.
+- **Unclaim** -- remove your ownership of a claimed device.
 
 ### Flash
 
 The Flash page embeds the browser-based firmware flasher, allowing users to flash their QBIT directly from the web platform without visiting a separate site.
 
-<!-- Screenshot: Flash page in web platform -->
-<!-- ![Flash Tab](docs/images/flash-tab.png) -->
-
 ### Library
 
-The Library page is a community-driven repository of .qgif animation files. Logged-in users can upload their own animations, and anyone can browse, preview (with animated canvas rendering), and download files.
-
-Each entry displays:
-- File name, frame count, and file size
-- Uploader name and upload date
-- Animated preview rendered on a canvas element
-- Download link
-
-<!-- Screenshot: Library page -->
-<!-- ![Library Page](docs/images/library-page.png) -->
+The Library page is a community-driven repository of .qgif animation files.
 
 ---
 
@@ -114,7 +164,9 @@ Each entry displays:
 
 QBIT uses a custom binary animation format (`.qgif`) optimized for the 128x64 monochrome OLED. The format stores 1-bit monochrome frames with per-frame delay values.
 
-Binary layout:
+<details>
+<summary><strong>Binary layout</strong></summary>
+<br>
 
 | Offset | Type | Description |
 |---|---|---|
@@ -123,6 +175,8 @@ Binary layout:
 | 3-4 | uint16 LE | Height (pixels) |
 | 5+ | uint16 LE[] | Per-frame delay (ms), one per frame |
 | ... | uint8[] | Frame data: 1024 bytes per frame (128x64 / 8), row-major |
+
+</details>
 
 ### Converting GIFs
 
@@ -144,6 +198,63 @@ Options:
 | `--invert` | Invert black/white |
 | `--scale` | Scaling mode: `fit` (default), `stretch`, `crop` |
 
+### Converting .qgif to C Header
+
+To embed a .qgif animation into firmware as a PROGMEM constant (e.g. for idle or boot animations):
+
+```bash
+python tools/qgif2header.py firmware/include/sys_idle.qgif
+```
+
+This generates a C header file with the animation data as an `AnimatedGIF` struct, ready for `#include` in firmware source.
+
+---
+
+## MQTT & Home Assistant
+
+QBIT supports local MQTT integration with automatic Home Assistant discovery. Configure the MQTT broker connection from the device dashboard at `http://qbit.local`.
+
+Once connected, the device publishes HA discovery payloads that automatically create the following entities in Home Assistant:
+
+| Entity | Type | Description |
+|---|---|---|
+| Status | Binary Sensor | Online/offline connectivity status |
+| IP | Sensor | Device local IP address |
+| Poke | Button | Send a poke message to the device |
+| Last Poke | Sensor | Last received poke (sender name, message text as attributes) |
+
+<details>
+<summary><strong>MQTT topics</strong> (default prefix <code>qbit</code>)</summary>
+<br>
+
+| Topic | Description |
+|---|---|
+| `qbit/<id>/status` | `online` / `offline` (retained, with LWT) |
+| `qbit/<id>/info` | Device info JSON (`id`, `name`, `ip`) |
+| `qbit/<id>/command` | Command input (subscribe). Accepts `{"command":"poke","sender":"...","text":"..."}` |
+| `qbit/<id>/poke` | Poke event output (published when a poke is received from any source) |
+
+</details>
+
+---
+
+## Device Claiming
+
+Logged-in users can claim a QBIT device to bind it to their account. Claimed devices display the owner's name and avatar on the Network graph.
+
+**Claiming flow:**
+
+1. Click a device on the Network page and select "Claim this device".
+2. Enter the full 12-character device ID (printed on the device dashboard).
+3. The web sends a claim request to the device via WebSocket.
+4. The QBIT OLED displays the requester's name and prompts for a long-press confirmation.
+5. Long-press the touch button on the device to confirm, or wait 30 seconds to reject.
+6. On confirmation, the claim is stored on the server and the device shows the owner's avatar on the graph.
+
+**Unclaiming:**
+
+Click a claimed device on the Network page and select "Unclaim this device". Only the owner can unclaim.
+
 ---
 
 ## Self-Hosting the Web Platform
@@ -154,7 +265,9 @@ Options:
 - A domain name with DNS managed by Cloudflare (or any reverse proxy that provides TLS)
 - A Google Cloud project with OAuth 2.0 credentials
 
-### Architecture
+<details>
+<summary><strong>Architecture</strong></summary>
+<br>
 
 ```
 Internet
@@ -165,15 +278,18 @@ Internet
         |     |-- Serves React SPA
         |     |-- Proxies /api/, /auth/, /socket.io/, /device to backend
         |
-        +-- backend (Node.js, port 3001)
-              |-- REST API (devices, poke, library)
+        +-- backend (Node.js, port 3001 + 3002)
+              |-- REST API (devices, poke, library, claims)
               |-- Google OAuth (Passport.js)
               |-- Socket.io (real-time frontend updates)
               |-- WebSocket /device (ESP32 device connections)
-              |-- Persistent storage volume (/data)
+              |-- Admin UI on port 3002 (sessions, users, devices, bans)
+              |-- SQLite DB + files in /data (volume)
 ```
 
-Only the frontend container exposes a port to the host. The backend communicates with the frontend container via the Docker internal network. External traffic reaches the services through your reverse proxy or Cloudflare Tunnel.
+Only the frontend container exposes port 80 (mapped to host 3000) to the internet. The backend listens on 3001 (API) and 3002 (admin); restrict port 3002 to internal/VPN. Backend storage: SQLite database `qbit.db`, library files under `/data/files/`, and optional `/data/secrets.json` for auto-generated session and health secrets.
+
+</details>
 
 ### Environment Variables
 
@@ -189,20 +305,24 @@ cp .env.example .env
 | `GOOGLE_CLIENT_ID` | OAuth 2.0 client ID from Google Cloud Console |
 | `GOOGLE_CLIENT_SECRET` | OAuth 2.0 client secret |
 | `GOOGLE_CALLBACK_URL` | OAuth callback URL, e.g. `https://yourdomain.com/auth/google/callback` |
-| `SESSION_SECRET` | Random string (at least 32 chars) for session encryption |
 | `COOKIE_DOMAIN` | Parent domain for cookies, e.g. `.yourdomain.com` |
 | `FRONTEND_URL` | Full frontend URL for CORS, e.g. `https://yourdomain.com` |
-| `DEVICE_API_KEY` | Shared secret between backend and ESP32 firmware |
-| `MAX_DEVICE_CONNECTIONS` | Max simultaneous device WebSocket connections (default: 100) |
+| `DEVICE_API_KEY` | Shared secret with ESP32 firmware. Must match `WS_API_KEY` in firmware. |
+| `MAX_DEVICE_CONNECTIONS` | Max device WebSocket connections (default: 100) |
+| `ADMIN_USERNAME` | Admin UI login (1–64 chars). Empty = no admin login. |
+| `ADMIN_PASSWORD` | Admin UI password (8–128 chars). |
 
-Generate secure random values:
+Optional (auto-generated and stored in `/data/secrets.json` if not set): `SESSION_SECRET`, `ADMIN_SESSION_SECRET`, `HEALTH_SECRET`.
+
+Generate secure random values (e.g. for `DEVICE_API_KEY`):
 
 ```bash
-openssl rand -hex 32   # for SESSION_SECRET
-openssl rand -hex 32   # for DEVICE_API_KEY
+openssl rand -hex 32
 ```
 
-The `DEVICE_API_KEY` value must match the `WS_API_KEY` compiled into the firmware. When using GitHub Actions CI, this is injected automatically via the `QBIT_WS_API_KEY` repository secret.
+**Passwords with special characters:** Use the `.env` file and wrap values in double quotes. Escape `\` and `"` inside (e.g. `ADMIN_PASSWORD="my\"pass"`).
+
+For CI builds, set the `QBIT_WS_API_KEY` repository secret to the same value as `DEVICE_API_KEY`; it is injected into the firmware at build time.
 
 ### Local Development
 
@@ -215,9 +335,9 @@ docker compose -f docker-compose.dev.yml up --build
 |---|---|
 | Frontend | http://localhost:3000 |
 | Backend API | http://localhost:3001 |
-| Health check | http://localhost:3001/health |
+| Health | http://localhost:3001/health |
 
-For Google OAuth to work locally, add `http://localhost:3000/auth/google/callback` to the Authorized Redirect URIs in Google Cloud Console.
+For Google OAuth locally, add `http://localhost:3000/auth/google/callback` to Authorized Redirect URIs in Google Cloud Console.
 
 ### Production Deployment
 
@@ -226,14 +346,26 @@ cd web
 docker compose up --build -d
 ```
 
-This starts the frontend (exposed on port 3000) and backend (internal only) containers. Point your reverse proxy or Cloudflare Tunnel to the frontend service on port 3000. The frontend Nginx configuration handles proxying all API, auth, WebSocket, and Socket.io traffic to the backend internally.
+This starts the frontend (exposed on port 3000) and backend (internal only) containers. Point your reverse proxy or Cloudflare Tunnel to the frontend service on port 3000. The frontend Nginx configuration handles proxying all API, auth, WebSocket, and Socket.io traffic to the backend internally. **Only port 3000 is intended for external access;** the backend is not exposed to the internet.
 
 Verify the deployment:
 
 ```bash
-docker compose ps           # both containers should be running
-docker compose logs backend # should show "QBIT backend listening on port 3001"
+docker compose ps             # both containers should be running
+docker compose logs backend   # should show "QBIT backend listening on port 3001"
 ```
+
+### Data storage
+
+All persistent data is in the `qbit-data` volume (path `/data` inside the backend container): SQLite database `qbit.db` (sessions, users, claims, bans, library metadata), uploaded library files in `files/`, and `secrets.json` for auto-generated secrets. Legacy JSON files (e.g. `claims.json`) are migrated once to SQLite on first run.
+
+### Logs
+
+The backend logs to stdout (pino, JSON in production). View with `docker compose logs -f backend`. No log files are written.
+
+### Health check
+
+`GET /health` returns server status (uptime, devices, claims, online users, library count). Use `?format=json` for JSON. From the server: `docker exec qbit-frontend curl -s http://backend:3001/health`.
 
 ### GitHub Actions CI/CD
 
@@ -241,12 +373,13 @@ Two workflows are included:
 
 **Build and Release** (`build-and-release.yml`) -- triggered on version tags (`v*`):
 - Compiles firmware with PlatformIO
+- Builds the LittleFS filesystem image from `firmware/data/`
 - Injects `WS_HOST` and `WS_API_KEY` from repository secrets (`QBIT_WS_HOST`, `QBIT_WS_API_KEY`)
-- Creates a GitHub Release with firmware.bin, littlefs.bin, bootloader.bin, and partitions.bin
+- Creates a GitHub Release with `firmware.bin`, `littlefs.bin`, `bootloader.bin`, and `partitions.bin`
 
 **Deploy Flasher** (`deploy-gh-pages.yml`) -- triggered after a successful build or on push to main:
 - Downloads the latest release artifacts
-- Generates `manifest.json` for esp-web-tools
+- Generates `manifest.json` for esp-web-tools with partition offsets matching `firmware/partitions.csv`
 - Deploys the flasher tool to GitHub Pages
 
 To set up CI/CD, add these repository secrets in GitHub (Settings > Secrets and variables > Actions > Repository secrets):
@@ -271,7 +404,18 @@ pio device monitor              # open serial monitor (115200 baud)
 
 The firmware connects to the backend WebSocket server using the `WS_HOST`, `WS_PORT`, and `WS_API_KEY` defines in `firmware/src/main.cpp`. For local development, the defaults point to `localhost:3001`. For production builds via GitHub Actions, these values are injected from repository secrets at compile time.
 
-Custom partition table ([`firmware/partitions.csv`](firmware/partitions.csv)):
+Custom partition table ([`firmware/partitions.csv`](firmware/partitions.csv))
+
+---
+
+## Tools
+
+| Tool | Description |
+|---|---|
+| `tools/gif2qbit.py` | Convert standard GIF animations to the .qgif format |
+| `tools/qgif2header.py` | Convert .qgif files to C header files for PROGMEM embedding |
+| `tools/simulate-devices.py` | Simulate multiple QBIT devices connecting to the backend for testing |
+| `tools/flasher/` | Browser-based firmware flasher (deployed to GitHub Pages) |
 
 ---
 

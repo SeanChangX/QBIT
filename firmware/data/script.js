@@ -90,6 +90,77 @@ function fmt(b) {
   });
 })();
 
+// GPIO pin configuration -- fetch current pins and allow saving
+(function () {
+  var VALID_PINS = [0,1,2,3,4,5,6,7,8,9,10,20,21];
+  var selTouch  = document.getElementById('pinTouch');
+  var selBuzzer = document.getElementById('pinBuzzer');
+  var selSDA    = document.getElementById('pinSDA');
+  var selSCL    = document.getElementById('pinSCL');
+  var btnPin    = document.getElementById('btnPinSave');
+  var pinMsg    = document.getElementById('pinMsg');
+
+  // Populate each <select> with the available GPIO options
+  [selTouch, selBuzzer, selSDA, selSCL].forEach(function (sel) {
+    VALID_PINS.forEach(function (p) {
+      var opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = 'GPIO ' + p;
+      sel.appendChild(opt);
+    });
+  });
+
+  // Fetch current pin values from device
+  fetch('/api/pins').then(function (r) { return r.json(); }).then(function (d) {
+    selTouch.value  = d.touch;
+    selBuzzer.value = d.buzzer;
+    selSDA.value    = d.sda;
+    selSCL.value    = d.scl;
+  }).catch(function () {});
+
+  btnPin.addEventListener('click', function () {
+    // Client-side validation: all 4 must be distinct
+    var vals = [selTouch.value, selBuzzer.value, selSDA.value, selSCL.value];
+    var unique = new Set(vals);
+    if (unique.size < 4) {
+      pinMsg.className = 'msg error';
+      pinMsg.textContent = 'All four pins must be different.';
+      pinMsg.style.display = 'block';
+      return;
+    }
+
+    pinMsg.className = 'msg';
+    pinMsg.style.display = 'none';
+    btnPin.disabled = true;
+
+    var params = 'touch=' + selTouch.value
+               + '&buzzer=' + selBuzzer.value
+               + '&sda=' + selSDA.value
+               + '&scl=' + selSCL.value;
+    fetch('/api/pins?' + params, { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.ok) {
+          pinMsg.className = 'msg ok';
+          pinMsg.textContent = 'Saved. Rebooting device...';
+          pinMsg.style.display = 'block';
+          btnPin.textContent = 'Rebooting...';
+        } else {
+          pinMsg.className = 'msg error';
+          pinMsg.textContent = d.error || 'Save failed.';
+          pinMsg.style.display = 'block';
+          btnPin.disabled = false;
+        }
+      })
+      .catch(function () {
+        pinMsg.className = 'msg error';
+        pinMsg.textContent = 'Connection lost (device may be rebooting).';
+        pinMsg.style.display = 'block';
+        btnPin.disabled = false;
+      });
+  });
+})();
+
 // Settings controls -- fetch current values and send changes on input
 (function () {
   var rSpeed  = document.getElementById('rSpeed');

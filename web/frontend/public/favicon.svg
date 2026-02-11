@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="1000"><style>
+    #light-icon {
+      display: inline;
+    }
+    #dark-icon {
+      display: none;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      #light-icon {
+        display: none;
+      }
+      #dark-icon {
+        display: inline;
+      }
+    }
+  </style><g id="light-icon"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="1000"><g clip-path="url(#SvgjsClipPath2217)"><rect width="1000" height="1000" fill="#000000"></rect><g transform="matrix(1.5625,0,0,1.5625,100,100)"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512"><svg id="ICON" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 512 512">
+  <!-- Generator: Adobe Illustrator 29.1.0, SVG Export Plug-In . SVG Version: 2.1.0 Build 142)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: #fff;
+      }
+    </style>
+  <clipPath id="SvgjsClipPath2217"><rect width="1000" height="1000" x="0" y="0" rx="250" ry="250"></rect></clipPath></defs>
+  <g id="X">
+    <polygon class="st0" points="409.28 150.73 287.86 150.73 308.66 127.49 430.08 127.49 409.28 150.73"></polygon>
+    <polygon class="st0" points="474.35 431 409.95 431 285.18 290.87 162.42 290.87 183.21 267.62 330.13 267.62 474.35 431"></polygon>
+    <polygon class="st0" points="58.44 407.76 181.2 407.76 160.41 431 37.65 431 58.44 407.76"></polygon>
+    <polygon class="st0" points="186.57 244.38 39.66 81 100.03 81 224.81 221.13 346.9 221.13 326.77 244.38 186.57 244.38"></polygon>
+    <polygon class="st0" points="274.45 314.11 378.43 431 352.27 431 256.34 323.41 243.59 337.36 120.83 337.36 141.62 314.11 274.45 314.11"></polygon>
+    <polygon class="st0" points="235.54 197.22 131.56 81 161.75 81 256.34 186.6 267.07 173.98 388.49 173.98 367.69 197.22 235.54 197.22"></polygon>
+    <polygon class="st0" points="100.03 360.6 222.79 360.6 202 384.51 79.24 384.51 100.03 360.6"></polygon>
+    <polygon class="st0" points="450.88 104.24 329.45 104.24 350.25 81 471.67 81 450.88 104.24"></polygon>
+  </g>
+</svg></svg></g></g></svg></g><g id="dark-icon"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="1000"><g><g transform="matrix(1.953125,0,0,1.953125,0,0)"><svg xmlns="http://www.w3.org/2000/svg" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" width="512" height="512"><svg id="ICON" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 512 512">
+  <!-- Generator: Adobe Illustrator 29.1.0, SVG Export Plug-In . SVG Version: 2.1.0 Build 142)  -->
+  <defs>
+    <style>
+      .st0 {
+        fill: #fff;
+      }
+    </style>
+  </defs>
+  <g id="X">
+    <polygon class="st0" points="409.28 150.73 287.86 150.73 308.66 127.49 430.08 127.49 409.28 150.73"></polygon>
+    <polygon class="st0" points="474.35 431 409.95 431 285.18 290.87 162.42 290.87 183.21 267.62 330.13 267.62 474.35 431"></polygon>
+    <polygon class="st0" points="58.44 407.76 181.2 407.76 160.41 431 37.65 431 58.44 407.76"></polygon>
+    <polygon class="st0" points="186.57 244.38 39.66 81 100.03 81 224.81 221.13 346.9 221.13 326.77 244.38 186.57 244.38"></polygon>
+    <polygon class="st0" points="274.45 314.11 378.43 431 352.27 431 256.34 323.41 243.59 337.36 120.83 337.36 141.62 314.11 274.45 314.11"></polygon>
+    <polygon class="st0" points="235.54 197.22 131.56 81 161.75 81 256.34 186.6 267.07 173.98 388.49 173.98 367.69 197.22 235.54 197.22"></polygon>
+    <polygon class="st0" points="100.03 360.6 222.79 360.6 202 384.51 79.24 384.51 100.03 360.6"></polygon>
+    <polygon class="st0" points="450.88 104.24 329.45 104.24 350.25 81 471.67 81 450.88 104.24"></polygon>
+  </g>
+</svg></svg></g></g></svg></g></svg>
