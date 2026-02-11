@@ -292,9 +292,54 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
 .section-actions .btn {
   font-size: 0.82em;
+}
+
+/* Collapsible section toggle */
+.section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  font-family: inherit;
+  min-width: 0;
+}
+.section-toggle:hover .section-title {
+  color: var(--text-primary);
+}
+.section-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.section-chevron-open {
+  transform: rotate(90deg);
+}
+
+/* Navbar actions group */
+.navbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.navbar-refresh-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+}
+.navbar-refresh-btn svg {
+  display: block;
 }
 
 .section-title {
@@ -523,6 +568,24 @@ body {
 .admin-claim-row:hover {
   background: var(--bg-hover);
 }
+@media (max-width: 640px) {
+  .admin-user-row {
+    flex-wrap: wrap;
+  }
+  .admin-user-info {
+    min-width: 0;
+    flex: 1 1 calc(100% - 56px);
+  }
+  .admin-user-actions {
+    width: 100%;
+    padding-top: 6px;
+  }
+  .admin-user-actions .btn {
+    width: 100%;
+    text-align: center;
+    justify-content: center;
+  }
+}
 
 .admin-avatar,
 .admin-avatar-placeholder {
@@ -591,4 +654,105 @@ body {
   font-size: 0.9em;
   padding: 24px;
   text-align: center;
+}
+
+/* Responsive table/card toggle */
+.admin-show-mobile {
+  display: none;
+}
+@media (max-width: 768px) {
+  .admin-hide-mobile {
+    display: none;
+  }
+  .admin-show-mobile {
+    display: block;
+  }
+}
+
+/* Mobile card list */
+.admin-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-card-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.admin-card-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.85em;
+}
+
+.admin-card-row code {
+  color: var(--red-light);
+  font-size: 0.85em;
+  word-break: break-all;
+  text-align: right;
+}
+
+.admin-card-label {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.admin-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-card-actions .btn {
+  flex: 1;
+  text-align: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+/* Action buttons row (desktop table cells) */
+.admin-action-btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Ban item improvements for better name display */
+.ban-item strong {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-right: 4px;
 }

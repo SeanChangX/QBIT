@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 interface Session {
   socketId: string;
@@ -284,6 +284,25 @@ export default function App() {
     [refresh, handleUnauthorized]
   );
 
+  // Collapsible section state
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const toggle = useCallback((key: string) => {
+    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  // Lookup maps for ban list name resolution
+  const userMap = useMemo(() => {
+    const m = new Map<string, KnownUser>();
+    users.forEach((u) => m.set(u.userId, u));
+    return m;
+  }, [users]);
+
+  const deviceMap = useMemo(() => {
+    const m = new Map<string, Device>();
+    devices.forEach((d) => m.set(d.id, d));
+    return m;
+  }, [devices]);
+
   return (
     <div className="app">
       {showLoginModal && (
@@ -357,13 +376,28 @@ export default function App() {
           <span className="admin-badge">Admin</span>
         </div>
         {auth && (
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={handleLogout}
-          >
-            Logout
-          </button>
+          <div className="navbar-actions">
+            <button
+              type="button"
+              className="btn btn-ghost navbar-refresh-btn"
+              onClick={() => refresh(true)}
+              disabled={loading}
+              title="Refresh all"
+              aria-label="Refresh all"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10" />
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={handleLogout}
+            >
+              Logout
+            </button>
+          </div>
         )}
       </nav>
 
@@ -407,230 +441,328 @@ export default function App() {
               {bans.userIds.length === 0 && bans.ips.length === 0 && (bans.deviceIds?.length ?? 0) === 0 && (
                 <div className="empty-msg">No bans</div>
               )}
-              {(bans.userIds ?? []).map((id) => (
-                <div key={`u-${id}`} className="ban-item">
-                  <span>User: <code>{id}</code></span>
-                  <button className="btn btn-ghost" onClick={() => handleUnbanUser(id)}>Unban</button>
-                </div>
-              ))}
+              {(bans.userIds ?? []).map((id) => {
+                const u = userMap.get(id);
+                return (
+                  <div key={`u-${id}`} className="ban-item">
+                    <span>
+                      User: {u ? <strong>{u.displayName}</strong> : null}
+                      {' '}<code>{id}</code>
+                    </span>
+                    <button className="btn btn-ghost" onClick={() => handleUnbanUser(id)}>Unban</button>
+                  </div>
+                );
+              })}
               {(bans.ips ?? []).map((ip) => (
                 <div key={`i-${ip}`} className="ban-item">
                   <span>IP: <code>{ip}</code></span>
                   <button className="btn btn-ghost" onClick={() => handleUnbanIp(ip)}>Unban</button>
                 </div>
               ))}
-              {(bans.deviceIds ?? []).map((id) => (
-                <div key={`d-${id}`} className="ban-item">
-                  <span>Device: <code>{id}</code></span>
-                  <button className="btn btn-ghost" onClick={() => handleUnbanDevice(id)}>Unban</button>
+              {(bans.deviceIds ?? []).map((id) => {
+                const d = deviceMap.get(id);
+                return (
+                  <div key={`d-${id}`} className="ban-item">
+                    <span>
+                      Device: {d ? <strong>{d.name}</strong> : null}
+                      {' '}<code>{id}</code>
+                    </span>
+                    <button className="btn btn-ghost" onClick={() => handleUnbanDevice(id)}>Unban</button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        <section className="section">
+          <div className="section-header-row">
+            <button className="section-toggle" onClick={() => toggle('users')}>
+              <span className={`section-chevron${collapsed.users ? '' : ' section-chevron-open'}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </span>
+              <h2 className="section-title">Users ({users.length})</h2>
+            </button>
+            <div className="section-actions">
+              {loading && <span className="admin-loading">Updating...</span>}
+            </div>
+          </div>
+          {!collapsed.users && (
+            <div className="admin-scroll-list">
+              {users.length === 0 && !loading && (
+                <div className="empty-msg">No users yet</div>
+              )}
+              {users.map((u) => (
+                <div key={u.userId} className="admin-user-row">
+                  {u.avatar ? (
+                    <img
+                      src={u.avatar}
+                      alt=""
+                      className="admin-avatar"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  ) : (
+                    <span className="admin-avatar-placeholder" />
+                  )}
+                  <div className="admin-user-info">
+                    <span className="admin-user-name">{u.displayName}</span>
+                    <span className="admin-user-email">{u.email}</span>
+                    <span className="admin-user-meta">
+                      {u.status === 'online' ? (
+                        <span className="admin-status-online">Online</span>
+                      ) : (
+                        <span className="admin-status-offline">Offline</span>
+                      )}
+                      {' · Last seen '}
+                      {new Date(u.lastSeen).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="admin-user-actions">
+                    <button
+                      className="btn btn-danger"
+                      onClick={() => handleBanSessionUser(u.userId)}
+                    >
+                      Ban user
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
-          </div>
+          )}
         </section>
 
         <section className="section">
           <div className="section-header-row">
-            <h2 className="section-title">Users (all who have logged in)</h2>
+            <button className="section-toggle" onClick={() => toggle('claims')}>
+              <span className={`section-chevron${collapsed.claims ? '' : ' section-chevron-open'}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </span>
+              <h2 className="section-title">Claims ({claims.length})</h2>
+            </button>
             <div className="section-actions">
               {loading && <span className="admin-loading">Updating...</span>}
-              <button className="btn btn-ghost" onClick={() => refresh(true)} disabled={loading}>
-                Refresh
-              </button>
             </div>
           </div>
-          <div className="admin-scroll-list">
-            {users.length === 0 && !loading && (
-              <div className="empty-msg">No users yet</div>
-            )}
-            {users.map((u) => (
-              <div key={u.userId} className="admin-user-row">
-                {u.avatar ? (
-                  <img
-                    src={u.avatar}
-                    alt=""
-                    className="admin-avatar"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  />
-                ) : (
-                  <span className="admin-avatar-placeholder" />
-                )}
-                <div className="admin-user-info">
-                  <span className="admin-user-name">{u.displayName}</span>
-                  <span className="admin-user-email">{u.email}</span>
-                  <span className="admin-user-meta">
-                    {u.status === 'online' ? (
-                      <span className="admin-status-online">Online</span>
-                    ) : (
-                      <span className="admin-status-offline">Offline</span>
+          {!collapsed.claims && (
+            <div className="admin-scroll-list">
+              {claims.length === 0 && !loading && (
+                <div className="empty-msg">No claims</div>
+              )}
+              {claims.map((c) => (
+                <div key={c.deviceId} className="admin-claim-row">
+                  {c.userAvatar ? (
+                    <img
+                      src={c.userAvatar}
+                      alt=""
+                      className="admin-avatar"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  ) : (
+                    <span className="admin-avatar-placeholder" />
+                  )}
+                  <div className="admin-claim-info">
+                    <span className="admin-claim-device">{c.deviceName || c.deviceId}</span>
+                    <span className="admin-claim-user">Claimed by {c.userName}</span>
+                    <span className="admin-claim-meta">{new Date(c.claimedAt).toLocaleString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="section">
+          <div className="section-header-row">
+            <button className="section-toggle" onClick={() => toggle('sessions')}>
+              <span className={`section-chevron${collapsed.sessions ? '' : ' section-chevron-open'}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </span>
+              <h2 className="section-title">Online sessions ({sessions.length})</h2>
+            </button>
+            <div className="section-actions">
+              {loading && <span className="admin-loading">Updating...</span>}
+            </div>
+          </div>
+          {!collapsed.sessions && (
+            <>
+              {/* Desktop: table layout */}
+              <div className="admin-table-wrap admin-table-fixed admin-hide-mobile">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>User ID</th>
+                      <th>IP</th>
+                      <th>Connected</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessions.length === 0 && !loading && (
+                      <tr>
+                        <td colSpan={7} className="empty-msg">No sessions</td>
+                      </tr>
                     )}
-                    {' · Last seen '}
-                    {new Date(u.lastSeen).toLocaleString()}
-                  </span>
-                </div>
-                <div className="admin-user-actions">
-                  <button
-                    className="btn btn-danger"
-                    onClick={() => handleBanSessionUser(u.userId)}
-                  >
-                    Ban user
-                  </button>
-                </div>
+                    {sessions.map((s) => (
+                      <tr key={s.socketId}>
+                        <td>
+                          {s.avatar ? (
+                            <img
+                              src={s.avatar}
+                              alt=""
+                              className="admin-table-avatar"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                            />
+                          ) : (
+                            <span className="admin-avatar-placeholder admin-table-avatar-placeholder" />
+                          )}
+                        </td>
+                        <td>{s.displayName}</td>
+                        <td>{s.email}</td>
+                        <td><code style={{ fontSize: '0.85em' }}>{s.userId}</code></td>
+                        <td>{s.ip}</td>
+                        <td>{new Date(s.connectedAt).toLocaleString()}</td>
+                        <td>
+                          <div className="admin-action-btns">
+                            <button
+                              className="btn btn-danger"
+                              onClick={() => handleBanSessionUser(s.userId)}
+                            >
+                              Ban user
+                            </button>
+                            <button className="btn btn-ghost" onClick={() => handleBanSessionIp(s.ip)}>
+                              Ban IP
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="section-header-row">
-            <h2 className="section-title">Claims (device ownership)</h2>
-            <div className="section-actions">
-              {loading && <span className="admin-loading">Updating...</span>}
-              <button className="btn btn-ghost" onClick={() => refresh(true)} disabled={loading}>
-                Refresh
-              </button>
-            </div>
-          </div>
-          <div className="admin-scroll-list">
-            {claims.length === 0 && !loading && (
-              <div className="empty-msg">No claims</div>
-            )}
-            {claims.map((c) => (
-              <div key={c.deviceId} className="admin-claim-row">
-                {c.userAvatar ? (
-                  <img
-                    src={c.userAvatar}
-                    alt=""
-                    className="admin-avatar"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  />
-                ) : (
-                  <span className="admin-avatar-placeholder" />
-                )}
-                <div className="admin-claim-info">
-                  <span className="admin-claim-device">{c.deviceName || c.deviceId}</span>
-                  <span className="admin-claim-user">Claimed by {c.userName}</span>
-                  <span className="admin-claim-meta">{new Date(c.claimedAt).toLocaleString()}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="section">
-          <div className="section-header-row">
-            <h2 className="section-title">Online sessions (current connections)</h2>
-            <div className="section-actions">
-              {loading && <span className="admin-loading">Updating...</span>}
-              <button className="btn btn-ghost" onClick={() => refresh(true)} disabled={loading}>
-                Refresh
-              </button>
-            </div>
-          </div>
-          <div className="admin-table-wrap admin-table-fixed">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th></th>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>User ID</th>
-                  <th>IP</th>
-                  <th>Connected</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+              {/* Mobile: card layout */}
+              <div className="admin-card-list admin-show-mobile">
                 {sessions.length === 0 && !loading && (
-                  <tr>
-                    <td colSpan={7} className="empty-msg">No sessions</td>
-                  </tr>
+                  <div className="empty-msg">No sessions</div>
                 )}
                 {sessions.map((s) => (
-                  <tr key={s.socketId}>
-                    <td>
+                  <div key={s.socketId} className="admin-card">
+                    <div className="admin-card-header">
                       {s.avatar ? (
-                        <img
-                          src={s.avatar}
-                          alt=""
-                          className="admin-table-avatar"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                        />
+                        <img src={s.avatar} alt="" className="admin-avatar" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                       ) : (
-                        <span className="admin-avatar-placeholder admin-table-avatar-placeholder" />
+                        <span className="admin-avatar-placeholder" />
                       )}
-                    </td>
-                    <td>{s.displayName}</td>
-                    <td>{s.email}</td>
-                    <td><code style={{ fontSize: '0.85em' }}>{s.userId}</code></td>
-                    <td>{s.ip}</td>
-                    <td>{new Date(s.connectedAt).toLocaleString()}</td>
-                    <td>
-                      <button
-                        className="btn btn-danger"
-                        style={{ marginRight: 8 }}
-                        onClick={() => handleBanSessionUser(s.userId)}
-                      >
-                        Ban user
-                      </button>
-                      <button className="btn btn-ghost" onClick={() => handleBanSessionIp(s.ip)}>
-                        Ban IP
-                      </button>
-                    </td>
-                  </tr>
+                      <div className="admin-card-title">
+                        <span className="admin-user-name">{s.displayName}</span>
+                        <span className="admin-user-email">{s.email}</span>
+                      </div>
+                    </div>
+                    <div className="admin-card-details">
+                      <div className="admin-card-row"><span className="admin-card-label">User ID</span><code>{s.userId}</code></div>
+                      <div className="admin-card-row"><span className="admin-card-label">IP</span><span>{s.ip}</span></div>
+                      <div className="admin-card-row"><span className="admin-card-label">Connected</span><span>{new Date(s.connectedAt).toLocaleString()}</span></div>
+                    </div>
+                    <div className="admin-card-actions">
+                      <button className="btn btn-danger" onClick={() => handleBanSessionUser(s.userId)}>Ban user</button>
+                      <button className="btn btn-ghost" onClick={() => handleBanSessionIp(s.ip)}>Ban IP</button>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            </>
+          )}
         </section>
 
         <section className="section">
           <div className="section-header-row">
-            <h2 className="section-title">Devices (QBIT hardware)</h2>
+            <button className="section-toggle" onClick={() => toggle('devices')}>
+              <span className={`section-chevron${collapsed.devices ? '' : ' section-chevron-open'}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </span>
+              <h2 className="section-title">Devices ({devices.length})</h2>
+            </button>
             <div className="section-actions">
               {loading && <span className="admin-loading">Updating...</span>}
-              <button className="btn btn-ghost" onClick={() => refresh(true)} disabled={loading}>
-                Refresh
-              </button>
             </div>
           </div>
-          <div className="admin-table-wrap admin-table-fixed">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Name</th>
-                  <th>Local IP</th>
-                  <th>Public IP</th>
-                  <th>Version</th>
-                  <th>Connected</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+          {!collapsed.devices && (
+            <>
+              {/* Desktop: table layout */}
+              <div className="admin-table-wrap admin-table-fixed admin-hide-mobile">
+                <table className="admin-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Name</th>
+                      <th>Local IP</th>
+                      <th>Public IP</th>
+                      <th>Version</th>
+                      <th>Connected</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {devices.length === 0 && !loading && (
+                      <tr>
+                        <td colSpan={7} className="empty-msg">No devices</td>
+                      </tr>
+                    )}
+                    {devices.map((d) => (
+                      <tr key={d.id}>
+                        <td><code style={{ fontSize: '0.85em' }}>{d.id}</code></td>
+                        <td>{d.name}</td>
+                        <td>{d.ip}</td>
+                        <td>{d.publicIp || '-'}</td>
+                        <td>{d.version}</td>
+                        <td>{new Date(d.connectedAt).toLocaleString()}</td>
+                        <td>
+                          <button className="btn btn-danger" onClick={() => handleBanDevice(d.id)}>
+                            Ban device
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {/* Mobile: card layout */}
+              <div className="admin-card-list admin-show-mobile">
                 {devices.length === 0 && !loading && (
-                  <tr>
-                    <td colSpan={7} className="empty-msg">No devices</td>
-                  </tr>
+                  <div className="empty-msg">No devices</div>
                 )}
                 {devices.map((d) => (
-                  <tr key={d.id}>
-                    <td><code style={{ fontSize: '0.85em' }}>{d.id}</code></td>
-                    <td>{d.name}</td>
-                    <td>{d.ip}</td>
-                    <td>{d.publicIp || '-'}</td>
-                    <td>{d.version}</td>
-                    <td>{new Date(d.connectedAt).toLocaleString()}</td>
-                    <td>
-                      <button className="btn btn-danger" onClick={() => handleBanDevice(d.id)}>
-                        Ban device
-                      </button>
-                    </td>
-                  </tr>
+                  <div key={d.id} className="admin-card">
+                    <div className="admin-card-header">
+                      <div className="admin-card-title">
+                        <span className="admin-user-name">{d.name}</span>
+                        <code style={{ fontSize: '0.8em' }}>{d.id}</code>
+                      </div>
+                    </div>
+                    <div className="admin-card-details">
+                      <div className="admin-card-row"><span className="admin-card-label">Local IP</span><span>{d.ip}</span></div>
+                      <div className="admin-card-row"><span className="admin-card-label">Public IP</span><span>{d.publicIp || '-'}</span></div>
+                      <div className="admin-card-row"><span className="admin-card-label">Version</span><span>{d.version}</span></div>
+                      <div className="admin-card-row"><span className="admin-card-label">Connected</span><span>{new Date(d.connectedAt).toLocaleString()}</span></div>
+                    </div>
+                    <div className="admin-card-actions">
+                      <button className="btn btn-danger" onClick={() => handleBanDevice(d.id)}>Ban device</button>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            </>
+          )}
         </section>
       </main>
     </div>

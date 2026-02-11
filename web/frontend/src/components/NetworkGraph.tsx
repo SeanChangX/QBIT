@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Network } from 'vis-network/standalone';
 import { DataSet } from 'vis-data/standalone';
 import type { Device, OnlineUser } from '../types';
@@ -29,6 +29,8 @@ export default function NetworkGraph({
   const networkRef = useRef<Network | null>(null);
   const nodesRef = useRef(new DataSet<Record<string, unknown>>());
   const edgesRef = useRef(new DataSet<Record<string, unknown>>());
+  const [labelsVisible, setLabelsVisible] = useState(true);
+  const labelsVisibleRef = useRef(true);
 
   const devicesRef = useRef(devices);
   const onlineUsersRef = useRef(onlineUsers);
@@ -233,11 +235,55 @@ export default function NetworkGraph({
     });
   }, [devices, onlineUsers]);
 
+  // Center / fit the view
+  const handleFit = useCallback(() => {
+    networkRef.current?.fit({ animation: { duration: 400, easingFunction: 'easeInOutQuad' } });
+  }, []);
+
+  // Toggle label visibility
+  const handleToggleLabels = useCallback(() => {
+    const next = !labelsVisibleRef.current;
+    labelsVisibleRef.current = next;
+    setLabelsVisible(next);
+    const nodes = nodesRef.current;
+    const allIds = (nodes.getIds() as string[]).filter((id) => id !== HUB_ID);
+    allIds.forEach((id) => {
+      nodes.update({ id, font: { color: next ? '#ffffff' : 'transparent' } });
+    });
+  }, []);
+
   return (
-    <div
-      ref={containerRef}
-      className="network-graph-container"
-      style={{ width: '100%', height: '100%', background: '#0e0e0e' }}
-    />
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      <div
+        ref={containerRef}
+        className="network-graph-container"
+        style={{ width: '100%', height: '100%', background: '#0e0e0e' }}
+      />
+      <div className="network-fab-group">
+        <button
+          className="network-fab"
+          onClick={handleFit}
+          title="Center view"
+          aria-label="Center view"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M3 12h3m12 0h3M12 3v3m0 12v3" />
+          </svg>
+        </button>
+        <button
+          className={`network-fab${labelsVisible ? '' : ' network-fab-off'}`}
+          onClick={handleToggleLabels}
+          title={labelsVisible ? 'Hide labels' : 'Show labels'}
+          aria-label={labelsVisible ? 'Hide labels' : 'Show labels'}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 7V4h16v3" />
+            <path d="M9 20h6" />
+            <path d="M12 4v16" />
+          </svg>
+        </button>
+      </div>
+    </div>
   );
 }

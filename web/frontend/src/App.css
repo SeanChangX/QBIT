@@ -628,6 +628,53 @@ body {
   letter-spacing: 0.04em;
   pointer-events: none;
   z-index: 10;
+  white-space: nowrap;
+  max-width: calc(100vw - 32px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* -- Network floating action buttons (bottom-right) -- */
+.network-fab-group {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10;
+}
+
+.network-fab {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(24, 24, 24, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.network-fab:hover {
+  background: rgba(40, 40, 40, 0.9);
+  color: var(--text-primary);
+  border-color: var(--red);
+}
+
+.network-fab-off {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.network-fab-off:hover {
+  opacity: 1;
 }
 
 /* -- Device count badge -- */
