@@ -278,15 +278,16 @@ Internet
         |     |-- 提供 React SPA
         |     |-- 代理 /api/、/auth/、/socket.io/、/device 至 backend
         |
-        +-- backend（Node.js，連接埠 3001）
+        +-- backend（Node.js，連接埠 3001 + 3002）
               |-- REST API（裝置、戳一下、素材庫、綁定）
               |-- Google OAuth（Passport.js）
               |-- Socket.io（即時前端更新）
               |-- WebSocket /device（ESP32 裝置連線）
-              |-- 持久化儲存卷 (/data)
+              |-- 管理介面 port 3002（連線、用戶、裝置、封鎖）
+              |-- SQLite 與檔案儲存於 /data（volume）
 ```
 
-僅前端容器對主機開放連接埠。後端透過 Docker 內部網路與前端容器通訊。外部流量透過反向代理或 Cloudflare Tunnel 到達服務。
+僅前端容器對外開放 port 80（對應主機 3000）。後端監聽 3001（API）與 3002（管理）；建議將 3002 限於內網或 VPN。後端儲存：SQLite 資料庫 `qbit.db`、素材庫檔案於 `/data/files/`，以及可選的 `/data/secrets.json`（自動產生的 session 與 health 密鑰）。
 
 </details>
 
@@ -304,30 +305,24 @@ cp .env.example .env
 | `GOOGLE_CLIENT_ID` | Google Cloud Console 的 OAuth 2.0 用戶端 ID |
 | `GOOGLE_CLIENT_SECRET` | OAuth 2.0 用戶端密鑰 |
 | `GOOGLE_CALLBACK_URL` | OAuth 回呼 URL，例如 `https://yourdomain.com/auth/google/callback` |
-| `SESSION_SECRET` | 工作階段加密用隨機字串（至少 32 字元） |
 | `COOKIE_DOMAIN` | Cookie 父網域，例如 `.yourdomain.com` |
 | `FRONTEND_URL` | 完整前端 URL（CORS 用），例如 `https://yourdomain.com` |
+| `DEVICE_API_KEY` | 與 ESP32 韌體共用密鑰，須與韌體內 `WS_API_KEY` 一致 |
+| `MAX_DEVICE_CONNECTIONS` | 最大裝置 WebSocket 連線數（預設：100） |
+| `ADMIN_USERNAME` | 管理介面登入帳號（1–64 字元）。留空則不啟用登入。 |
+| `ADMIN_PASSWORD` | 管理介面密碼（8–128 字元）。 |
 
-| 變數 | 說明 |
-|---|---|
-| `DEVICE_API_KEY` | 後端與 ESP32 韌體共用密鑰，須與韌體內 `WS_API_KEY` 一致 |
-| `MAX_DEVICE_CONNECTIONS` | 最大同時裝置 WebSocket 連線數（預設：100） |
+可選（未設定時會自動產生並寫入 `/data/secrets.json`）：`SESSION_SECRET`、`ADMIN_SESSION_SECRET`、`HEALTH_SECRET`。
 
-| 變數 | 說明 |
-|---|---|
-| `ADMIN_USERNAME` | Admin 登入帳號（1–64 字元）。留空則關閉 admin 登入驗證。 |
-| `ADMIN_PASSWORD` | Admin 登入密碼（8–128 字元）。 |
-| `ADMIN_SESSION_SECRET` | Admin session cookie 簽章用密鑰。未設則使用 `SESSION_SECRET`。 |
-
-產生安全的隨機值（可複用於 SESSION_SECRET、DEVICE_API_KEY、ADMIN_SESSION_SECRET 等）：
+產生安全的隨機值（例如給 `DEVICE_API_KEY`）：
 
 ```bash
 openssl rand -hex 32
 ```
 
-**密碼含特殊字元時：** 請用 `.env` 檔，並用雙引號包住值；內容中的 `\` 與 `"` 需跳脫（例如 `ADMIN_PASSWORD="my\"pass"`）。避免在 shell 用單引號匯出。
+**密碼含特殊字元時：** 請用 `.env` 檔，並用雙引號包住值；內容中的 `\` 與 `"` 需跳脫（例如 `ADMIN_PASSWORD="my\"pass"`）。
 
-使用 GitHub Actions CI 時，`DEVICE_API_KEY` 會透過 `QBIT_WS_API_KEY` Repository Secret 自動注入。
+使用 GitHub Actions CI 時，請設定 Repository Secret `QBIT_WS_API_KEY` 與 `.env` 的 `DEVICE_API_KEY` 相同，建置時會注入韌體。
 
 ### 本機開發
 
@@ -340,6 +335,7 @@ docker compose -f docker-compose.dev.yml up --build
 |---|---|
 | 前端 | http://localhost:3000 |
 | 後端 API | http://localhost:3001 |
+| 健康檢查 | http://localhost:3001/health |
 
 若要在本機使用 Google OAuth，請在 Google Cloud Console 的「已授權的重新導向 URI」中新增 `http://localhost:3000/auth/google/callback`。
 
@@ -359,9 +355,17 @@ docker compose ps             # 兩個容器都應為執行中
 docker compose logs backend   # 應顯示 "QBIT backend listening on port 3001"
 ```
 
+### 資料儲存
+
+所有持久化資料位於 volume `qbit-data`（後端容器內路徑 `/data`）：SQLite 資料庫 `qbit.db`（sessions、users、claims、bans、素材庫元資料）、上傳的素材檔於 `files/`、以及自動產生的密鑰於 `secrets.json`。舊版 JSON 檔（如 `claims.json`）在首次啟動時會一次性遷移至 SQLite。
+
+### 日誌
+
+後端日誌輸出至 stdout（pino，正式環境為 JSON）。使用 `docker compose logs -f backend` 查看，不寫入檔案。
+
 ### 健康檢查
 
-在伺服器上執行：`docker exec qbit-frontend curl -s http://backend:3001/health`。
+`GET /health` 回傳伺服器狀態（uptime、裝置、認領、線上用戶、素材庫數量）。使用 `?format=json` 取得 JSON。在伺服器上執行：`docker exec qbit-frontend curl -s http://backend:3001/health`。
 
 ### GitHub Actions CI/CD
 

@@ -278,15 +278,16 @@ Internet
         |     |-- Serves React SPA
         |     |-- Proxies /api/, /auth/, /socket.io/, /device to backend
         |
-        +-- backend (Node.js, port 3001)
+        +-- backend (Node.js, port 3001 + 3002)
               |-- REST API (devices, poke, library, claims)
               |-- Google OAuth (Passport.js)
               |-- Socket.io (real-time frontend updates)
               |-- WebSocket /device (ESP32 device connections)
-              |-- Persistent storage volume (/data)
+              |-- Admin UI on port 3002 (sessions, users, devices, bans)
+              |-- SQLite DB + files in /data (volume)
 ```
 
-Only the frontend container exposes a port to the host. The backend communicates with the frontend container via the Docker internal network. External traffic reaches the services through your reverse proxy or Cloudflare Tunnel.
+Only the frontend container exposes port 80 (mapped to host 3000) to the internet. The backend listens on 3001 (API) and 3002 (admin); restrict port 3002 to internal/VPN. Backend storage: SQLite database `qbit.db`, library files under `/data/files/`, and optional `/data/secrets.json` for auto-generated session and health secrets.
 
 </details>
 
@@ -304,30 +305,24 @@ cp .env.example .env
 | `GOOGLE_CLIENT_ID` | OAuth 2.0 client ID from Google Cloud Console |
 | `GOOGLE_CLIENT_SECRET` | OAuth 2.0 client secret |
 | `GOOGLE_CALLBACK_URL` | OAuth callback URL, e.g. `https://yourdomain.com/auth/google/callback` |
-| `SESSION_SECRET` | Random string (at least 32 chars) for session encryption |
 | `COOKIE_DOMAIN` | Parent domain for cookies, e.g. `.yourdomain.com` |
 | `FRONTEND_URL` | Full frontend URL for CORS, e.g. `https://yourdomain.com` |
+| `DEVICE_API_KEY` | Shared secret with ESP32 firmware. Must match `WS_API_KEY` in firmware. |
+| `MAX_DEVICE_CONNECTIONS` | Max device WebSocket connections (default: 100) |
+| `ADMIN_USERNAME` | Admin UI login (1–64 chars). Empty = no admin login. |
+| `ADMIN_PASSWORD` | Admin UI password (8–128 chars). |
 
-| Variable | Description |
-|---|---|
-| `DEVICE_API_KEY` | Shared secret between backend and ESP32 firmware. Must match `WS_API_KEY` in firmware. |
-| `MAX_DEVICE_CONNECTIONS` | Max simultaneous device WebSocket connections (default: 100) |
+Optional (auto-generated and stored in `/data/secrets.json` if not set): `SESSION_SECRET`, `ADMIN_SESSION_SECRET`, `HEALTH_SECRET`.
 
-| Variable | Description |
-|---|---|
-| `ADMIN_USERNAME` | Admin login username (1–64 chars). Leave empty to disable admin auth. |
-| `ADMIN_PASSWORD` | Admin login password (8–128 chars). |
-| `ADMIN_SESSION_SECRET` | Secret for signing admin session cookie. Defaults to `SESSION_SECRET` if unset. |
-
-Generate secure random values (use for SESSION_SECRET, DEVICE_API_KEY, ADMIN_SESSION_SECRET, etc.):
+Generate secure random values (e.g. for `DEVICE_API_KEY`):
 
 ```bash
 openssl rand -hex 32
 ```
 
-**Passwords with special characters:** Use the `.env` file and wrap values in double quotes. Escape backslash `\` and double quote `"` inside the value (e.g. `ADMIN_PASSWORD="my\"pass"`). Avoid single quotes in the shell when exporting.
+**Passwords with special characters:** Use the `.env` file and wrap values in double quotes. Escape `\` and `"` inside (e.g. `ADMIN_PASSWORD="my\"pass"`).
 
-The `DEVICE_API_KEY` value must match the `WS_API_KEY` compiled into the firmware. When using GitHub Actions CI, this is injected automatically via the `QBIT_WS_API_KEY` repository secret.
+For CI builds, set the `QBIT_WS_API_KEY` repository secret to the same value as `DEVICE_API_KEY`; it is injected into the firmware at build time.
 
 ### Local Development
 
@@ -340,8 +335,9 @@ docker compose -f docker-compose.dev.yml up --build
 |---|---|
 | Frontend | http://localhost:3000 |
 | Backend API | http://localhost:3001 |
+| Health | http://localhost:3001/health |
 
-For Google OAuth to work locally, add `http://localhost:3000/auth/google/callback` to the Authorized Redirect URIs in Google Cloud Console.
+For Google OAuth locally, add `http://localhost:3000/auth/google/callback` to Authorized Redirect URIs in Google Cloud Console.
 
 ### Production Deployment
 
@@ -359,9 +355,17 @@ docker compose ps             # both containers should be running
 docker compose logs backend   # should show "QBIT backend listening on port 3001"
 ```
 
+### Data storage
+
+All persistent data is in the `qbit-data` volume (path `/data` inside the backend container): SQLite database `qbit.db` (sessions, users, claims, bans, library metadata), uploaded library files in `files/`, and `secrets.json` for auto-generated secrets. Legacy JSON files (e.g. `claims.json`) are migrated once to SQLite on first run.
+
+### Logs
+
+The backend logs to stdout (pino, JSON in production). View with `docker compose logs -f backend`. No log files are written.
+
 ### Health check
 
-From the server: `docker exec qbit-frontend curl -s http://backend:3001/health`.
+`GET /health` returns server status (uptime, devices, claims, online users, library count). Use `?format=json` for JSON. From the server: `docker exec qbit-frontend curl -s http://backend:3001/health`.
 
 ### GitHub Actions CI/CD
 
