@@ -284,8 +284,13 @@ export default function App() {
     [refresh, handleUnauthorized]
   );
 
-  // Collapsible section state
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Collapsible section state (all collapsed by default except sessions)
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
+    users: true,
+    claims: true,
+    sessions: false,
+    devices: true,
+  });
   const toggle = useCallback((key: string) => {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
   }, []);
@@ -297,11 +302,19 @@ export default function App() {
     return m;
   }, [users]);
 
-  const deviceMap = useMemo(() => {
-    const m = new Map<string, Device>();
-    devices.forEach((d) => m.set(d.id, d));
+  // Build a device name map from both online devices AND claims
+  const deviceNameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    // Online devices (current name)
+    devices.forEach((d) => m.set(d.id, d.name));
+    // Claims (device name at claim time, fallback for offline devices)
+    claims.forEach((c) => {
+      if (c.deviceName && !m.has(c.deviceId)) {
+        m.set(c.deviceId, c.deviceName);
+      }
+    });
     return m;
-  }, [devices]);
+  }, [devices, claims]);
 
   return (
     <div className="app">
@@ -460,11 +473,11 @@ export default function App() {
                 </div>
               ))}
               {(bans.deviceIds ?? []).map((id) => {
-                const d = deviceMap.get(id);
+                const dName = deviceNameMap.get(id);
                 return (
                   <div key={`d-${id}`} className="ban-item">
                     <span>
-                      Device: {d ? <strong>{d.name}</strong> : null}
+                      Device: {dName ? <strong>{dName}</strong> : null}
                       {' '}<code>{id}</code>
                     </span>
                     <button className="btn btn-ghost" onClick={() => handleUnbanDevice(id)}>Unban</button>
@@ -590,95 +603,62 @@ export default function App() {
             </div>
           </div>
           {!collapsed.sessions && (
-            <>
-              {/* Desktop: table layout */}
-              <div className="admin-table-wrap admin-table-fixed admin-hide-mobile">
-                <table className="admin-table">
-                  <thead>
+            <div className="admin-table-wrap admin-table-fixed">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>User ID</th>
+                    <th>IP</th>
+                    <th>Connected</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessions.length === 0 && !loading && (
                     <tr>
-                      <th></th>
-                      <th>Name</th>
-                      <th>Email</th>
-                      <th>User ID</th>
-                      <th>IP</th>
-                      <th>Connected</th>
-                      <th>Actions</th>
+                      <td colSpan={7} className="empty-msg">No sessions</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {sessions.length === 0 && !loading && (
-                      <tr>
-                        <td colSpan={7} className="empty-msg">No sessions</td>
-                      </tr>
-                    )}
-                    {sessions.map((s) => (
-                      <tr key={s.socketId}>
-                        <td>
-                          {s.avatar ? (
-                            <img
-                              src={s.avatar}
-                              alt=""
-                              className="admin-table-avatar"
-                              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                            />
-                          ) : (
-                            <span className="admin-avatar-placeholder admin-table-avatar-placeholder" />
-                          )}
-                        </td>
-                        <td>{s.displayName}</td>
-                        <td>{s.email}</td>
-                        <td><code style={{ fontSize: '0.85em' }}>{s.userId}</code></td>
-                        <td>{s.ip}</td>
-                        <td>{new Date(s.connectedAt).toLocaleString()}</td>
-                        <td>
-                          <div className="admin-action-btns">
-                            <button
-                              className="btn btn-danger"
-                              onClick={() => handleBanSessionUser(s.userId)}
-                            >
-                              Ban user
-                            </button>
-                            <button className="btn btn-ghost" onClick={() => handleBanSessionIp(s.ip)}>
-                              Ban IP
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {/* Mobile: card layout */}
-              <div className="admin-card-list admin-show-mobile">
-                {sessions.length === 0 && !loading && (
-                  <div className="empty-msg">No sessions</div>
-                )}
-                {sessions.map((s) => (
-                  <div key={s.socketId} className="admin-card">
-                    <div className="admin-card-header">
-                      {s.avatar ? (
-                        <img src={s.avatar} alt="" className="admin-avatar" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                      ) : (
-                        <span className="admin-avatar-placeholder" />
-                      )}
-                      <div className="admin-card-title">
-                        <span className="admin-user-name">{s.displayName}</span>
-                        <span className="admin-user-email">{s.email}</span>
-                      </div>
-                    </div>
-                    <div className="admin-card-details">
-                      <div className="admin-card-row"><span className="admin-card-label">User ID</span><code>{s.userId}</code></div>
-                      <div className="admin-card-row"><span className="admin-card-label">IP</span><span>{s.ip}</span></div>
-                      <div className="admin-card-row"><span className="admin-card-label">Connected</span><span>{new Date(s.connectedAt).toLocaleString()}</span></div>
-                    </div>
-                    <div className="admin-card-actions">
-                      <button className="btn btn-danger" onClick={() => handleBanSessionUser(s.userId)}>Ban user</button>
-                      <button className="btn btn-ghost" onClick={() => handleBanSessionIp(s.ip)}>Ban IP</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
+                  )}
+                  {sessions.map((s) => (
+                    <tr key={s.socketId}>
+                      <td>
+                        {s.avatar ? (
+                          <img
+                            src={s.avatar}
+                            alt=""
+                            className="admin-table-avatar"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          />
+                        ) : (
+                          <span className="admin-avatar-placeholder admin-table-avatar-placeholder" />
+                        )}
+                      </td>
+                      <td>{s.displayName}</td>
+                      <td>{s.email}</td>
+                      <td><code style={{ fontSize: '0.85em' }}>{s.userId}</code></td>
+                      <td>{s.ip}</td>
+                      <td>{new Date(s.connectedAt).toLocaleString()}</td>
+                      <td>
+                        <div className="admin-action-btns">
+                          <button
+                            className="btn btn-danger"
+                            onClick={() => handleBanSessionUser(s.userId)}
+                          >
+                            Ban user
+                          </button>
+                          <button className="btn btn-ghost" onClick={() => handleBanSessionIp(s.ip)}>
+                            Ban IP
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
 
@@ -697,71 +677,43 @@ export default function App() {
             </div>
           </div>
           {!collapsed.devices && (
-            <>
-              {/* Desktop: table layout */}
-              <div className="admin-table-wrap admin-table-fixed admin-hide-mobile">
-                <table className="admin-table">
-                  <thead>
+            <div className="admin-table-wrap admin-table-fixed">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Local IP</th>
+                    <th>Public IP</th>
+                    <th>Version</th>
+                    <th>Connected</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {devices.length === 0 && !loading && (
                     <tr>
-                      <th>ID</th>
-                      <th>Name</th>
-                      <th>Local IP</th>
-                      <th>Public IP</th>
-                      <th>Version</th>
-                      <th>Connected</th>
-                      <th>Actions</th>
+                      <td colSpan={7} className="empty-msg">No devices</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {devices.length === 0 && !loading && (
-                      <tr>
-                        <td colSpan={7} className="empty-msg">No devices</td>
-                      </tr>
-                    )}
-                    {devices.map((d) => (
-                      <tr key={d.id}>
-                        <td><code style={{ fontSize: '0.85em' }}>{d.id}</code></td>
-                        <td>{d.name}</td>
-                        <td>{d.ip}</td>
-                        <td>{d.publicIp || '-'}</td>
-                        <td>{d.version}</td>
-                        <td>{new Date(d.connectedAt).toLocaleString()}</td>
-                        <td>
-                          <button className="btn btn-danger" onClick={() => handleBanDevice(d.id)}>
-                            Ban device
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {/* Mobile: card layout */}
-              <div className="admin-card-list admin-show-mobile">
-                {devices.length === 0 && !loading && (
-                  <div className="empty-msg">No devices</div>
-                )}
-                {devices.map((d) => (
-                  <div key={d.id} className="admin-card">
-                    <div className="admin-card-header">
-                      <div className="admin-card-title">
-                        <span className="admin-user-name">{d.name}</span>
-                        <code style={{ fontSize: '0.8em' }}>{d.id}</code>
-                      </div>
-                    </div>
-                    <div className="admin-card-details">
-                      <div className="admin-card-row"><span className="admin-card-label">Local IP</span><span>{d.ip}</span></div>
-                      <div className="admin-card-row"><span className="admin-card-label">Public IP</span><span>{d.publicIp || '-'}</span></div>
-                      <div className="admin-card-row"><span className="admin-card-label">Version</span><span>{d.version}</span></div>
-                      <div className="admin-card-row"><span className="admin-card-label">Connected</span><span>{new Date(d.connectedAt).toLocaleString()}</span></div>
-                    </div>
-                    <div className="admin-card-actions">
-                      <button className="btn btn-danger" onClick={() => handleBanDevice(d.id)}>Ban device</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
+                  )}
+                  {devices.map((d) => (
+                    <tr key={d.id}>
+                      <td><code style={{ fontSize: '0.85em' }}>{d.id}</code></td>
+                      <td>{d.name}</td>
+                      <td>{d.ip}</td>
+                      <td>{d.publicIp || '-'}</td>
+                      <td>{d.version}</td>
+                      <td>{new Date(d.connectedAt).toLocaleString()}</td>
+                      <td>
+                        <button className="btn btn-danger" onClick={() => handleBanDevice(d.id)}>
+                          Ban device
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </section>
       </main>

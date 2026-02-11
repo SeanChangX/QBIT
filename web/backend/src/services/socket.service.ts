@@ -126,8 +126,17 @@ export function setupSocketIo(httpServer: HttpServer, sessionMiddleware: Request
 
     const req = socket.request as IncomingMessage;
     const clientIp = deviceService.extractPublicIp(req);
-    const passportUser = (socket.request as unknown as Record<string, unknown> & { session?: { passport?: { user?: AppUser } } })
-      ?.session?.passport?.user as AppUser | undefined;
+
+    // Session stores only the user ID (string) after the serializeUser security fix.
+    // Passport's deserializeUser does NOT run for socket.io (only sessionMiddleware does),
+    // so we must manually look up the full user from the database.
+    const sessionData = (socket.request as unknown as Record<string, unknown> & { session?: { passport?: { user?: string } } })
+      ?.session?.passport?.user;
+    const passportUser: AppUser | undefined = typeof sessionData === 'string'
+      ? userService.getUserById(sessionData) ?? undefined
+      : typeof sessionData === 'object' && sessionData && 'id' in (sessionData as Record<string, unknown>)
+        ? sessionData as unknown as AppUser
+        : undefined;
 
     if (passportUser && passportUser.id) {
       if (isBanned(passportUser.id, clientIp)) {

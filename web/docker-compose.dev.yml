@@ -15,6 +15,7 @@ services:
       - "3001:3001"
       - "3002:3002"
     environment:
+      - NODE_ENV=development
       - PORT=3001
       - ADMIN_PORT=3002
       - ADMIN_HOST=0.0.0.0
