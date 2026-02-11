@@ -18,13 +18,13 @@ export const helmetMiddleware = helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", 'https://static.cloudflareinsights.com'],
+      scriptSrc: ["'self'", "'unsafe-inline'", 'https://static.cloudflareinsights.com'],
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       imgSrc: ["'self'", 'data:', 'https://*.googleusercontent.com'],
       connectSrc: ["'self'", 'wss:', 'ws:', 'https://cloudflareinsights.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       objectSrc: ["'none'"],
-      frameAncestors: ["'none'"],
+      frameAncestors: ["'self'"],
     },
   },
   crossOriginEmbedderPolicy: false, // avoid breaking Google avatar images

@@ -98,6 +98,19 @@ export function disconnectUserSockets(userId: string): void {
   broadcastOnlineUsers();
 }
 
+export function disconnectUserSocketsByIp(ip: string): number {
+  const toDisconnect = Array.from(onlineUsers.entries())
+    .filter(([, u]) => u.ip === ip)
+    .map(([sid]) => sid);
+  for (const sid of toDisconnect) {
+    const s = io.sockets.sockets.get(sid);
+    if (s) s.disconnect(true);
+    onlineUsers.delete(sid);
+  }
+  if (toDisconnect.length > 0) broadcastOnlineUsers();
+  return toDisconnect.length;
+}
+
 export function getIo(): SocketIOServer {
   return io;
 }

@@ -144,6 +144,11 @@ router.post('/ban', adminAuth, validate(adminBanSchema), (req, res) => {
   banService.addBan(userId, ip, deviceId);
   if (userId) socketService.disconnectUserSockets(userId);
   if (deviceId) deviceService.disconnectDevice(deviceId);
+  if (ip) {
+    const disconnectedUsers = socketService.disconnectUserSocketsByIp(ip);
+    const disconnectedDevices = deviceService.disconnectDevicesByIp(ip);
+    logger.info({ ip, disconnectedUsers, disconnectedDevices }, 'IP ban: disconnected existing connections');
+  }
   logger.info({ userId, ip, deviceId }, 'Ban added');
   res.json({ ok: true });
 });

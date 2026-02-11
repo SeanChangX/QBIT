@@ -6,7 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import { Server as HttpServer } from 'http';
 import { DEVICE_API_KEY, MAX_DEVICE_CONNECTIONS } from '../config';
-import { isBannedDevice } from './ban.service';
+import { isBannedDevice, isBanned } from './ban.service';
 import * as claimService from './claim.service';
 import logger from '../logger';
 import type { DeviceState, PendingClaim, ClaimInfo } from '../types';
@@ -71,6 +71,20 @@ export function disconnectDevice(deviceId: string): void {
     devices.delete(deviceId);
     broadcastDevices();
   }
+}
+
+export function disconnectDevicesByIp(ip: string): number {
+  const toDisconnect: string[] = [];
+  for (const [id, dev] of devices) {
+    if (dev.publicIp === ip) toDisconnect.push(id);
+  }
+  for (const id of toDisconnect) {
+    const dev = devices.get(id);
+    if (dev) dev.ws.close();
+    devices.delete(id);
+  }
+  if (toDisconnect.length > 0) broadcastDevices();
+  return toDisconnect.length;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,12 +180,12 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
         if (msg.type === 'device.register' && msg.id) {
           deviceId = msg.id;
 
-          if (isBannedDevice(msg.id)) {
+          if (isBannedDevice(msg.id) || isBanned(undefined, publicIp)) {
             const now = Date.now();
             const last = bannedDeviceLogLast.get(msg.id) ?? 0;
             if (now - last >= BANNED_LOG_INTERVAL_MS) {
               bannedDeviceLogLast.set(msg.id, now);
-              logger.warn({ deviceId: msg.id }, 'Device WS rejected: banned');
+              logger.warn({ deviceId: msg.id, publicIp }, 'Device WS rejected: banned (device or IP)');
             }
             ws.close();
             return;
