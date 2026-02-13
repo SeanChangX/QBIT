@@ -1174,13 +1174,21 @@ void setup() {
     // Determine protocol based on port
     String wsUrl;
 #if WS_PORT == 443
+#ifdef WS_CA_CERT
+    _wsClient.setCACert(WS_CA_CERT);
+#else
+    // Fallback for servers with public certs but no bundled CA.
+    _wsClient.setInsecure();
+#endif
     wsUrl = "wss://" + String(WS_HOST) + String(WS_PATH);
 #else
     wsUrl = "ws://" + String(WS_HOST) + ":" + String(WS_PORT) + String(WS_PATH);
 #endif
     
-    _wsClient.connect(wsUrl);
     Serial.printf("WebSocket connecting to: %s\n", wsUrl.c_str());
+    if (!_wsClient.connect(wsUrl)) {
+        Serial.println("[WS] Connect failed");
+    }
 
     // -- Local MQTT (if configured) --
     if (_mqttEnabled && _mqttHost.length() > 0) {
