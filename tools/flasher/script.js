@@ -1,6 +1,5 @@
 // QBIT Firmware Flasher
 // Flashing handled by esp-web-tools <esp-web-install-button> via manifest.json
-// Serial monitor uses Web Serial API directly
 
 // UI elements
 const ui = {
@@ -10,20 +9,9 @@ const ui = {
     firmwareSizeEl: document.getElementById('firmware-size'),
     firmwareMd5El: document.getElementById('firmware-md5'),
     refreshBtn: document.getElementById('refresh-btn'),
-    monitorConnectBtn: document.getElementById('monitor-connect-btn'),
-    monitorDisconnectBtn: document.getElementById('monitor-disconnect-btn'),
-    monitorClearBtn: document.getElementById('monitor-clear-btn'),
-    monitorNotConnected: document.getElementById('monitor-not-connected'),
-    monitorConnected: document.getElementById('monitor-connected'),
-    monitorOutput: document.getElementById('monitor-output'),
-    monitorSendInput: document.getElementById('monitor-send-input'),
-    monitorSendBtn: document.getElementById('monitor-send-btn'),
 };
 
 let releaseData = null;
-let monitorPort = null;
-let monitorReader = null;
-let monitorReadAborted = false;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -33,12 +21,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadLatestVersion();
     ui.refreshBtn.addEventListener('click', loadLatestVersion);
-
-    ui.monitorConnectBtn.addEventListener('click', monitorConnect);
-    ui.monitorDisconnectBtn.addEventListener('click', monitorDisconnect);
-    ui.monitorClearBtn.addEventListener('click', () => { ui.monitorOutput.textContent = ''; });
-    ui.monitorSendBtn.addEventListener('click', monitorSend);
-    ui.monitorSendInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') monitorSend(); });
 });
 
 function toggleTheme() {
@@ -72,70 +54,6 @@ async function loadLatestVersion() {
         ui.versionEl.textContent = '[ERR] Load failed';
     } finally {
         ui.refreshBtn.disabled = false;
-    }
-}
-
-// Serial Monitor
-function setMonitorUI(connected) {
-    ui.monitorNotConnected.style.display = connected ? 'none' : '';
-    ui.monitorConnected.style.display = connected ? 'block' : 'none';
-}
-
-async function monitorConnect() {
-    try {
-        const port = await navigator.serial.requestPort();
-        await port.open({ baudRate: 115200 });
-        monitorPort = port;
-        monitorReadAborted = false;
-        setMonitorUI(true);
-        appendMonitor('Connected.\n');
-        readSerialLoop();
-    } catch (e) {
-        if (e.name !== 'NotFoundError') alert('Connect failed: ' + e.message);
-    }
-}
-
-async function monitorDisconnect() {
-    monitorReadAborted = true;
-    if (monitorReader) try { await monitorReader.cancel(); } catch (_) {}
-    if (monitorPort) try { await monitorPort.close(); } catch (_) {}
-    monitorPort = null;
-    monitorReader = null;
-    setMonitorUI(false);
-    appendMonitor('Disconnected.\n');
-}
-
-async function readSerialLoop() {
-    if (!monitorPort || monitorReadAborted) return;
-    const decoder = new TextDecoder();
-    try {
-        monitorReader = monitorPort.readable.getReader();
-        while (!monitorReadAborted) {
-            const { value, done } = await monitorReader.read();
-            if (done) break;
-            if (value && value.length) appendMonitor(decoder.decode(value));
-        }
-    } catch (e) {
-        if (!monitorReadAborted) appendMonitor('\nRead error: ' + e.message + '\n');
-    } finally {
-        try { if (monitorReader) await monitorReader.releaseLock(); } catch (_) {}
-    }
-}
-
-function appendMonitor(text) {
-    ui.monitorOutput.textContent += text;
-    ui.monitorOutput.scrollTop = ui.monitorOutput.scrollHeight;
-}
-
-async function monitorSend() {
-    if (!monitorPort || !monitorPort.writable) return;
-    const line = ui.monitorSendInput.value + '\n';
-    ui.monitorSendInput.value = '';
-    const writer = monitorPort.writable.getWriter();
-    try {
-        await writer.write(new TextEncoder().encode(line));
-    } finally {
-        writer.releaseLock();
     }
 }
 
