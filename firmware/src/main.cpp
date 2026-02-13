@@ -962,7 +962,7 @@ static void wsSendClaimConfirm() {
     doc["type"] = "claim_confirm";
     String msg;
     serializeJson(doc, msg);
-    _wsClient.sendTXT(msg);
+    _wsClient.send(msg);
     Serial.println("Claim confirmed");
 }
 
@@ -972,7 +972,7 @@ static void wsSendClaimReject() {
     doc["type"] = "claim_reject";
     String msg;
     serializeJson(doc, msg);
-    _wsClient.sendTXT(msg);
+    _wsClient.send(msg);
     Serial.println("Claim rejected (timeout)");
 }
 
@@ -994,11 +994,13 @@ static void wsSendDeviceInfo() {
 
     String msg;
     serializeJson(doc, msg);
-    _wsClient.sendTXT(msg);
+    _wsClient.send(msg);
 }
 
 // WebSocket event handler (called by the WebSockets library).
-static void wsEvent(WebsocketsEvent event, String data) {
+static void wsEvent(WebsocketsClient &client, WebsocketsEvent event, WSInterfaceString data) {
+    (void)client;
+    (void)data;
     switch (event) {
         case WebsocketsEvent::ConnectionOpened:
             _wsConnected = true;
@@ -1010,45 +1012,48 @@ static void wsEvent(WebsocketsEvent event, String data) {
             _wsConnected = false;
             Serial.println("[WS] Disconnected from backend");
             break;
-
-        case WebsocketsEvent::GotMessage:
-        {
-            JsonDocument doc;
-            if (deserializeJson(doc, data)) break;
-
-            const char *msgType = doc["type"];
-            if (!msgType) break;
-
-            if (strcmp(msgType, "poke") == 0) {
-                const char *sender = doc["sender"] | "Someone";
-                const char *text   = doc["text"]   | "Poke!";
-
-                // Check for bitmap data (multi-language rendering)
-                if (doc["senderBitmap"].is<const char*>() && doc["textBitmap"].is<const char*>()) {
-                    const char *senderBmp = doc["senderBitmap"];
-                    uint16_t senderW      = doc["senderBitmapWidth"] | 0;
-                    const char *textBmp   = doc["textBitmap"];
-                    uint16_t textW        = doc["textBitmapWidth"] | 0;
-
-                    if (senderW > 0 && textW > 0) {
-                        handlePokeBitmap(sender, text, senderBmp, senderW, textBmp, textW);
-                    } else {
-                        handlePoke(sender, text);
-                    }
-                } else {
-                    handlePoke(sender, text);
-                }
-            }
-
-            if (strcmp(msgType, "claim_request") == 0) {
-                const char *userName = doc["userName"] | "Unknown";
-                handleClaimRequest(userName);
-            }
+        case WebsocketsEvent::GotPing:
+        case WebsocketsEvent::GotPong:
             break;
+    }
+}
+
+// WebSocket message handler (called by the WebSockets library).
+static void wsMessage(WebsocketsClient &client, WebsocketsMessage message) {
+    (void)client;
+    if (!message.isText()) return;
+
+    String data = message.data();
+    JsonDocument doc;
+    if (deserializeJson(doc, data)) return;
+
+    const char *msgType = doc["type"];
+    if (!msgType) return;
+
+    if (strcmp(msgType, "poke") == 0) {
+        const char *sender = doc["sender"] | "Someone";
+        const char *text   = doc["text"]   | "Poke!";
+
+        // Check for bitmap data (multi-language rendering)
+        if (doc["senderBitmap"].is<const char*>() && doc["textBitmap"].is<const char*>()) {
+            const char *senderBmp = doc["senderBitmap"];
+            uint16_t senderW      = doc["senderBitmapWidth"] | 0;
+            const char *textBmp   = doc["textBitmap"];
+            uint16_t textW        = doc["textBitmapWidth"] | 0;
+
+            if (senderW > 0 && textW > 0) {
+                handlePokeBitmap(sender, text, senderBmp, senderW, textBmp, textW);
+            } else {
+                handlePoke(sender, text);
+            }
+        } else {
+            handlePoke(sender, text);
         }
+    }
 
-        default:
-            break;
+    if (strcmp(msgType, "claim_request") == 0) {
+        const char *userName = doc["userName"] | "Unknown";
+        handleClaimRequest(userName);
     }
 }
 
@@ -1164,6 +1169,7 @@ void setup() {
     // Connect to WSS endpoint without query parameters.
     _wsClient.addHeader("Authorization", "Bearer " + String(WS_API_KEY));
     _wsClient.onEvent(wsEvent);
+    _wsClient.onMessage(wsMessage);
     
     // Determine protocol based on port
     String wsUrl;
