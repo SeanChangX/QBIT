@@ -57,23 +57,25 @@ export default function NetworkGraph({
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Central hub node
-    nodesRef.current.add({
-      id: HUB_ID,
-      label: '',
-      shape: 'hexagon',
-      size: 45,
-      color: {
-        border: '#d32f2f',
-        background: '#1a1a1a',
-        highlight: { border: '#ff4d4d', background: '#222' },
-        hover: { border: '#ff4d4d', background: '#222' },
-      },
-      font: { color: '#fff', size: 16, bold: { color: '#fff' } },
-      fixed: true,
-      x: 0,
-      y: 0,
-    });
+    // Central hub node (guard against StrictMode double-mount in dev)
+    if (!nodesRef.current.get(HUB_ID)) {
+      nodesRef.current.add({
+        id: HUB_ID,
+        label: '',
+        shape: 'hexagon',
+        size: 45,
+        color: {
+          border: '#d32f2f',
+          background: '#1a1a1a',
+          highlight: { border: '#ff4d4d', background: '#222' },
+          hover: { border: '#ff4d4d', background: '#222' },
+        },
+        font: { color: '#fff', size: 16, bold: { color: '#fff' } },
+        fixed: true,
+        x: 0,
+        y: 0,
+      });
+    }
 
     networkRef.current = new Network(
       containerRef.current,

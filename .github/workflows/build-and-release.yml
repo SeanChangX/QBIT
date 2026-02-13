@@ -32,25 +32,23 @@ jobs:
           VERSION="${VERSION#v}"
           echo "QBIT_VERSION=$VERSION" >> "$GITHUB_ENV"
       
-      - name: Inject build secrets
+      - name: Build firmware
         env:
           QBIT_WS_HOST: ${{ secrets.QBIT_WS_HOST }}
           QBIT_WS_API_KEY: ${{ secrets.QBIT_WS_API_KEY }}
         run: |
-          SRC="firmware/src/main.cpp"
+          cd firmware
+          # Inject production WebSocket config via build flags
+          FLAGS=""
           if [ -n "$QBIT_WS_HOST" ]; then
-            sed -i "s|^#define WS_HOST .*|#define WS_HOST         \"${QBIT_WS_HOST}\"|" "$SRC"
-            sed -i "s|^#define WS_PORT .*|#define WS_PORT         443|" "$SRC"
-            echo "Injected WS_HOST=${QBIT_WS_HOST}, WS_PORT=443"
+            FLAGS="$FLAGS -DWS_HOST=\"$QBIT_WS_HOST\" -DWS_PORT=443"
+            echo "Injected WS_HOST=$QBIT_WS_HOST, WS_PORT=443"
           fi
           if [ -n "$QBIT_WS_API_KEY" ]; then
-            sed -i "s|^#define WS_API_KEY .*|#define WS_API_KEY      \"${QBIT_WS_API_KEY}\"|" "$SRC"
+            FLAGS="$FLAGS -DWS_API_KEY=\"$QBIT_WS_API_KEY\""
             echo "Injected WS_API_KEY (hidden)"
           fi
-
-      - name: Build firmware
-        run: |
-          cd firmware
+          export PLATFORMIO_BUILD_FLAGS="$FLAGS"
           platformio run -e seeed_xiao_esp32c3
           platformio run -e seeed_xiao_esp32c3 -t buildfs
       

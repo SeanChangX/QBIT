@@ -982,14 +982,30 @@ static void wsSendClaimReject() {
 //  WebSocket helpers
 // ==========================================================================
 
+// Connect to backend WebSocket.
+// Port 443 → TLS (connectSecure), other ports → plain (connect).
+// The pre-build script (scripts/patch_arduinowebsockets.py) patches the
+// ArduinoWebsockets library to support setInsecure() on ESP32 and increase
+// the header-read timeout for Cloudflare's large response headers.
 static bool wsConnect() {
     if (_wsUrl.length() == 0) return false;
-    Serial.printf("WebSocket connecting to: %s\n", _wsUrl.c_str());
-    if (!_wsClient.connect(_wsUrl)) {
-        Serial.println("[WS] Connect failed");
-        return false;
+
+    // Close any existing connection
+    if (_wsClient.available()) {
+        _wsClient.close();
+        delay(100);
     }
-    return true;
+
+    bool ok;
+    if (WS_PORT == 443) {
+        ok = _wsClient.connectSecure(WS_HOST, WS_PORT, WS_PATH);
+    } else {
+        ok = _wsClient.connect(WS_HOST, WS_PORT, WS_PATH);
+    }
+    if (!ok) {
+        Serial.println("[WS] Connection failed");
+    }
+    return ok;
 }
 
 // Send (or re-send) device info to the backend.
@@ -1012,19 +1028,19 @@ static void wsSendDeviceInfo() {
 // WebSocket event handler (called by the WebSockets library).
 static void wsEvent(WebsocketsClient &client, WebsocketsEvent event, WSInterfaceString data) {
     (void)client;
-    (void)data;
     switch (event) {
         case WebsocketsEvent::ConnectionOpened:
             _wsConnected = true;
-            Serial.println("[WS] Connected to backend");
+            Serial.println("[WS] ✓ Connected to backend");
             wsSendDeviceInfo();
             break;
 
         case WebsocketsEvent::ConnectionClosed:
             _wsConnected = false;
-            Serial.println("[WS] Disconnected from backend");
+            Serial.println("[WS] Disconnected");
             break;
         case WebsocketsEvent::GotPing:
+            break;
         case WebsocketsEvent::GotPong:
             break;
     }
@@ -1162,6 +1178,20 @@ void setup() {
         Serial.println("mDNS: http://qbit.local");
     }
 
+    // -- Sync time via NTP (required for TLS certificate validation) --
+    configTime(0, 0, "time.google.com", "time.cloudflare.com");
+    time_t now = time(nullptr);
+    int attempts = 0;
+    while (now < 24 * 3600 && attempts < 10) {
+        delay(1000);
+        now = time(nullptr);
+        attempts++;
+    }
+    if (now < 24 * 3600) {
+        Serial.println("[NTP] Time sync failed — TLS connections may break");
+    }
+    Serial.flush();
+
     // -- Show connection info --
     String ip = WiFi.localIP().toString();
     showText("[ Wi-Fi Connected ]",
@@ -1177,37 +1207,14 @@ void setup() {
     Serial.println("Web server started: http://qbit.local (" + ip + ")");
 
     // -- Connect to backend via WebSocket --
-    // API key is sent via Authorization header for security.
-    // Connect to WSS endpoint without query parameters.
+    // Authorization header carries the shared API key for device authentication.
     if (String(WS_API_KEY).length() > 0) {
         _wsClient.addHeader("Authorization", "Bearer " + String(WS_API_KEY));
     }
     _wsClient.onEvent(wsEvent);
     _wsClient.onMessage(wsMessage);
-    
-    // Determine protocol based on host/port.
-    // If WS_HOST already includes ws:// or wss://, use it as the base.
-    String wsUrl;
-    String host = String(WS_HOST);
-    bool hostHasScheme = host.startsWith("ws://") || host.startsWith("wss://");
-    bool useTls = host.startsWith("wss://") || (!hostHasScheme && (WS_PORT == 443));
-    if (useTls) {
-#ifdef WS_CA_CERT
-        _wsClient.setCACert(WS_CA_CERT);
-#else
-        // Fallback for servers with public certs but no bundled CA.
-        _wsClient.setInsecure();
-#endif
-    }
 
-    if (hostHasScheme) {
-        wsUrl = host + String(WS_PATH);
-    } else if (WS_PORT == 443) {
-        wsUrl = "wss://" + host + String(WS_PATH);
-    } else {
-        wsUrl = "ws://" + host + ":" + String(WS_PORT) + String(WS_PATH);
-    }
-    _wsUrl = wsUrl;
+    _wsUrl = String(WS_PORT == 443 ? "wss://" : "ws://") + WS_HOST + WS_PATH;
     _wsLastReconnect = 0;
     wsConnect();
 
