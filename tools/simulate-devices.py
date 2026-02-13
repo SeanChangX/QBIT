@@ -144,7 +144,7 @@ def main():
 
     for i in range(args.count):
         t = threading.Thread(target=device_thread,
-                     args=(i, url, stop_event, args.auto_claim, args.key),
+                             args=(i, url, stop_event, args.auto_claim, args.key),
                              daemon=True)
         t.start()
         threads.append(t)

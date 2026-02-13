@@ -39,13 +39,14 @@ jobs:
         run: |
           cd firmware
           # Inject production WebSocket config via build flags
+          # Inner \\\" produces literal \" so the C compiler sees a string literal.
           FLAGS=""
           if [ -n "$QBIT_WS_HOST" ]; then
-            FLAGS="$FLAGS -DWS_HOST=\"$QBIT_WS_HOST\" -DWS_PORT=443"
+            FLAGS="$FLAGS -DWS_HOST=\\\"$QBIT_WS_HOST\\\" -DWS_PORT=443"
             echo "Injected WS_HOST=$QBIT_WS_HOST, WS_PORT=443"
           fi
           if [ -n "$QBIT_WS_API_KEY" ]; then
-            FLAGS="$FLAGS -DWS_API_KEY=\"$QBIT_WS_API_KEY\""
+            FLAGS="$FLAGS -DWS_API_KEY=\\\"$QBIT_WS_API_KEY\\\""
             echo "Injected WS_API_KEY (hidden)"
           fi
           export PLATFORMIO_BUILD_FLAGS="$FLAGS"

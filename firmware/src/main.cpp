@@ -106,7 +106,6 @@ static const char BOOT_MELODY[] =
 using namespace websockets;
 static WebsocketsClient _wsClient;
 static bool             _wsConnected = false;
-static String           _wsUrl;
 static unsigned long    _wsLastReconnect = 0;
 
 // ==========================================================================
@@ -988,8 +987,6 @@ static void wsSendClaimReject() {
 // ArduinoWebsockets library to support setInsecure() on ESP32 and increase
 // the header-read timeout for Cloudflare's large response headers.
 static bool wsConnect() {
-    if (_wsUrl.length() == 0) return false;
-
     // Close any existing connection
     if (_wsClient.available()) {
         _wsClient.close();
@@ -1214,7 +1211,6 @@ void setup() {
     _wsClient.onEvent(wsEvent);
     _wsClient.onMessage(wsMessage);
 
-    _wsUrl = String(WS_PORT == 443 ? "wss://" : "ws://") + WS_HOST + WS_PATH;
     _wsLastReconnect = 0;
     wsConnect();
 
