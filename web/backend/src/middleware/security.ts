@@ -7,6 +7,9 @@ import { Request, Response, NextFunction } from 'express';
 import { FRONTEND_URL } from '../config';
 import logger from '../logger';
 
+// Avoid logging sensitive Authorization header
+const sensitiveHeaders = ['authorization', 'x-device-api-key'];
+
 // ---------------------------------------------------------------------------
 //  Helmet configuration
 // ---------------------------------------------------------------------------
@@ -14,6 +17,7 @@ import logger from '../logger';
 // Strict-Transport-Security, X-XSS-Protection, etc.
 // We customise CSP to allow Google avatar images and inline styles for React.
 
+// Helmet middleware with custom security headers
 export const helmetMiddleware = helmet({
   contentSecurityPolicy: {
     directives: {
@@ -25,10 +29,24 @@ export const helmetMiddleware = helmet({
       fontSrc: ["'self'", 'https://fonts.gstatic.com'],
       objectSrc: ["'none'"],
       frameAncestors: ["'self'"],
+      baseUri: ["'self'"],
     },
   },
   crossOriginEmbedderPolicy: false, // avoid breaking Google avatar images
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 });
+
+export function permissionsPolicyMiddleware(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  res.setHeader(
+    'Permissions-Policy',
+    'camera=(), microphone=(), geolocation=(), magnetometer=(), gyroscope=(), accelerometer=()'
+  );
+  next();
+}
 
 // ---------------------------------------------------------------------------
 //  CSRF origin-check middleware

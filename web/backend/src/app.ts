@@ -16,12 +16,13 @@ import {
 } from './config';
 import { SQLiteSessionStore } from './db';
 import { setupAuth } from './auth';
-import { helmetMiddleware, csrfOriginCheck } from './middleware/security';
+import { helmetMiddleware, permissionsPolicyMiddleware, csrfOriginCheck } from './middleware/security';
 import { errorHandler } from './middleware/errorHandler';
 import authRoutes from './routes/auth.routes';
 import deviceRoutes from './routes/device.routes';
 import libraryRoutes from './routes/library.routes';
 import healthRoutes from './routes/health.routes';
+import type { Request } from 'express';
 
 const app = express();
 
@@ -33,6 +34,7 @@ app.set('trust proxy', 1); // trust Cloudflare / reverse proxy
 
 // Security headers (helmet)
 app.use(helmetMiddleware);
+app.use(permissionsPolicyMiddleware);
 
 // CORS
 app.use(cors({ origin: FRONTEND_URL, credentials: true }));

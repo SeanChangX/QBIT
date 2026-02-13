@@ -144,8 +144,11 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
     const url = new URL(request.url || '/', `http://${request.headers.host}`);
 
     if (url.pathname === '/device') {
-      // --- Device API Key validation (reject if empty or mismatched) ---
-      const key = url.searchParams.get('key');
+      // --- Device API Key validation via Authorization header ---
+      // Header format: "Bearer <DEVICE_API_KEY>"
+      const authHeader = request.headers['authorization'] || '';
+      const key = authHeader.replace(/^Bearer\s+/i, '').trim();
+      
       if (!DEVICE_API_KEY || key !== DEVICE_API_KEY) {
         logger.warn({ ip: request.socket.remoteAddress }, 'Device WS rejected: invalid or missing API key');
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
@@ -174,6 +177,18 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
     const publicIp = extractPublicIp(request);
 
     ws.on('message', (raw) => {
+      const rawSize = (() => {
+        if (typeof raw === 'string') return Buffer.byteLength(raw);
+        if (Array.isArray(raw)) return raw.reduce((sum, part) => sum + part.length, 0);
+        if (raw instanceof ArrayBuffer) return raw.byteLength;
+        return raw.byteLength;
+      })();
+      // Limit message size to 1MB to prevent memory exhaustion
+      if (rawSize > 1024 * 1024) {
+        logger.warn({ deviceId, ip: publicIp }, 'Device WS message exceeds size limit (1MB)');
+        ws.close(1009, 'Message too large');
+        return;
+      }
       try {
         const msg = JSON.parse(raw.toString());
 

@@ -13,7 +13,7 @@
 #include <NonBlockingRtttl.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
-#include <WebSocketsClient.h>
+#include <ArduinoWebsockets.h>
 #include <PubSubClient.h>
 
 // Base64 decode helper (for bitmap poke)
@@ -26,6 +26,14 @@
 #include "sys_idle.h"
 #include "gif_player.h"
 #include "web_dashboard.h"
+
+#ifndef QBIT_VERSION
+#define QBIT_VERSION "dev-build"
+#endif
+
+static const char *kQbitVersion = (QBIT_VERSION[0] != '\0')
+                                 ? QBIT_VERSION
+                                 : "dev-build";
 
 // ==========================================================================
 //  Hardware pin definitions (configurable via web dashboard, stored in NVS)
@@ -95,7 +103,8 @@ static const char BOOT_MELODY[] =
 #endif
 #define WS_RECONNECT_MS 5000
 
-static WebSocketsClient _wsClient;
+using namespace websockets;
+static WebsocketsClient _wsClient;
 static bool             _wsConnected = false;
 
 // ==========================================================================
@@ -282,7 +291,7 @@ static void mqttPublishHADiscovery() {
     devBlock["name"]  = name;
     devBlock["mf"]    = "QBIT";
     devBlock["mdl"]   = "QBIT";
-    devBlock["sw"]    = "0.2.4";
+    devBlock["sw"]    = kQbitVersion;
 
     // --- Binary sensor: online/offline status ---
     {
@@ -981,7 +990,7 @@ static void wsSendDeviceInfo() {
     doc["id"]      = getDeviceId();
     doc["name"]    = _deviceName;
     doc["ip"]      = WiFi.localIP().toString();
-    doc["version"] = "0.2.4";
+    doc["version"] = kQbitVersion;
 
     String msg;
     serializeJson(doc, msg);
@@ -989,23 +998,23 @@ static void wsSendDeviceInfo() {
 }
 
 // WebSocket event handler (called by the WebSockets library).
-static void wsEvent(WStype_t type, uint8_t *payload, size_t length) {
-    switch (type) {
-        case WStype_DISCONNECTED:
-            _wsConnected = false;
-            Serial.println("[WS] Disconnected from backend");
-            break;
-
-        case WStype_CONNECTED:
+static void wsEvent(WebsocketsEvent event, String data) {
+    switch (event) {
+        case WebsocketsEvent::ConnectionOpened:
             _wsConnected = true;
             Serial.println("[WS] Connected to backend");
             wsSendDeviceInfo();
             break;
 
-        case WStype_TEXT:
+        case WebsocketsEvent::ConnectionClosed:
+            _wsConnected = false;
+            Serial.println("[WS] Disconnected from backend");
+            break;
+
+        case WebsocketsEvent::GotMessage:
         {
             JsonDocument doc;
-            if (deserializeJson(doc, payload, length)) break;
+            if (deserializeJson(doc, data)) break;
 
             const char *msgType = doc["type"];
             if (!msgType) break;
@@ -1151,15 +1160,21 @@ void setup() {
     Serial.println("Web server started: http://qbit.local (" + ip + ")");
 
     // -- Connect to backend via WebSocket --
-    // API key is sent as a query parameter for device authentication.
-    String wsPath = String(WS_PATH) + "?key=" + WS_API_KEY;
-#if WS_PORT == 443
-    _wsClient.beginSSL(WS_HOST, WS_PORT, wsPath.c_str());
-#else
-    _wsClient.begin(WS_HOST, WS_PORT, wsPath.c_str());
-#endif
+    // API key is sent via Authorization header for security.
+    // Connect to WSS endpoint without query parameters.
+    _wsClient.addHeader("Authorization", "Bearer " + String(WS_API_KEY));
     _wsClient.onEvent(wsEvent);
-    _wsClient.setReconnectInterval(WS_RECONNECT_MS);
+    
+    // Determine protocol based on port
+    String wsUrl;
+#if WS_PORT == 443
+    wsUrl = "wss://" + String(WS_HOST) + String(WS_PATH);
+#else
+    wsUrl = "ws://" + String(WS_HOST) + ":" + String(WS_PORT) + String(WS_PATH);
+#endif
+    
+    _wsClient.connect(wsUrl);
+    Serial.printf("WebSocket connecting to: %s\n", wsUrl.c_str());
 
     // -- Local MQTT (if configured) --
     if (_mqttEnabled && _mqttHost.length() > 0) {
@@ -1184,7 +1199,7 @@ static bool infoScreenShown = false;
 
 void loop() {
     NW.loop();
-    _wsClient.loop();
+    _wsClient.poll();  // Poll WebSocket for messages (replaces _wsClient.loop())
 
     // --- WiFi reconnection monitoring ---
     // If WiFi drops, wait for ESP32 auto-reconnect.  If it does not

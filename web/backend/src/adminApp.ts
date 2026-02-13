@@ -14,7 +14,7 @@ import {
   IS_LOCAL_DEV,
 } from './config';
 import { SQLiteSessionStore } from './db';
-import { helmetMiddleware } from './middleware/security';
+import { helmetMiddleware, permissionsPolicyMiddleware } from './middleware/security';
 import { errorHandler } from './middleware/errorHandler';
 import adminRoutes from './routes/admin.routes';
 import logger from './logger';
@@ -27,6 +27,7 @@ const adminApp = express();
 
 adminApp.set('trust proxy', 1);
 adminApp.use(helmetMiddleware);
+adminApp.use(permissionsPolicyMiddleware);
 adminApp.use(express.json());
 
 // ---------------------------------------------------------------------------
@@ -49,13 +50,7 @@ adminApp.use(
   })
 );
 
-// ---------------------------------------------------------------------------
-//  Startup warning if admin auth is disabled
-// ---------------------------------------------------------------------------
-
-if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
-  logger.warn('ADMIN_USERNAME / ADMIN_PASSWORD not set -- admin API is unprotected');
-}
+// ---------------------------------------------------------------------------\n//  Startup: admin credentials are auto-managed in config.ts\n// ---------------------------------------------------------------------------\n// If ADMIN_USERNAME/PASSWORD are set via environment, those are used.\n// Otherwise, random credentials are auto-generated on first startup and persisted.\n// Check logs for auto-generated credentials on first deployment.
 
 // ---------------------------------------------------------------------------
 //  Routes

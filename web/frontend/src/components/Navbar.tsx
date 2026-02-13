@@ -46,6 +46,9 @@ const TABS: { id: Page; label: string }[] = [
 export default function Navbar({ user, apiUrl, page, setPage }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0, visible: false });
 
   // Close menu on outside click
   useEffect(() => {
@@ -59,6 +62,34 @@ export default function Navbar({ user, apiUrl, page, setPage }: Props) {
     return () => document.removeEventListener('mousedown', handler);
   }, [menuOpen]);
 
+  useEffect(() => {
+    const updateIndicator = () => {
+      const container = tabsRef.current;
+      const activeIndex = Math.max(0, TABS.findIndex((tab) => tab.id === page));
+      const activeTab = tabRefs.current[activeIndex];
+      if (!container || !activeTab) return;
+      setIndicatorStyle({
+        left: activeTab.offsetLeft,
+        width: activeTab.offsetWidth,
+        visible: true,
+      });
+    };
+
+    updateIndicator();
+    window.addEventListener('resize', updateIndicator);
+    return () => window.removeEventListener('resize', updateIndicator);
+  }, [page]);
+
+  useEffect(() => {
+    const container = tabsRef.current;
+    const activeIndex = Math.max(0, TABS.findIndex((tab) => tab.id === page));
+    const activeTab = tabRefs.current[activeIndex];
+    if (!container || !activeTab) return;
+    requestAnimationFrame(() => {
+      activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    });
+  }, [page]);
+
   return (
     <nav className="navbar">
       <div className="navbar-brand">
@@ -66,10 +97,22 @@ export default function Navbar({ user, apiUrl, page, setPage }: Props) {
         <span className="brand-bit">BIT</span>
       </div>
 
-      <div className="nav-tabs">
-        {TABS.map((tab) => (
+      <div className="nav-tabs" ref={tabsRef}>
+        <span
+          className="nav-tab-indicator"
+          aria-hidden
+          style={{
+            width: `${indicatorStyle.width}px`,
+            transform: `translateX(${indicatorStyle.left}px)`,
+            opacity: indicatorStyle.visible ? 1 : 0,
+          }}
+        />
+        {TABS.map((tab, index) => (
           <button
             key={tab.id}
+            ref={(el) => {
+              tabRefs.current[index] = el;
+            }}
             className={`nav-tab${page === tab.id ? ' active' : ''}`}
             onClick={() => setPage(tab.id)}
           >

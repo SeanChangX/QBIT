@@ -20,7 +20,7 @@ services:
       - PORT=3001
       - ADMIN_PORT=3002
       - ADMIN_HOST=0.0.0.0
-      # Admin login (Basic auth). If both set, admin UI shows login modal. Password: 8-128 chars.
+      # Admin login credentials (auto-generated if not provided)
       - ADMIN_USERNAME=${ADMIN_USERNAME:-}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       # Device WebSocket auth; must match firmware WS_API_KEY.

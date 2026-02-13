@@ -25,6 +25,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install platformio
+
+      - name: Set firmware version
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          echo "QBIT_VERSION=$VERSION" >> "$GITHUB_ENV"
       
       - name: Inject build secrets
         env:

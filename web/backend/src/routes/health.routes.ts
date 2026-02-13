@@ -5,6 +5,7 @@
 // the correct HEALTH_SECRET query parameter.
 
 import { Router } from 'express';
+import crypto from 'crypto';
 import { HEALTH_SECRET } from '../config';
 import * as deviceService from '../services/device.service';
 import * as claimService from '../services/claim.service';
@@ -53,20 +54,27 @@ function drawTable(headers: string[], rows: string[][]): string {
   return lines.join('\n');
 }
 
-/** Check if the request has the correct health secret */
-function hasSecret(req: { query: Record<string, unknown> }): boolean {
+/** Check if the request has the correct health secret via Authorization header */
+function hasSecret(req: { headers: Record<string, unknown> }): boolean {
   if (!HEALTH_SECRET) return false;
-  return req.query.secret === HEALTH_SECRET;
+  const authHeader = (req.headers['authorization'] || '') as string;
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!token) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(HEALTH_SECRET));
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
 //  GET /health
 // ---------------------------------------------------------------------------
 
-router.get('/', (req, res) => {
-  const format = req.query.format;
+router.get('/', (req: any, res) => {
+  const format = req.query.format as string | undefined;
   const now = Date.now();
-  const showSensitive = hasSecret(req);
+  const showSensitive = hasSecret(req as any);
 
   const claims = claimService.getAllClaims();
   const onlineUsers = socketService.getOnlineUsersMap();

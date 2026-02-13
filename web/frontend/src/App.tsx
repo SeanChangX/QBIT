@@ -68,7 +68,7 @@ export default function App() {
         setTimeout(() => {
           setNotifications((prev) => prev.filter((n) => n.id !== id));
         }, 300);
-      }, 5000);
+      }, 10000);
     });
 
     socketRef.current = s;
@@ -245,6 +245,25 @@ export default function App() {
           onClaimed={() => setClaimDevice(null)}
         />
       )}
+      <a
+        className="github-link"
+        href="https://github.com/SeanChangX/QBIT"
+        target="_blank"
+        rel="noreferrer"
+        aria-label="QBIT GitHub repository"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          aria-hidden="true"
+        >
+          <path
+            fill="currentColor"
+            d="M12 0.5C5.37 0.5 0 5.87 0 12.5c0 5.29 3.44 9.78 8.2 11.37.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.74-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.76.08-.75.08-.75 1.2.08 1.83 1.23 1.83 1.23 1.07 1.83 2.8 1.3 3.49.99.11-.78.42-1.3.76-1.6-2.66-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.23-3.22-.12-.3-.53-1.53.12-3.2 0 0 1.01-.32 3.3 1.23.96-.27 2-.41 3.03-.41 1.03 0 2.07.14 3.03.41 2.29-1.55 3.3-1.23 3.3-1.23.65 1.67.24 2.9.12 3.2.76.84 1.23 1.91 1.23 3.22 0 4.61-2.81 5.62-5.49 5.92.43.37.82 1.1.82 2.22 0 1.6-.02 2.9-.02 3.3 0 .32.22.7.82.58 4.76-1.59 8.2-6.08 8.2-11.37C24 5.87 18.63 0.5 12 0.5z"
+          />
+        </svg>
+      </a>
       <div className="poke-notifications" aria-live="polite">
         {notifications.map((n) => (
           <div
