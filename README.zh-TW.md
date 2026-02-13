@@ -196,7 +196,7 @@ python tools/gif2qbit.py *.gif
 | `-o` / `--output` | 輸出檔案路徑 |
 | `--threshold` | 二值化閾值（0-255，預設 128） |
 | `--invert` | 反轉黑白 |
-| `--scale` | 縮放模式：`fit`（預設）、`stretch`、`crop` |
+| `--scale` | 縮放模式：`fit`（預設）、`stretch`、`fit_width`、`fit_height` |
 
 ### 將 .qgif 轉換為 C 標頭檔
 

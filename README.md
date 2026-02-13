@@ -196,7 +196,7 @@ Options:
 | `-o` / `--output` | Output file path |
 | `--threshold` | Binarization threshold (0-255, default 128) |
 | `--invert` | Invert black/white |
-| `--scale` | Scaling mode: `fit` (default), `stretch`, `crop` |
+| `--scale` | Scaling mode: `fit` (default), `stretch`, `fit_width`, `fit_height` |
 
 ### Converting .qgif to C Header
 
