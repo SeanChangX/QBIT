@@ -106,6 +106,8 @@ static const char BOOT_MELODY[] =
 using namespace websockets;
 static WebsocketsClient _wsClient;
 static bool             _wsConnected = false;
+static String           _wsUrl;
+static unsigned long    _wsLastReconnect = 0;
 
 // ==========================================================================
 //  Device identity
@@ -980,6 +982,16 @@ static void wsSendClaimReject() {
 //  WebSocket helpers
 // ==========================================================================
 
+static bool wsConnect() {
+    if (_wsUrl.length() == 0) return false;
+    Serial.printf("WebSocket connecting to: %s\n", _wsUrl.c_str());
+    if (!_wsClient.connect(_wsUrl)) {
+        Serial.println("[WS] Connect failed");
+        return false;
+    }
+    return true;
+}
+
 // Send (or re-send) device info to the backend.
 // Called on connect and whenever the device name changes.
 static void wsSendDeviceInfo() {
@@ -1167,28 +1179,37 @@ void setup() {
     // -- Connect to backend via WebSocket --
     // API key is sent via Authorization header for security.
     // Connect to WSS endpoint without query parameters.
-    _wsClient.addHeader("Authorization", "Bearer " + String(WS_API_KEY));
+    if (String(WS_API_KEY).length() > 0) {
+        _wsClient.addHeader("Authorization", "Bearer " + String(WS_API_KEY));
+    }
     _wsClient.onEvent(wsEvent);
     _wsClient.onMessage(wsMessage);
     
-    // Determine protocol based on port
+    // Determine protocol based on host/port.
+    // If WS_HOST already includes ws:// or wss://, use it as the base.
     String wsUrl;
-#if WS_PORT == 443
+    String host = String(WS_HOST);
+    bool hostHasScheme = host.startsWith("ws://") || host.startsWith("wss://");
+    bool useTls = host.startsWith("wss://") || (!hostHasScheme && (WS_PORT == 443));
+    if (useTls) {
 #ifdef WS_CA_CERT
-    _wsClient.setCACert(WS_CA_CERT);
+        _wsClient.setCACert(WS_CA_CERT);
 #else
-    // Fallback for servers with public certs but no bundled CA.
-    _wsClient.setInsecure();
+        // Fallback for servers with public certs but no bundled CA.
+        _wsClient.setInsecure();
 #endif
-    wsUrl = "wss://" + String(WS_HOST) + String(WS_PATH);
-#else
-    wsUrl = "ws://" + String(WS_HOST) + ":" + String(WS_PORT) + String(WS_PATH);
-#endif
-    
-    Serial.printf("WebSocket connecting to: %s\n", wsUrl.c_str());
-    if (!_wsClient.connect(wsUrl)) {
-        Serial.println("[WS] Connect failed");
     }
+
+    if (hostHasScheme) {
+        wsUrl = host + String(WS_PATH);
+    } else if (WS_PORT == 443) {
+        wsUrl = "wss://" + host + String(WS_PATH);
+    } else {
+        wsUrl = "ws://" + host + ":" + String(WS_PORT) + String(WS_PATH);
+    }
+    _wsUrl = wsUrl;
+    _wsLastReconnect = 0;
+    wsConnect();
 
     // -- Local MQTT (if configured) --
     if (_mqttEnabled && _mqttHost.length() > 0) {
@@ -1224,6 +1245,7 @@ void loop() {
             _wifiLostMs = millis();
             if (_wifiLostMs == 0) _wifiLostMs = 1;  // avoid sentinel collision
             _wifiConnected = false;
+            _wsConnected = false;
             Serial.println("[WiFi] Connection lost, waiting for auto-reconnect...");
         }
         if (!_portalRestartedForReconnect &&
@@ -1245,6 +1267,15 @@ void loop() {
             Serial.println("[WiFi] Reconnected, stopping AP portal");
         }
         infoScreenShown = false;  // force screen redraw
+    }
+
+    // WebSocket reconnect (if needed)
+    if (!_wsConnected && _wifiConnected) {
+        unsigned long now = millis();
+        if (now - _wsLastReconnect >= WS_RECONNECT_MS) {
+            _wsLastReconnect = now;
+            wsConnect();
+        }
     }
 
     // Local MQTT maintenance
