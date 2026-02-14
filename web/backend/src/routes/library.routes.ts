@@ -5,6 +5,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import fs from 'fs';
+import path from 'path';
 import archiver from 'archiver';
 import rateLimit from 'express-rate-limit';
 import { validate } from '../middleware/validate';
@@ -120,7 +121,9 @@ router.post('/batch-download', validate(libraryBatchSchema), (req, res) => {
   const archive = archiver('zip', { zlib: { level: 6 } });
   archive.pipe(res);
   for (const f of filesToZip) {
-    archive.file(f.filepath, { name: f.filename });
+    // Sanitize filename: only keep basename to prevent zip-slip
+    const safeName = path.basename(f.filename);
+    archive.file(f.filepath, { name: safeName });
   }
   archive.finalize();
 });
@@ -133,7 +136,7 @@ router.get('/:id/download', (req, res) => {
   const filePath = libraryService.getFilePath(item.id);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File missing' });
 
-  // Sanitised Content-Disposition (Sec 15 fix)
+  // Sanitised Content-Disposition to avoid header injection
   res.setHeader('Content-Disposition', libraryService.contentDisposition(item.filename));
   res.setHeader('Content-Type', 'application/octet-stream');
   fs.createReadStream(filePath).pipe(res);

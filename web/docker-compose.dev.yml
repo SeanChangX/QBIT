@@ -19,7 +19,7 @@ services:
       - PORT=3001
       - ADMIN_PORT=3002
       - ADMIN_HOST=0.0.0.0
-      # Admin UI login. Password must be 8-128 chars. Empty = no auth in dev.
+      # Admin login credentials (auto-generated if not provided)
       - ADMIN_USERNAME=${ADMIN_USERNAME:-}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - SESSION_SECRET=dev-secret-local-only

@@ -37,6 +37,8 @@ interface PersistedSecrets {
   sessionSecret?: string;
   adminSessionSecret?: string;
   healthSecret?: string;
+  adminUsername?: string;
+  adminPassword?: string;
 }
 
 const SECRETS_PATH = path.join(LIBRARY_DIR, 'secrets.json');
@@ -52,6 +54,21 @@ function loadPersistedSecrets(): PersistedSecrets {
 function savePersistedSecrets(secrets: PersistedSecrets): void {
   fs.mkdirSync(path.dirname(SECRETS_PATH), { recursive: true });
   fs.writeFileSync(SECRETS_PATH, JSON.stringify(secrets, null, 2), { mode: 0o600 });
+}
+
+// Generate a random password: 16 alphanumeric characters
+function generateRandomPassword(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let password = '';
+  for (let i = 0; i < 16; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+}
+
+// Generate a random username: "qbit_" + 8 hex chars
+function generateRandomUsername(): string {
+  return 'qbit_' + crypto.randomBytes(4).toString('hex');
 }
 
 function resolveSecret(envValue: string | undefined, persistedValue: string | undefined, label: string): { value: string; source: string } {
@@ -94,9 +111,58 @@ export const SESSION_SECRET = sessionResult.value;
 export const ADMIN_SESSION_SECRET = adminSessionResult.value;
 export const HEALTH_SECRET = healthResult.value;
 
-// ---- Admin credentials ----
-export const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || '').trim();
-export const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || '').trim();
+// ---- Admin credentials (auto-generate if not provided) ----
+// If ADMIN_USERNAME and ADMIN_PASSWORD are not set via environment variables,
+// they are auto-generated on first startup and persisted to secrets.json
+const adminCredsEnv = loadPersistedSecrets();
+
+let adminUsernameGenerated = false;
+let adminPasswordGenerated = false;
+
+let adminUsername = (process.env.ADMIN_USERNAME || '').trim();
+if (!adminUsername) {
+  adminUsername = adminCredsEnv.adminUsername || generateRandomUsername();
+  if (!adminCredsEnv.adminUsername) {
+    adminUsernameGenerated = true;
+  }
+}
+
+let adminPassword = (process.env.ADMIN_PASSWORD || '').trim();
+if (!adminPassword) {
+  adminPassword = adminCredsEnv.adminPassword || generateRandomPassword();
+  if (!adminCredsEnv.adminPassword) {
+    adminPasswordGenerated = true;
+  }
+}
+
+// Persist newly generated credentials
+if (adminUsernameGenerated || adminPasswordGenerated) {
+  const toMerge: PersistedSecrets = {
+    sessionSecret: sessionResult.value,
+    adminSessionSecret: adminSessionResult.value,
+    healthSecret: healthResult.value,
+    adminUsername,
+    adminPassword,
+  };
+  savePersistedSecrets(toMerge);
+
+  // Log the auto-generated credentials (only on first startup)
+  // eslint-disable-next-line no-console
+  console.log('\n========= AUTO-GENERATED ADMIN CREDENTIALS =========');
+  // eslint-disable-next-line no-console
+  console.log(`Username: ${adminUsername}`);
+  // eslint-disable-next-line no-console
+  console.log(`Password: ${adminPassword}`);
+  // eslint-disable-next-line no-console
+  console.log('====================================================');
+  // eslint-disable-next-line no-console
+  console.log('⚠️  Save these credentials securely. They are persisted in /data/secrets.json');
+  // eslint-disable-next-line no-console
+  console.log('====================================================\n');
+}
+
+export const ADMIN_USERNAME = adminUsername;
+export const ADMIN_PASSWORD = adminPassword;
 
 // ---- Device WebSocket ----
 export const DEVICE_API_KEY = process.env.DEVICE_API_KEY || '';

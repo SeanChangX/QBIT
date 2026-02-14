@@ -196,7 +196,7 @@ Options:
 | `-o` / `--output` | Output file path |
 | `--threshold` | Binarization threshold (0-255, default 128) |
 | `--invert` | Invert black/white |
-| `--scale` | Scaling mode: `fit` (default), `stretch`, `crop` |
+| `--scale` | Scaling mode: `fit` (default), `stretch`, `fit_width`, `fit_height` |
 
 ### Converting .qgif to C Header
 
@@ -357,8 +357,7 @@ docker compose logs backend   # should show "QBIT backend listening on port 3001
 
 ### Data storage
 
-All persistent data is in the `qbit-data` volume (path `/data` inside the backend container): SQLite database `qbit.db` (sessions, users, claims, bans, library metadata), uploaded library files in `files/`, and `secrets.json` for auto-generated secrets. Legacy JSON files (e.g. `claims.json`) are migrated once to SQLite on first run.
-
+All persistent data is in the `qbit-data` volume (path `/data` inside the backend container): SQLite database `qbit.db` (sessions, users, claims, bans, library metadata), uploaded library files in `files/`, and `secrets.json` for auto-generated secrets.
 ### Logs
 
 The backend logs to stdout (pino, JSON in production). View with `docker compose logs -f backend`. No log files are written.

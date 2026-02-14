@@ -22,6 +22,19 @@ if (isDev) {
 
 export const logger = pino({
   level: isDev ? 'debug' : 'info',
+  serializers: {
+    req: (req) => {
+      // SanitizeHeaders: remove sensitive fields before logging
+      const headers = { ...req.headers };
+      if (headers.authorization) delete headers.authorization;
+      if (headers['x-device-api-key']) delete headers['x-device-api-key'];
+      return {
+        method: req.method,
+        url: req.url,
+        headers: headers,
+      };
+    },
+  },
   ...(hasPinoPretty
     ? {
         transport: {

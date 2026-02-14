@@ -401,66 +401,6 @@ body {
   margin-top: 0;
 }
 
-/* Device section: Connect + Flash + Serial */
-.card-device .device-connect-row {
-  margin-bottom: 0;
-}
-.card-device .device-connect-row .btn {
-  margin-top: 0;
-}
-.device-connected {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-.device-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-.device-actions .btn {
-  width: auto;
-  flex: 1 1 0;
-}
-.btn-small {
-  padding: 6px 12px;
-  font-size: .8em;
-  margin-top: 0;
-  width: auto;
-}
-.monitor-output-box .log-content {
-  max-height: 200px;
-  overflow-y: auto;
-}
-.monitor-send {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-  align-items: center;
-  width: 100%;
-}
-.monitor-send input {
-  flex: 1 1 0;
-  min-width: 0;
-  width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: .85em;
-}
-.monitor-send input:focus {
-  outline: none;
-  border-color: var(--red);
-}
-.monitor-send .btn {
-  width: auto;
-  flex: 0 0 auto;
-  min-width: 4.5em;
-}
-
 /* Footer */
 .footer {
   text-align: center;

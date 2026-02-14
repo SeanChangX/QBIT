@@ -27,11 +27,6 @@ const router = Router();
 // ---------------------------------------------------------------------------
 
 function adminAuth(req: Request, res: Response, next: NextFunction): void {
-  // If credentials are not configured, allow access (with startup warning)
-  if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
-    next();
-    return;
-  }
   const s = req.session as { admin?: boolean } | undefined;
   if (s?.admin === true) {
     next();
@@ -41,7 +36,7 @@ function adminAuth(req: Request, res: Response, next: NextFunction): void {
 }
 
 // ---------------------------------------------------------------------------
-//  Timing-safe string comparison
+//  Constant-time comparison for admin token
 // ---------------------------------------------------------------------------
 
 function timingSafeCompare(a: string, b: string): boolean {
@@ -72,10 +67,6 @@ const adminLoginLimiter = rateLimit({
 
 // POST /api/admin/login
 router.post('/admin/login', adminLoginLimiter, validate(adminLoginSchema), (req, res) => {
-  if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
-    return res.status(200).json({ ok: true });
-  }
-
   const { username, password } = req.body as { username: string; password: string };
 
   const validUser = timingSafeCompare(username, ADMIN_USERNAME);

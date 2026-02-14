@@ -196,7 +196,7 @@ python tools/gif2qbit.py *.gif
 | `-o` / `--output` | 輸出檔案路徑 |
 | `--threshold` | 二值化閾值（0-255，預設 128） |
 | `--invert` | 反轉黑白 |
-| `--scale` | 縮放模式：`fit`（預設）、`stretch`、`crop` |
+| `--scale` | 縮放模式：`fit`（預設）、`stretch`、`fit_width`、`fit_height` |
 
 ### 將 .qgif 轉換為 C 標頭檔
 
@@ -357,7 +357,7 @@ docker compose logs backend   # 應顯示 "QBIT backend listening on port 3001"
 
 ### 資料儲存
 
-所有持久化資料位於 volume `qbit-data`（後端容器內路徑 `/data`）：SQLite 資料庫 `qbit.db`（sessions、users、claims、bans、素材庫元資料）、上傳的素材檔於 `files/`、以及自動產生的密鑰於 `secrets.json`。舊版 JSON 檔（如 `claims.json`）在首次啟動時會一次性遷移至 SQLite。
+所有持久化資料位於 volume `qbit-data`（後端容器內路徑 `/data`）：SQLite 資料庫 `qbit.db`（sessions、users、claims、bans、素材庫元資料）、上傳的素材檔於 `files/`、以及自動產生的密鑰於 `secrets.json`。
 
 ### 日誌
 

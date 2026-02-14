@@ -68,7 +68,7 @@ def handle_message(ws, device_id, device_name, msg_data, auto_claim):
             print(" (ignored, use --auto-claim to accept)")
 
 
-def device_thread(index, url, stop_event, auto_claim):
+def device_thread(index, url, stop_event, auto_claim, api_key):
     """Run a single simulated device connection."""
     device_id = make_device_id(index)
     device_name = make_device_name(device_id)
@@ -86,7 +86,10 @@ def device_thread(index, url, stop_event, auto_claim):
         try:
             ws = websocket.WebSocket()
             ws.settimeout(10)
-            ws.connect(url)
+            headers = []
+            if api_key:
+                headers.append(f"Authorization: Bearer {api_key}")
+            ws.connect(url, header=headers)
             ws.send(register_msg)
             print(f"  [+] #{index:>3d}  {device_id}  {device_name}")
 
@@ -129,8 +132,6 @@ def main():
     args = parser.parse_args()
 
     path = "/device"
-    if args.key:
-        path += f"?key={args.key}"
     url = args.host.rstrip("/") + path
 
     print(f"Simulating {args.count} devices -> {url}")
@@ -143,7 +144,7 @@ def main():
 
     for i in range(args.count):
         t = threading.Thread(target=device_thread,
-                             args=(i, url, stop_event, args.auto_claim),
+                             args=(i, url, stop_event, args.auto_claim, args.key),
                              daemon=True)
         t.start()
         threads.append(t)

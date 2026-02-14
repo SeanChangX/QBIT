@@ -122,6 +122,7 @@ export function getIo(): SocketIOServer {
 export function setupSocketIo(httpServer: HttpServer, sessionMiddleware: RequestHandler): SocketIOServer {
   io = new SocketIOServer(httpServer, {
     cors: { origin: FRONTEND_URL, credentials: true },
+    maxHttpBufferSize: 1024 * 1024, // 1MB limit per message
   });
 
   // Share session with Socket.io
@@ -182,7 +183,7 @@ export function setupSocketIo(httpServer: HttpServer, sessionMiddleware: Request
       broadcastOnlineUsers();
     }
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
       const user = onlineUsers.get(socket.id);
       if (user) {
         onlineUsers.delete(socket.id);

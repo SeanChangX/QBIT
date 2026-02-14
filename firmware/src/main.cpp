@@ -13,7 +13,7 @@
 #include <NonBlockingRtttl.h>
 #include <Preferences.h>
 #include <ArduinoJson.h>
-#include <WebSocketsClient.h>
+#include <ArduinoWebsockets.h>
 #include <PubSubClient.h>
 
 // Base64 decode helper (for bitmap poke)
@@ -26,6 +26,14 @@
 #include "sys_idle.h"
 #include "gif_player.h"
 #include "web_dashboard.h"
+
+#ifndef QBIT_VERSION
+#define QBIT_VERSION "dev-build"
+#endif
+
+static const char *kQbitVersion = (QBIT_VERSION[0] != '\0')
+                                 ? QBIT_VERSION
+                                 : "dev-build";
 
 // ==========================================================================
 //  Hardware pin definitions (configurable via web dashboard, stored in NVS)
@@ -95,8 +103,10 @@ static const char BOOT_MELODY[] =
 #endif
 #define WS_RECONNECT_MS 5000
 
-static WebSocketsClient _wsClient;
+using namespace websockets;
+static WebsocketsClient _wsClient;
 static bool             _wsConnected = false;
+static unsigned long    _wsLastReconnect = 0;
 
 // ==========================================================================
 //  Device identity
@@ -282,7 +292,7 @@ static void mqttPublishHADiscovery() {
     devBlock["name"]  = name;
     devBlock["mf"]    = "QBIT";
     devBlock["mdl"]   = "QBIT";
-    devBlock["sw"]    = "0.2.4";
+    devBlock["sw"]    = kQbitVersion;
 
     // --- Binary sensor: online/offline status ---
     {
@@ -953,7 +963,7 @@ static void wsSendClaimConfirm() {
     doc["type"] = "claim_confirm";
     String msg;
     serializeJson(doc, msg);
-    _wsClient.sendTXT(msg);
+    _wsClient.send(msg);
     Serial.println("Claim confirmed");
 }
 
@@ -963,13 +973,37 @@ static void wsSendClaimReject() {
     doc["type"] = "claim_reject";
     String msg;
     serializeJson(doc, msg);
-    _wsClient.sendTXT(msg);
+    _wsClient.send(msg);
     Serial.println("Claim rejected (timeout)");
 }
 
 // ==========================================================================
 //  WebSocket helpers
 // ==========================================================================
+
+// Connect to backend WebSocket.
+// Port 443 → TLS (connectSecure), other ports → plain (connect).
+// The pre-build script (scripts/patch_arduinowebsockets.py) patches the
+// ArduinoWebsockets library to support setInsecure() on ESP32 and increase
+// the header-read timeout for Cloudflare's large response headers.
+static bool wsConnect() {
+    // Close any existing connection
+    if (_wsClient.available()) {
+        _wsClient.close();
+        delay(100);
+    }
+
+    bool ok;
+    if (WS_PORT == 443) {
+        ok = _wsClient.connectSecure(WS_HOST, WS_PORT, WS_PATH);
+    } else {
+        ok = _wsClient.connect(WS_HOST, WS_PORT, WS_PATH);
+    }
+    if (!ok) {
+        Serial.println("[WS] Connection failed");
+    }
+    return ok;
+}
 
 // Send (or re-send) device info to the backend.
 // Called on connect and whenever the device name changes.
@@ -981,65 +1015,70 @@ static void wsSendDeviceInfo() {
     doc["id"]      = getDeviceId();
     doc["name"]    = _deviceName;
     doc["ip"]      = WiFi.localIP().toString();
-    doc["version"] = "0.2.4";
+    doc["version"] = kQbitVersion;
 
     String msg;
     serializeJson(doc, msg);
-    _wsClient.sendTXT(msg);
+    _wsClient.send(msg);
 }
 
 // WebSocket event handler (called by the WebSockets library).
-static void wsEvent(WStype_t type, uint8_t *payload, size_t length) {
-    switch (type) {
-        case WStype_DISCONNECTED:
-            _wsConnected = false;
-            Serial.println("[WS] Disconnected from backend");
-            break;
-
-        case WStype_CONNECTED:
+static void wsEvent(WebsocketsClient &client, WebsocketsEvent event, WSInterfaceString data) {
+    (void)client;
+    switch (event) {
+        case WebsocketsEvent::ConnectionOpened:
             _wsConnected = true;
-            Serial.println("[WS] Connected to backend");
+            Serial.println("[WS] ✓ Connected to backend");
             wsSendDeviceInfo();
             break;
 
-        case WStype_TEXT:
-        {
-            JsonDocument doc;
-            if (deserializeJson(doc, payload, length)) break;
-
-            const char *msgType = doc["type"];
-            if (!msgType) break;
-
-            if (strcmp(msgType, "poke") == 0) {
-                const char *sender = doc["sender"] | "Someone";
-                const char *text   = doc["text"]   | "Poke!";
-
-                // Check for bitmap data (multi-language rendering)
-                if (doc["senderBitmap"].is<const char*>() && doc["textBitmap"].is<const char*>()) {
-                    const char *senderBmp = doc["senderBitmap"];
-                    uint16_t senderW      = doc["senderBitmapWidth"] | 0;
-                    const char *textBmp   = doc["textBitmap"];
-                    uint16_t textW        = doc["textBitmapWidth"] | 0;
-
-                    if (senderW > 0 && textW > 0) {
-                        handlePokeBitmap(sender, text, senderBmp, senderW, textBmp, textW);
-                    } else {
-                        handlePoke(sender, text);
-                    }
-                } else {
-                    handlePoke(sender, text);
-                }
-            }
-
-            if (strcmp(msgType, "claim_request") == 0) {
-                const char *userName = doc["userName"] | "Unknown";
-                handleClaimRequest(userName);
-            }
+        case WebsocketsEvent::ConnectionClosed:
+            _wsConnected = false;
+            Serial.println("[WS] Disconnected");
             break;
+        case WebsocketsEvent::GotPing:
+            break;
+        case WebsocketsEvent::GotPong:
+            break;
+    }
+}
+
+// WebSocket message handler (called by the WebSockets library).
+static void wsMessage(WebsocketsClient &client, WebsocketsMessage message) {
+    (void)client;
+    if (!message.isText()) return;
+
+    String data = message.data();
+    JsonDocument doc;
+    if (deserializeJson(doc, data)) return;
+
+    const char *msgType = doc["type"];
+    if (!msgType) return;
+
+    if (strcmp(msgType, "poke") == 0) {
+        const char *sender = doc["sender"] | "Someone";
+        const char *text   = doc["text"]   | "Poke!";
+
+        // Check for bitmap data (multi-language rendering)
+        if (doc["senderBitmap"].is<const char*>() && doc["textBitmap"].is<const char*>()) {
+            const char *senderBmp = doc["senderBitmap"];
+            uint16_t senderW      = doc["senderBitmapWidth"] | 0;
+            const char *textBmp   = doc["textBitmap"];
+            uint16_t textW        = doc["textBitmapWidth"] | 0;
+
+            if (senderW > 0 && textW > 0) {
+                handlePokeBitmap(sender, text, senderBmp, senderW, textBmp, textW);
+            } else {
+                handlePoke(sender, text);
+            }
+        } else {
+            handlePoke(sender, text);
         }
+    }
 
-        default:
-            break;
+    if (strcmp(msgType, "claim_request") == 0) {
+        const char *userName = doc["userName"] | "Unknown";
+        handleClaimRequest(userName);
     }
 }
 
@@ -1136,6 +1175,20 @@ void setup() {
         Serial.println("mDNS: http://qbit.local");
     }
 
+    // -- Sync time via NTP (required for TLS certificate validation) --
+    configTime(0, 0, "time.google.com", "time.cloudflare.com");
+    time_t now = time(nullptr);
+    int attempts = 0;
+    while (now < 24 * 3600 && attempts < 10) {
+        delay(1000);
+        now = time(nullptr);
+        attempts++;
+    }
+    if (now < 24 * 3600) {
+        Serial.println("[NTP] Time sync failed — TLS connections may break");
+    }
+    Serial.flush();
+
     // -- Show connection info --
     String ip = WiFi.localIP().toString();
     showText("[ Wi-Fi Connected ]",
@@ -1151,15 +1204,15 @@ void setup() {
     Serial.println("Web server started: http://qbit.local (" + ip + ")");
 
     // -- Connect to backend via WebSocket --
-    // API key is sent as a query parameter for device authentication.
-    String wsPath = String(WS_PATH) + "?key=" + WS_API_KEY;
-#if WS_PORT == 443
-    _wsClient.beginSSL(WS_HOST, WS_PORT, wsPath.c_str());
-#else
-    _wsClient.begin(WS_HOST, WS_PORT, wsPath.c_str());
-#endif
+    // Authorization header carries the shared API key for device authentication.
+    if (String(WS_API_KEY).length() > 0) {
+        _wsClient.addHeader("Authorization", "Bearer " + String(WS_API_KEY));
+    }
     _wsClient.onEvent(wsEvent);
-    _wsClient.setReconnectInterval(WS_RECONNECT_MS);
+    _wsClient.onMessage(wsMessage);
+
+    _wsLastReconnect = 0;
+    wsConnect();
 
     // -- Local MQTT (if configured) --
     if (_mqttEnabled && _mqttHost.length() > 0) {
@@ -1184,7 +1237,7 @@ static bool infoScreenShown = false;
 
 void loop() {
     NW.loop();
-    _wsClient.loop();
+    _wsClient.poll();  // Poll WebSocket for messages (replaces _wsClient.loop())
 
     // --- WiFi reconnection monitoring ---
     // If WiFi drops, wait for ESP32 auto-reconnect.  If it does not
@@ -1195,6 +1248,7 @@ void loop() {
             _wifiLostMs = millis();
             if (_wifiLostMs == 0) _wifiLostMs = 1;  // avoid sentinel collision
             _wifiConnected = false;
+            _wsConnected = false;
             Serial.println("[WiFi] Connection lost, waiting for auto-reconnect...");
         }
         if (!_portalRestartedForReconnect &&
@@ -1216,6 +1270,15 @@ void loop() {
             Serial.println("[WiFi] Reconnected, stopping AP portal");
         }
         infoScreenShown = false;  // force screen redraw
+    }
+
+    // WebSocket reconnect (if needed)
+    if (!_wsConnected && _wifiConnected) {
+        unsigned long now = millis();
+        if (now - _wsLastReconnect >= WS_RECONNECT_MS) {
+            _wsLastReconnect = now;
+            wsConnect();
+        }
     }
 
     // Local MQTT maintenance
