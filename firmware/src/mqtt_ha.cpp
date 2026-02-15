@@ -6,7 +6,6 @@
 #include "gif_player.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
-#include <LittleFS.h>
 
 void mqttPublishHADiscovery(PubSubClient *client) {
     String id    = getDeviceId();
@@ -20,8 +19,8 @@ void mqttPublishHADiscovery(PubSubClient *client) {
     JsonArray ids = devBlock["ids"].to<JsonArray>();
     ids.add("qbit_" + idLow);
     devBlock["name"] = name;
-    devBlock["mf"]   = "QBIT";
-    devBlock["mdl"]  = "QBIT";
+    devBlock["mf"]   = "SCX.TW";    // manufacturer
+    devBlock["mdl"]  = "QBIT";      // model
     devBlock["sw"]   = kQbitVersion;
 
     // --- Binary sensor: online/offline status ---
@@ -124,42 +123,9 @@ void mqttPublishHADiscovery(PubSubClient *client) {
         doc["object_id"] = "qbit_" + idLow + "_touch";
         doc["stat_t"]    = prefix + "/" + id + "/touch";
         doc["val_tpl"]   = "{{ value_json.type }}";
+        doc["frc_upd"]   = true;
         doc["icon"]      = "mdi:gesture-tap";
         doc["dev"]       = devBlock;
-        String payload;
-        serializeJson(doc, payload);
-        client->publish(topic.c_str(), payload.c_str(), true);
-    }
-
-    // --- Select: animation ---
-    {
-        String topic = "homeassistant/select/qbit_" + idLow + "/animation/config";
-        JsonDocument doc;
-        doc["name"]      = "Animation";
-        doc["uniq_id"]   = "qbit_" + idLow + "_animation";
-        doc["object_id"] = "qbit_" + idLow + "_animation";
-        doc["stat_t"]    = prefix + "/" + id + "/animation/state";
-        doc["cmd_t"]     = prefix + "/" + id + "/animation/set";
-        doc["icon"]      = "mdi:animation-play";
-
-        // Populate options from LittleFS
-        JsonArray opts = doc["options"].to<JsonArray>();
-        File root = LittleFS.open("/");
-        if (root && root.isDirectory()) {
-            File f = root.openNextFile();
-            while (f) {
-                String fname = String(f.name());
-                f.close();
-                if (fname.endsWith(".qgif")) {
-                    if (fname.startsWith("/")) fname = fname.substring(1);
-                    opts.add(fname);
-                }
-                f = root.openNextFile();
-            }
-            root.close();
-        }
-
-        doc["dev"] = devBlock;
         String payload;
         serializeJson(doc, payload);
         client->publish(topic.c_str(), payload.c_str(), true);

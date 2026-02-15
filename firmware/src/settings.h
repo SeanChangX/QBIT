@@ -57,8 +57,6 @@ void     setMqttConfig(const String &host, uint16_t port,
 // --- Timezone ---
 String  getTimezoneIANA();
 void    setTimezoneIANA(const String &tz);
-int16_t getTimezoneOffset();
-void    setTimezoneOffset(int16_t minutes);
 
 // --- Mute state (saved volume for toggle) ---
 uint8_t getSavedVolume();

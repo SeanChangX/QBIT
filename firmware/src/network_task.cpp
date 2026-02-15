@@ -218,15 +218,18 @@ static void wsMessage(WebsocketsClient &client, WebsocketsMessage message) {
 // ==========================================================================
 
 static void mqttCallback(char *topic, byte *payload, unsigned int length) {
-    JsonDocument doc;
-    if (deserializeJson(doc, payload, length)) return;
-
     String topicStr = String(topic);
     String prefix   = getMqttPrefix();
     String id       = getDeviceId();
 
-    // Poke command
+    // Build raw string from payload
+    String rawPayload = "";
+    for (unsigned int i = 0; i < length; i++) rawPayload += (char)payload[i];
+
+    // Poke command (JSON payload)
     if (topicStr == prefix + "/" + id + "/command") {
+        JsonDocument doc;
+        if (deserializeJson(doc, payload, length)) return;
         const char *cmd = doc["command"];
         if (!cmd) return;
         if (strcmp(cmd, "poke") == 0) {
@@ -240,36 +243,26 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
             mqttPublishPokeEvent(sender, text);
             Serial.printf("[MQTT] Poke from %s: %s\n", sender, text);
         }
+        return;
     }
 
-    // Mute set
+    // Mute set (plain text: ON/OFF)
     if (topicStr == prefix + "/" + id + "/mute/set") {
-        String val = "";
-        for (unsigned int i = 0; i < length; i++) val += (char)payload[i];
         NetworkEvent evt = {};
         evt.kind = NetworkEvent::MQTT_COMMAND;
         strncpy(evt.sender, "mute", sizeof(evt.sender) - 1);
-        strncpy(evt.text, val.c_str(), sizeof(evt.text) - 1);
+        strncpy(evt.text, rawPayload.c_str(), sizeof(evt.text) - 1);
         xQueueSend(networkEventQueue, &evt, pdMS_TO_TICKS(100));
+        return;
     }
 
-    // Animation set
-    if (topicStr == prefix + "/" + id + "/animation/set") {
-        String val = "";
-        for (unsigned int i = 0; i < length; i++) val += (char)payload[i];
-        NetworkEvent evt = {};
-        evt.kind = NetworkEvent::MQTT_COMMAND;
-        strncpy(evt.sender, "animation", sizeof(evt.sender) - 1);
-        strncpy(evt.text, val.c_str(), sizeof(evt.text) - 1);
-        xQueueSend(networkEventQueue, &evt, pdMS_TO_TICKS(100));
-    }
-
-    // Animation next
+    // Animation next (no payload needed)
     if (topicStr == prefix + "/" + id + "/animation/next") {
         NetworkEvent evt = {};
         evt.kind = NetworkEvent::MQTT_COMMAND;
         strncpy(evt.sender, "animation_next", sizeof(evt.sender) - 1);
         xQueueSend(networkEventQueue, &evt, pdMS_TO_TICKS(100));
+        return;
     }
 }
 
@@ -318,7 +311,6 @@ static void mqttReconnect() {
         String prefix = getMqttPrefix();
         _mqttClient.subscribe((prefix + "/" + id + "/command").c_str());
         _mqttClient.subscribe((prefix + "/" + id + "/mute/set").c_str());
-        _mqttClient.subscribe((prefix + "/" + id + "/animation/set").c_str());
         _mqttClient.subscribe((prefix + "/" + id + "/animation/next").c_str());
 
         // Publish HA discovery
@@ -385,11 +377,13 @@ void networkTask(void *param) {
                     evt.connected = true;
                     xQueueSend(networkEventQueue, &evt, 0);
 
-                    // Detect timezone on first connect
+                    // Detect timezone on first connect (only if user hasn't saved one)
                     static bool tzDetected = false;
                     if (!tzDetected) {
                         tzDetected = true;
-                        timeManagerDetectTimezone();
+                        if (getTimezoneIANA().length() == 0) {
+                            timeManagerDetectTimezone();
+                        }
                     }
                 }
                 if (_portalRestartedForReconnect) {

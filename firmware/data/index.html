@@ -51,7 +51,16 @@
     <button class="btn btn-save" id="btnDevSave">Save Name</button>
   </div>
 
-  <div class="card">
+  <div class="card" id="fl">
+    <div class="card-title">Files</div>
+    <div class="preview-wrap" id="previewWrap" style="display:none">
+      <canvas id="previewCanvas" width="256" height="128"></canvas>
+      <div class="preview-name" id="previewName"></div>
+    </div>
+    <div class="empty">Loading...</div>
+  </div>
+
+  <div class="card collapsible collapsed">
     <div class="card-title">MQTT</div>
     <div class="setting">
       <label class="setting-label">Enabled</label>
@@ -83,7 +92,7 @@
     <button class="btn btn-save" id="btnMqttSave">Save MQTT</button>
   </div>
 
-  <div class="card">
+  <div class="card collapsible collapsed">
     <div class="card-title">Settings</div>
     <div class="setting">
       <label class="setting-label">Speed</label>
@@ -102,7 +111,7 @@
     <button class="btn btn-save" id="btnSave">Save</button>
   </div>
 
-  <div class="card">
+  <div class="card collapsible collapsed">
     <div class="card-title">Timezone</div>
     <div class="setting">
       <label class="setting-label">Zone</label>
@@ -135,14 +144,10 @@
         <option value="Pacific/Auckland">Pacific/Auckland (UTC+12)</option>
       </select>
     </div>
-    <div class="setting">
-      <label class="setting-label">Offset (s)</label>
-      <input type="number" id="tzOffset" class="input-text" style="width:100px;flex:none" placeholder="auto">
-    </div>
     <button class="btn btn-save" id="btnTzSave">Save Timezone</button>
   </div>
 
-  <div class="card">
+  <div class="card collapsible collapsed">
     <div class="card-title">GPIO Pins</div>
     <div class="setting">
       <label class="setting-label">Touch</label>
@@ -163,11 +168,6 @@
     <div class="pin-hint">Changing pins will reboot the device.</div>
     <div class="msg" id="pinMsg"></div>
     <button class="btn btn-save" id="btnPinSave">Save Pins</button>
-  </div>
-
-  <div class="card" id="fl">
-    <div class="card-title">Files</div>
-    <div class="empty">Loading...</div>
   </div>
 
 

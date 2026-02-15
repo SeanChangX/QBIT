@@ -286,9 +286,6 @@ void displayTask(void *param) {
                             setBuzzerVolume(saved > 0 ? saved : 100);
                         }
                         mqttPublishMuteState(mute);
-                    } else if (strcmp(netEvt.sender, "animation") == 0) {
-                        gifPlayerSetFile(String(netEvt.text));
-                        mqttPublishAnimationState(String(netEvt.text));
                     } else if (strcmp(netEvt.sender, "animation_next") == 0) {
                         String next = gifPlayerNextShuffle();
                         if (next.length() > 0) {

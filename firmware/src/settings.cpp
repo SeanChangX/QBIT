@@ -39,7 +39,6 @@ static bool     _mqttEnabled = false;
 
 // Timezone
 static String  _tzIANA;
-static int16_t _tzOffset = 0;  // minutes from UTC
 
 // ==========================================================================
 //  Device identity
@@ -117,7 +116,6 @@ void loadSettings() {
 
     // Timezone
     _tzIANA   = _prefs.getString("tzName", "");
-    _tzOffset = _prefs.getShort("tzOffset", 0);
 
     // Apply speed
     gifPlayerSetSpeed(speed);
@@ -149,7 +147,6 @@ void saveSettings() {
     _prefs.putUChar("pinSDA",    _pinSDA);
     _prefs.putUChar("pinSCL",    _pinSCL);
     _prefs.putString("tzName",   _tzIANA);
-    _prefs.putShort("tzOffset",  _tzOffset);
     Serial.println("Settings saved to NVS");
 }
 
@@ -232,5 +229,3 @@ void setMqttConfig(const String &host, uint16_t port,
 
 String  getTimezoneIANA()  { return _tzIANA; }
 void    setTimezoneIANA(const String &tz) { _tzIANA = tz; }
-int16_t getTimezoneOffset() { return _tzOffset; }
-void    setTimezoneOffset(int16_t minutes) { _tzOffset = minutes; }

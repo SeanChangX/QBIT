@@ -111,6 +111,7 @@ void timeManagerDetectTimezone() {
             if (tz) {
                 Serial.printf("[TZ] Detected timezone: %s\n", tz);
                 timeManagerSetTimezone(String(tz));
+                saveSettings();
                 http.end();
                 return;
             }

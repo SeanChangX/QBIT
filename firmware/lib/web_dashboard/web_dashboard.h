@@ -60,7 +60,6 @@ extern void    setPinConfig(uint8_t touch, uint8_t buzzer,
 // Timezone -- implemented by settings.cpp / time_manager.cpp.
 extern String  getTimezoneIANA();
 extern void    setTimezoneIANA(const String &tz);
-extern int16_t getTimezoneOffset();
 
 // Time manager -- implemented by time_manager.cpp.
 extern void timeManagerSetTimezone(const String &ianaTz);
