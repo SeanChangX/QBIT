@@ -52,6 +52,7 @@ static unsigned long _historyLastScrollMs = 0;
 static bool          _offlineShown = false;
 static unsigned long _offlineStartMs = 0;
 static const char*   _offlineMsg = nullptr;
+static bool          _serverOfflineNotified = false;
 
 // WiFi setup: QR vs text toggle
 static bool _wifiSetupShowQR = true;
@@ -264,11 +265,14 @@ void displayTask(void *param) {
                     break;
 
                 case NetworkEvent::WS_STATUS:
-                    if (!netEvt.connected && _state == GIF_PLAYBACK && !_offlineShown) {
+                    if (!netEvt.connected && _state == GIF_PLAYBACK && !_serverOfflineNotified) {
+                        _serverOfflineNotified = true;
                         _offlineShown = true;
                         _offlineStartMs = now;
                         _offlineMsg = "Server Offline";
                         showText(_offlineMsg);
+                    } else if (netEvt.connected) {
+                        _serverOfflineNotified = false;
                     }
                     break;
 
