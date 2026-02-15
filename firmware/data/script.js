@@ -243,25 +243,52 @@ async function lf() {
   try {
     var files = await (await fetch('/api/list')).json();
     var el  = document.getElementById('fl');
+    // Remove old file-list and empty elements, but keep card-title and preview
+    var oldList = el.querySelector('.file-list');
+    if (oldList) oldList.remove();
+    var oldEmpty = el.querySelector('.empty');
+    if (oldEmpty) oldEmpty.remove();
+
     if (!files.length) {
-      el.innerHTML = '<div class="card-title">Files</div>'
-                   + '<div class="empty">No .qgif files yet.</div>';
+      var emptyDiv = document.createElement('div');
+      emptyDiv.className = 'empty';
+      emptyDiv.textContent = 'No .qgif files yet.';
+      el.appendChild(emptyDiv);
+      // Update card title (remove file count)
+      var titleEl = el.querySelector('.card-title');
+      if (titleEl) titleEl.innerHTML = 'Files';
       return;
     }
 
-    var hdr = '<div class="card-title">Files <span class="file-count">' + files.length + '</span></div>';
-    el.innerHTML = hdr + '<div class="file-list">' + files.map(function (f) {
+    // Update card title with file count
+    var titleEl = el.querySelector('.card-title');
+    if (titleEl) titleEl.innerHTML = 'Files <span class="file-count">' + files.length + '</span>';
+
+    var listDiv = document.createElement('div');
+    listDiv.className = 'file-list';
+    listDiv.innerHTML = files.map(function (f) {
       return '<div class="file">'
         + '<span class="file-name' + (f.playing ? ' playing' : '') + '">' + f.name + '</span>'
         + '<span class="file-size">' + fmt(f.size) + '</span>'
         + '<button class="btn btn-play" onclick="pf(\'' + f.name + '\')">Play</button>'
         + '<button class="btn btn-del"  onclick="df(\'' + f.name + '\')">Del</button>'
         + '</div>';
-    }).join('') + '</div>';
+    }).join('');
+    el.appendChild(listDiv);
+
+    // Track current playing
+    _currentFile = '';
+    files.forEach(function (f) { if (f.playing) _currentFile = f.name; });
   } catch (e) {
     var el = document.getElementById('fl');
-    el.innerHTML = '<div class="card-title">Files</div>'
-                 + '<div class="empty">Error loading files</div>';
+    var oldList = el.querySelector('.file-list');
+    if (oldList) oldList.remove();
+    var oldEmpty = el.querySelector('.empty');
+    if (oldEmpty) oldEmpty.remove();
+    var errDiv = document.createElement('div');
+    errDiv.className = 'empty';
+    errDiv.textContent = 'Error loading files';
+    el.appendChild(errDiv);
   }
 }
 
@@ -344,6 +371,47 @@ dz.addEventListener('drop', function (e) {
   if (e.dataTransfer.files.length) uf(e.dataTransfer.files);
 });
 
+// Timezone setting -- fetch current timezone and allow saving
+(function () {
+  var tzSelect = document.getElementById('tzSelect');
+  var btnTzSave = document.getElementById('btnTzSave');
+
+  fetch('/api/timezone').then(function (r) { return r.json(); }).then(function (d) {
+    if (d.timezone) {
+      // If detected timezone isn't in the select options, add it dynamically
+      var found = false;
+      for (var i = 0; i < tzSelect.options.length; i++) {
+        if (tzSelect.options[i].value === d.timezone) { found = true; break; }
+      }
+      if (!found) {
+        var opt = document.createElement('option');
+        opt.value = d.timezone;
+        opt.textContent = d.timezone + ' (detected)';
+        tzSelect.appendChild(opt);
+      }
+      tzSelect.value = d.timezone;
+    }
+  }).catch(function () {});
+
+  btnTzSave.addEventListener('click', function () {
+    btnTzSave.disabled = true;
+    var params = 'tz=' + encodeURIComponent(tzSelect.value);
+    fetch('/api/timezone?' + params, { method: 'POST' })
+      .then(function () {
+        btnTzSave.classList.add('saved');
+        btnTzSave.textContent = 'Saved';
+      })
+      .catch(function () {})
+      .finally(function () {
+        btnTzSave.disabled = false;
+        setTimeout(function () {
+          btnTzSave.classList.remove('saved');
+          btnTzSave.textContent = 'Save Timezone';
+        }, 2000);
+      });
+  });
+})();
+
 // Theme toggle (dark / light), persisted in localStorage
 (function () {
   var saved = localStorage.getItem('theme');
@@ -366,6 +434,125 @@ dz.addEventListener('drop', function (e) {
   });
 })();
 
+// QGIF preview renderer
+var _previewTimer = null;
+var _previewFile = '';
+
+function parseQgif(buf) {
+  var view = new DataView(buf);
+  var frameCount = view.getUint8(0);
+  var width = view.getUint16(1, true);
+  var height = view.getUint16(3, true);
+  var delays = [];
+  for (var i = 0; i < frameCount; i++) {
+    delays.push(view.getUint16(5 + i * 2, true));
+  }
+  var frameSize = Math.ceil(width * height / 8);
+  var dataStart = 5 + frameCount * 2;
+  var frames = [];
+  for (var i = 0; i < frameCount; i++) {
+    frames.push(new Uint8Array(buf, dataStart + i * frameSize, frameSize));
+  }
+  return { frameCount: frameCount, width: width, height: height, delays: delays, frames: frames };
+}
+
+function renderFrame(ctx, frame, w, h, scale) {
+  var imgData = ctx.createImageData(w * scale, h * scale);
+  var data = imgData.data;
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      var bitIndex = y * w + x;
+      var byteIndex = Math.floor(bitIndex / 8);
+      var bitPos = 7 - (bitIndex % 8);
+      var bit = (frame[byteIndex] >> bitPos) & 1;
+      // In qgif: 0 = pixel on (white on OLED), 1 = pixel off
+      var color = bit ? 0 : 255;
+      for (var sy = 0; sy < scale; sy++) {
+        for (var sx = 0; sx < scale; sx++) {
+          var px = ((y * scale + sy) * w * scale + (x * scale + sx)) * 4;
+          data[px] = color;
+          data[px + 1] = color;
+          data[px + 2] = color;
+          data[px + 3] = 255;
+        }
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function startPreview(filename) {
+  // Stop existing animation
+  if (_previewTimer) { clearTimeout(_previewTimer); _previewTimer = null; }
+
+  var wrap = document.getElementById('previewWrap');
+  var canvas = document.getElementById('previewCanvas');
+  var nameEl = document.getElementById('previewName');
+
+  if (!filename) { wrap.style.display = 'none'; return; }
+
+  _previewFile = filename;
+  nameEl.textContent = filename;
+
+  fetch('/' + encodeURIComponent(filename))
+    .then(function (r) { return r.arrayBuffer(); })
+    .then(function (buf) {
+      if (_previewFile !== filename) return; // changed while fetching
+      var qgif = parseQgif(buf);
+      var scale = 2;
+      canvas.width = qgif.width * scale;
+      canvas.height = qgif.height * scale;
+      var ctx = canvas.getContext('2d');
+      wrap.style.display = 'block';
+
+      var frameIdx = 0;
+      function tick() {
+        if (_previewFile !== filename) return;
+        renderFrame(ctx, qgif.frames[frameIdx], qgif.width, qgif.height, scale);
+        var delay = qgif.delays[frameIdx] || 100;
+        frameIdx = (frameIdx + 1) % qgif.frameCount;
+        _previewTimer = setTimeout(tick, delay);
+      }
+      tick();
+    })
+    .catch(function () {
+      wrap.style.display = 'none';
+    });
+}
+
+// Track currently playing file and sync highlighting
+var _currentFile = '';
+
+// Poll current playing file every 3 seconds
+function pollCurrent() {
+  fetch('/api/current').then(function (r) { return r.json(); }).then(function (d) {
+    if (d.name !== _currentFile) {
+      _currentFile = d.name;
+      // Update file list highlighting
+      document.querySelectorAll('.file-name').forEach(function (el) {
+        if (el.textContent === _currentFile) {
+          el.classList.add('playing');
+        } else {
+          el.classList.remove('playing');
+        }
+      });
+      // Trigger preview update
+      if (typeof startPreview === 'function') startPreview(_currentFile);
+    }
+  }).catch(function () {});
+}
+setInterval(pollCurrent, 3000);
+
+// Card collapse toggle -- click card-title to expand/collapse (only collapsible cards)
+(function () {
+  document.querySelectorAll('.collapsible .card-title').forEach(function (title) {
+    title.addEventListener('click', function () {
+      title.parentElement.classList.toggle('collapsed');
+    });
+  });
+})();
+
 // Initial load
 ls();
 lf();
+pollCurrent();

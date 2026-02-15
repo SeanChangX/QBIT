@@ -390,6 +390,44 @@ static void handlePostPins(AsyncWebServerRequest *request) {
 }
 
 // ==========================================================================
+//  Handlers -- Current playing file
+// ==========================================================================
+
+static void handleCurrent(AsyncWebServerRequest *request) {
+    String current = gifPlayerGetCurrentFile();
+    String json = "{\"name\":\"" + current + "\"}";
+    request->send(200, "application/json", json);
+}
+
+// ==========================================================================
+//  Handlers -- Timezone API
+// ==========================================================================
+
+static void handleGetTimezone(AsyncWebServerRequest *request) {
+    String json = "{\"timezone\":\"" + getTimezoneIANA() + "\"}";
+    request->send(200, "application/json", json);
+}
+
+static void handlePostTimezone(AsyncWebServerRequest *request) {
+    // Accept both "tz" and "iana" param names for the timezone
+    String tz;
+    if (request->hasParam("tz")) {
+        tz = request->getParam("tz")->value();
+    } else if (request->hasParam("iana")) {
+        tz = request->getParam("iana")->value();
+    }
+    if (tz.length() > 0) {
+        setTimezoneIANA(tz);
+        timeManagerSetTimezone(tz);
+    } else {
+        // Empty value = auto-detect: clear saved timezone
+        setTimezoneIANA("");
+    }
+    saveSettings();
+    handleGetTimezone(request);
+}
+
+// ==========================================================================
 //  Init
 // ==========================================================================
 
@@ -408,6 +446,7 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/upload",  HTTP_POST, handleUploadDone, handleUploadData);
     server.on("/api/delete",   HTTP_POST, handleDelete);
     server.on("/api/play",     HTTP_POST, handlePlay);
+    server.on("/api/current",  HTTP_GET,  handleCurrent);
     server.on("/api/settings",      HTTP_GET,  handleGetSettings);
     server.on("/api/settings",      HTTP_POST, handlePostSettings);
     server.on("/api/device",        HTTP_GET,  handleGetDevice);
@@ -416,4 +455,16 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/mqtt",          HTTP_POST, handlePostMqtt);
     server.on("/api/pins",          HTTP_GET,  handleGetPins);
     server.on("/api/pins",          HTTP_POST, handlePostPins);
+    server.on("/api/timezone",      HTTP_GET,  handleGetTimezone);
+    server.on("/api/timezone",      HTTP_POST, handlePostTimezone);
+
+    // Catch-all: serve .qgif files from LittleFS for browser preview
+    server.onNotFound([](AsyncWebServerRequest *request) {
+        String path = request->url();
+        if (request->method() == HTTP_GET && path.endsWith(".qgif") && LittleFS.exists(path)) {
+            request->send(LittleFS, path, "application/octet-stream");
+        } else {
+            request->send(404, "text/plain", "Not found");
+        }
+    });
 }

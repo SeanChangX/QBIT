@@ -1,5 +1,9 @@
 #include "gif_player.h"
 #include <LittleFS.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+
+extern SemaphoreHandle_t gifPlayerMutex;
 
 // ---------------------------------------------------------------------------
 // Internal state
@@ -239,20 +243,30 @@ void gifPlayerSetIdleAnimation(const AnimatedGIF *idle) {
 }
 
 void gifPlayerSetFile(const String &filename) {
+  if (gifPlayerMutex) xSemaphoreTake(gifPlayerMutex, portMAX_DELAY);
   _requestedFile = filename;
   _fileChanged   = true;
+  if (gifPlayerMutex) xSemaphoreGive(gifPlayerMutex);
 }
 
 String gifPlayerGetCurrentFile() {
-  return _currentFile;
+  if (gifPlayerMutex) xSemaphoreTake(gifPlayerMutex, portMAX_DELAY);
+  String f = _currentFile;
+  if (gifPlayerMutex) xSemaphoreGive(gifPlayerMutex);
+  return f;
 }
 
 void gifPlayerSetSpeed(uint16_t divisor) {
+  if (gifPlayerMutex) xSemaphoreTake(gifPlayerMutex, portMAX_DELAY);
   _speedDivisor = (divisor > 0) ? divisor : 1;
+  if (gifPlayerMutex) xSemaphoreGive(gifPlayerMutex);
 }
 
 uint16_t gifPlayerGetSpeed() {
-  return _speedDivisor;
+  if (gifPlayerMutex) xSemaphoreTake(gifPlayerMutex, portMAX_DELAY);
+  uint16_t s = _speedDivisor;
+  if (gifPlayerMutex) xSemaphoreGive(gifPlayerMutex);
+  return s;
 }
 
 void gifPlayerTick() {
