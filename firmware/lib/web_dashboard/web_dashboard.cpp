@@ -1,6 +1,7 @@
 #include "web_dashboard.h"
 #include "gif_player.h"
 #include <LittleFS.h>
+#include <ArduinoJson.h>
 
 // ==========================================================================
 //  Upload state
@@ -9,6 +10,41 @@
 static File   _uploadFile;
 static bool   _uploadOk    = false;
 static String _uploadError;
+
+// ==========================================================================
+//  Path sanitization (prevent path traversal)
+// ==========================================================================
+
+#define MAX_BASENAME_LEN 64
+
+// Returns a safe basename for a file under "/", or empty string if invalid.
+// Rejects "..", "/", "\\", NUL, and limits length.
+static String sanitizeFileBasename(const String &input) {
+    if (input.length() == 0 || input.length() > MAX_BASENAME_LEN)
+        return "";
+    for (size_t i = 0; i < input.length(); i++) {
+        char c = input[i];
+        if (c == '\0' || c == '/' || c == '\\')
+            return "";
+    }
+    if (input.indexOf("..") >= 0)
+        return "";
+    return input;
+}
+
+// Normalize request path to a single segment under root for .qgif serving.
+// Returns path like "/foo.qgif" or empty if invalid.
+static String normalizeQgifPath(const String &url) {
+    String path = url;
+    path.trim();
+    if (path.length() == 0) return "";
+    if (path.startsWith("/")) path = path.substring(1);
+    if (path.length() == 0 || path.indexOf("..") >= 0 || path.indexOf('/') >= 0)
+        return "";
+    if (!path.endsWith(".qgif")) return "";
+    if (path.length() > MAX_BASENAME_LEN) return "";
+    return "/" + path;
+}
 
 // ==========================================================================
 //  Helpers
@@ -58,11 +94,11 @@ static void handleFavicon(AsyncWebServerRequest *request) {
 // ==========================================================================
 
 static void handleList(AsyncWebServerRequest *request) {
-    String json = "[";
+    StaticJsonDocument<2048> doc;
+    JsonArray arr = doc.to<JsonArray>();
     File root = LittleFS.open("/");
     if (root && root.isDirectory()) {
         String current = gifPlayerGetCurrentFile();
-        bool first = true;
         File f = root.openNextFile();
         while (f) {
             String name = String(f.name());
@@ -70,36 +106,40 @@ static void handleList(AsyncWebServerRequest *request) {
             f.close();
             if (name.startsWith("/")) name = name.substring(1);
             if (name.endsWith(".qgif")) {
-                if (!first) json += ",";
-                json += "{\"name\":\"" + name + "\",\"size\":" + String(sz);
-                json += ",\"playing\":" + String(name == current ? "true" : "false") + "}";
-                first = false;
+                JsonObject obj = arr.add<JsonObject>();
+                obj["name"]    = name;
+                obj["size"]    = sz;
+                obj["playing"] = (name == current);
             }
             f = root.openNextFile();
         }
         root.close();
     }
-    json += "]";
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
 }
 
 static void handleStorage(AsyncWebServerRequest *request) {
-    size_t total = LittleFS.totalBytes();
-    size_t used  = LittleFS.usedBytes();
-    String json  = "{\"total\":" + String(total) +
-                   ",\"used\":"  + String(used)  +
-                   ",\"free\":"  + String(total - used) + "}";
+    StaticJsonDocument<128> doc;
+    doc["total"] = LittleFS.totalBytes();
+    doc["used"]  = LittleFS.usedBytes();
+    doc["free"]  = LittleFS.totalBytes() - LittleFS.usedBytes();
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
 }
 
-// Called when the upload POST request completes (after all chunks received).
 static void handleUploadDone(AsyncWebServerRequest *request) {
+    StaticJsonDocument<256> doc;
     if (_uploadOk) {
-        request->send(200, "application/json", "{\"ok\":true}");
+        doc["ok"] = true;
     } else {
-        request->send(507, "application/json",
-                      "{\"error\":\"" + _uploadError + "\"}");
+        doc["error"] = _uploadError;
     }
+    String json;
+    serializeJson(doc, json);
+    request->send(_uploadOk ? 200 : 507, "application/json", json);
 }
 
 // Called for each chunk of the multipart file upload.
@@ -122,6 +162,16 @@ static void handleUploadData(AsyncWebServerRequest *request,
             return;
         }
 
+        // Path traversal: use basename only and sanitize
+        int lastSlash = filename.lastIndexOf('/');
+        String basename = lastSlash >= 0 ? filename.substring(lastSlash + 1) : filename;
+        basename = sanitizeFileBasename(basename);
+        if (basename.length() == 0 || !basename.endsWith(".qgif")) {
+            _uploadOk    = false;
+            _uploadError = "Invalid filename";
+            return;
+        }
+
         // Rough free-space check (exact size unknown at this point)
         size_t freeBytes = LittleFS.totalBytes() - LittleFS.usedBytes();
         if (freeBytes < 2048) {
@@ -130,7 +180,7 @@ static void handleUploadData(AsyncWebServerRequest *request,
             return;
         }
 
-        _uploadFile = LittleFS.open("/" + filename, "w");
+        _uploadFile = LittleFS.open("/" + basename, "w");
         if (!_uploadFile) {
             _uploadOk    = false;
             _uploadError = "Failed to create file";
@@ -149,10 +199,17 @@ static void handleUploadData(AsyncWebServerRequest *request,
     if (final) {
         if (_uploadFile) _uploadFile.close();
 
-        String path = "/" + filename;
+        int lastSlash = filename.lastIndexOf('/');
+        String basename = lastSlash >= 0 ? filename.substring(lastSlash + 1) : filename;
+        basename = sanitizeFileBasename(basename);
+        if (basename.length() == 0) {
+            _uploadOk = false;
+            _uploadError = "Invalid filename";
+            return;
+        }
+        String path = "/" + basename;
 
         if (!_uploadOk) {
-            // Remove partial / invalid file
             LittleFS.remove(path);
             return;
         }
@@ -184,12 +241,8 @@ static void handleUploadData(AsyncWebServerRequest *request,
             return;
         }
 
-        // Auto-play if nothing is currently playing
-        if (gifPlayerGetCurrentFile().length() == 0) {
-            String n = filename;
-            if (n.startsWith("/")) n = n.substring(1);
-            gifPlayerSetFile(n);
-        }
+        if (gifPlayerGetCurrentFile().length() == 0)
+            gifPlayerSetFile(basename);
     }
 }
 
@@ -198,7 +251,11 @@ static void handleDelete(AsyncWebServerRequest *request) {
         request->send(400, "application/json", "{\"error\":\"Missing name\"}");
         return;
     }
-    String name = request->getParam("name")->value();
+    String name = sanitizeFileBasename(request->getParam("name")->value());
+    if (name.length() == 0) {
+        request->send(400, "application/json", "{\"error\":\"Invalid name\"}");
+        return;
+    }
 
     String path = "/" + name;
     if (!LittleFS.exists(path)) {
@@ -208,10 +265,9 @@ static void handleDelete(AsyncWebServerRequest *request) {
 
     LittleFS.remove(path);
 
-    // If we deleted the playing file, switch to another or stop
     if (gifPlayerGetCurrentFile() == name) {
         String next = gifPlayerGetFirstFile();
-        gifPlayerSetFile(next);  // empty string stops playback
+        gifPlayerSetFile(next);
     }
 
     request->send(200, "application/json", "{\"ok\":true}");
@@ -222,10 +278,12 @@ static void handleDelete(AsyncWebServerRequest *request) {
 // ==========================================================================
 
 static void handleGetSettings(AsyncWebServerRequest *request) {
-    String json = "{\"speed\":"      + String(getPlaybackSpeed())
-                + ",\"brightness\":" + String(getDisplayBrightness())
-                + ",\"volume\":"     + String(getBuzzerVolume())
-                + "}";
+    StaticJsonDocument<128> doc;
+    doc["speed"]      = getPlaybackSpeed();
+    doc["brightness"] = getDisplayBrightness();
+    doc["volume"]     = getBuzzerVolume();
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
 }
 
@@ -260,7 +318,11 @@ static void handlePlay(AsyncWebServerRequest *request) {
         request->send(400, "application/json", "{\"error\":\"Missing name\"}");
         return;
     }
-    String name = request->getParam("name")->value();
+    String name = sanitizeFileBasename(request->getParam("name")->value());
+    if (name.length() == 0) {
+        request->send(400, "application/json", "{\"error\":\"Invalid name\"}");
+        return;
+    }
 
     String path = "/" + name;
     if (!LittleFS.exists(path)) {
@@ -277,8 +339,11 @@ static void handlePlay(AsyncWebServerRequest *request) {
 // ==========================================================================
 
 static void handleGetDevice(AsyncWebServerRequest *request) {
-    String json = "{\"id\":\"" + getDeviceId()
-                + "\",\"name\":\"" + getDeviceName() + "\"}";
+    StaticJsonDocument<256> doc;
+    doc["id"]   = getDeviceId();
+    doc["name"] = getDeviceName();
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
 }
 
@@ -300,13 +365,15 @@ static void handlePostDevice(AsyncWebServerRequest *request) {
 // ==========================================================================
 
 static void handleGetMqtt(AsyncWebServerRequest *request) {
-    String json = "{\"enabled\":" + String(getMqttEnabled() ? "true" : "false")
-                + ",\"host\":\"" + getMqttHost() + "\""
-                + ",\"port\":"   + String(getMqttPort())
-                + ",\"user\":\"" + getMqttUser() + "\""
-                + ",\"pass\":\"" + getMqttPass() + "\""
-                + ",\"prefix\":\"" + getMqttPrefix() + "\""
-                + "}";
+    StaticJsonDocument<512> doc;
+    doc["enabled"] = getMqttEnabled();
+    doc["host"]    = getMqttHost();
+    doc["port"]   = getMqttPort();
+    doc["user"]   = getMqttUser();
+    doc["pass"]   = getMqttPass();
+    doc["prefix"] = getMqttPrefix();
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
 }
 
@@ -346,10 +413,13 @@ static bool isValidPin(uint8_t pin) {
 }
 
 static void handleGetPins(AsyncWebServerRequest *request) {
-    String json = "{\"touch\":" + String(getPinTouch())
-                + ",\"buzzer\":" + String(getPinBuzzer())
-                + ",\"sda\":" + String(getPinSDA())
-                + ",\"scl\":" + String(getPinSCL()) + "}";
+    StaticJsonDocument<128> doc;
+    doc["touch"]  = getPinTouch();
+    doc["buzzer"] = getPinBuzzer();
+    doc["sda"]    = getPinSDA();
+    doc["scl"]    = getPinSCL();
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
 }
 
@@ -394,8 +464,10 @@ static void handlePostPins(AsyncWebServerRequest *request) {
 // ==========================================================================
 
 static void handleCurrent(AsyncWebServerRequest *request) {
-    String current = gifPlayerGetCurrentFile();
-    String json = "{\"name\":\"" + current + "\"}";
+    StaticJsonDocument<256> doc;
+    doc["name"] = gifPlayerGetCurrentFile();
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
 }
 
@@ -404,7 +476,10 @@ static void handleCurrent(AsyncWebServerRequest *request) {
 // ==========================================================================
 
 static void handleGetTimezone(AsyncWebServerRequest *request) {
-    String json = "{\"timezone\":\"" + getTimezoneIANA() + "\"}";
+    StaticJsonDocument<128> doc;
+    doc["timezone"] = getTimezoneIANA();
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
 }
 
@@ -458,10 +533,14 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/timezone",      HTTP_GET,  handleGetTimezone);
     server.on("/api/timezone",      HTTP_POST, handlePostTimezone);
 
-    // Catch-all: serve .qgif files from LittleFS for browser preview
+    // Catch-all: serve .qgif files from LittleFS for browser preview (path-normalized)
     server.onNotFound([](AsyncWebServerRequest *request) {
-        String path = request->url();
-        if (request->method() == HTTP_GET && path.endsWith(".qgif") && LittleFS.exists(path)) {
+        if (request->method() != HTTP_GET) {
+            request->send(404, "text/plain", "Not found");
+            return;
+        }
+        String path = normalizeQgifPath(request->url());
+        if (path.length() > 0 && LittleFS.exists(path)) {
             request->send(LittleFS, path, "application/octet-stream");
         } else {
             request->send(404, "text/plain", "Not found");

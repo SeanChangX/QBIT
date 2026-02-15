@@ -56,11 +56,15 @@ uint16_t pokeMaxWidth() {
 }
 
 // ==========================================================================
-//  Base64 decode helper
+//  Base64 decode helper (capped to prevent OOM from malicious input)
 // ==========================================================================
+
+#define BASE64_MAX_INPUT_LEN 8192   // decodes to ~6KB max per bitmap
 
 uint8_t* decodeBase64Alloc(const char *b64, size_t *outLen) {
     size_t b64Len = strlen(b64);
+    if (b64Len == 0 || b64Len > BASE64_MAX_INPUT_LEN)
+        return nullptr;
     size_t maxOut = (b64Len * 3) / 4 + 4;
     uint8_t *buf = (uint8_t *)malloc(maxOut);
     if (!buf) return nullptr;

@@ -5,12 +5,17 @@
 #include "gif_player.h"
 #include <Preferences.h>
 #include <WiFi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 // ==========================================================================
 //  Internal state
 // ==========================================================================
-static Preferences _prefs;
-static bool        _prefsReady = false;
+static Preferences    _prefs;
+static bool           _prefsReady = false;
+static SemaphoreHandle_t _prefsMutex = NULL;
+
+#define TZ_IANA_MAX_LEN 64
 
 // GPIO pin defaults (ESP32-C3 Super Mini)
 static uint8_t _pinTouch  = 1;
@@ -79,6 +84,9 @@ String getApPassword() {
 // ==========================================================================
 
 void settingsInit() {
+    if (_prefsMutex == NULL) {
+        _prefsMutex = xSemaphoreCreateMutex();
+    }
     _prefs.begin("qbit", false);
     _prefsReady = true;
 
@@ -96,6 +104,7 @@ void loadSettings() {
     if (!_prefsReady) {
         settingsInit();
     }
+    if (xSemaphoreTake(_prefsMutex, portMAX_DELAY) != pdTRUE) return;
 
     _brightness   = _prefs.getUChar("bright", 0x80);
     _buzzerVolume = _prefs.getUChar("volume", 100);
@@ -114,8 +123,13 @@ void loadSettings() {
     _mqttPrefix  = _prefs.getString("mqttPfx",  "qbit");
     _mqttEnabled = _prefs.getBool("mqttOn", false);
 
-    // Timezone
-    _tzIANA   = _prefs.getString("tzName", "");
+    // Timezone (truncate if stored value exceeds limit)
+    _tzIANA = _prefs.getString("tzName", "");
+    if (_tzIANA.length() > TZ_IANA_MAX_LEN) {
+        _tzIANA = _tzIANA.substring(0, TZ_IANA_MAX_LEN);
+    }
+
+    xSemaphoreGive(_prefsMutex);
 
     // Apply speed
     gifPlayerSetSpeed(speed);
@@ -132,6 +146,8 @@ void loadSettings() {
 
 void saveSettings() {
     if (!_prefsReady) return;
+    if (xSemaphoreTake(_prefsMutex, portMAX_DELAY) != pdTRUE) return;
+
     _prefs.putUShort("speed",    gifPlayerGetSpeed());
     _prefs.putUChar("bright",    _brightness);
     _prefs.putUChar("volume",    _buzzerVolume);
@@ -147,6 +163,7 @@ void saveSettings() {
     _prefs.putUChar("pinSDA",    _pinSDA);
     _prefs.putUChar("pinSCL",    _pinSCL);
     _prefs.putString("tzName",   _tzIANA);
+    xSemaphoreGive(_prefsMutex);
     Serial.println("Settings saved to NVS");
 }
 
@@ -161,6 +178,7 @@ uint8_t getPinSCL()    { return _pinSCL; }
 
 void setPinConfig(uint8_t touch, uint8_t buzzer, uint8_t sda, uint8_t scl) {
     if (!_prefsReady) return;
+    if (xSemaphoreTake(_prefsMutex, portMAX_DELAY) != pdTRUE) return;
     _pinTouch  = touch;
     _pinBuzzer = buzzer;
     _pinSDA    = sda;
@@ -169,6 +187,7 @@ void setPinConfig(uint8_t touch, uint8_t buzzer, uint8_t sda, uint8_t scl) {
     _prefs.putUChar("pinBuzzer", _pinBuzzer);
     _prefs.putUChar("pinSDA",    _pinSDA);
     _prefs.putUChar("pinSCL",    _pinSCL);
+    xSemaphoreGive(_prefsMutex);
     Serial.println("Pin config saved -- rebooting...");
     delay(500);
     ESP.restart();
@@ -228,4 +247,10 @@ void setMqttConfig(const String &host, uint16_t port,
 // ==========================================================================
 
 String  getTimezoneIANA()  { return _tzIANA; }
-void    setTimezoneIANA(const String &tz) { _tzIANA = tz; }
+void    setTimezoneIANA(const String &tz) {
+    if (tz.length() > TZ_IANA_MAX_LEN) {
+        _tzIANA = tz.substring(0, TZ_IANA_MAX_LEN);
+    } else {
+        _tzIANA = tz;
+    }
+}

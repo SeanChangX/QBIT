@@ -218,21 +218,20 @@ void displayTask(void *param) {
                 case NetworkEvent::POKE_BITMAP:
                     if (_state != CLAIM_PROMPT && _state != MUTE_FEEDBACK
                         && _state != POKE_DISPLAY) {
-                        // Pass pre-decoded bitmap pointers to poke handler
-                        // (ownership transferred — poke handler will free)
                         handlePokeBitmapFromPtrs(
                             netEvt.sender, netEvt.text,
                             netEvt.senderBmp, netEvt.senderBmpWidth, netEvt.senderBmpLen,
                             netEvt.textBmp, netEvt.textBmpWidth, netEvt.textBmpLen);
+                        netEvt.senderBmp = nullptr;
+                        netEvt.textBmp   = nullptr;
                         if (getBuzzerVolume() > 0) {
                             noTone(getPinBuzzer());
                             rtttl::begin(getPinBuzzer(), POKE_MELODY);
                         }
                         enterState(POKE_DISPLAY);
                     } else {
-                        // Not in a state to show — free the allocated bitmaps
-                        if (netEvt.senderBmp) free(netEvt.senderBmp);
-                        if (netEvt.textBmp) free(netEvt.textBmp);
+                        if (netEvt.senderBmp) { free(netEvt.senderBmp); netEvt.senderBmp = nullptr; }
+                        if (netEvt.textBmp)   { free(netEvt.textBmp);   netEvt.textBmp   = nullptr; }
                     }
                     break;
 

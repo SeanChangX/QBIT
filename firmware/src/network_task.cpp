@@ -32,6 +32,19 @@
 #define WS_RECONNECT_MS 5000
 #define WIFI_RECONNECT_TIMEOUT_MS 30000
 
+// Bitmap poke: 1bpp row-major, size = (height_pages) * width, height_pages <= 8
+#define POKE_BMP_MAX_WIDTH  512
+#define POKE_BMP_MAX_PAGES 8
+
+// Validate decoded bitmap size matches claimed width (no integer overflow / OOB).
+static bool isValidBitmapSize(uint16_t width, size_t decodedLen) {
+    if (width == 0 || width > POKE_BMP_MAX_WIDTH) return false;
+    if (decodedLen == 0) return false;
+    if (decodedLen % width != 0) return false;
+    size_t pages = decodedLen / width;
+    return pages <= POKE_BMP_MAX_PAGES;
+}
+
 // ==========================================================================
 //  External objects (created in main.cpp)
 // ==========================================================================
@@ -81,7 +94,7 @@ static bool wsConnect() {
 
 static void wsSendDeviceInfo() {
     if (!_wsConnected) return;
-    JsonDocument doc;
+    StaticJsonDocument<384> doc;
     doc["type"]    = "device.register";
     doc["id"]      = getDeviceId();
     doc["name"]    = getDeviceName();
@@ -98,7 +111,7 @@ void networkSendDeviceInfo() {
 
 void networkSendClaimConfirm() {
     if (!_wsConnected) return;
-    JsonDocument doc;
+    StaticJsonDocument<64> doc;
     doc["type"] = "claim_confirm";
     String msg;
     serializeJson(doc, msg);
@@ -108,7 +121,7 @@ void networkSendClaimConfirm() {
 
 void networkSendClaimReject() {
     if (!_wsConnected) return;
-    JsonDocument doc;
+    StaticJsonDocument<64> doc;
     doc["type"] = "claim_reject";
     String msg;
     serializeJson(doc, msg);
@@ -152,7 +165,7 @@ static void wsMessage(WebsocketsClient &client, WebsocketsMessage message) {
     if (!message.isText()) return;
 
     String data = message.data();
-    JsonDocument doc;
+    StaticJsonDocument<2048> doc;
     if (deserializeJson(doc, data)) return;
 
     const char *msgType = doc["type"];
@@ -168,23 +181,37 @@ static void wsMessage(WebsocketsClient &client, WebsocketsMessage message) {
             const char *textBmp   = doc["textBitmap"];
             uint16_t textW        = doc["textBitmapWidth"] | 0;
 
-            if (senderW > 0 && textW > 0) {
-                // Decode bitmaps in this task context, then pass pointers
+            if (senderW > 0 && textW > 0 &&
+                senderW <= POKE_BMP_MAX_WIDTH && textW <= POKE_BMP_MAX_WIDTH) {
                 size_t sLen = 0, tLen = 0;
                 uint8_t *sBmp = decodeBase64Alloc(senderBmp, &sLen);
                 uint8_t *tBmp = decodeBase64Alloc(textBmp, &tLen);
 
-                NetworkEvent evt = {};
-                evt.kind = NetworkEvent::POKE_BITMAP;
-                strncpy(evt.sender, sender, sizeof(evt.sender) - 1);
-                strncpy(evt.text, text, sizeof(evt.text) - 1);
-                evt.senderBmp = sBmp;
-                evt.senderBmpWidth = senderW;
-                evt.senderBmpLen = sLen;
-                evt.textBmp = tBmp;
-                evt.textBmpWidth = textW;
-                evt.textBmpLen = tLen;
-                xQueueSend(networkEventQueue, &evt, pdMS_TO_TICKS(100));
+                bool valid = sBmp && tBmp &&
+                             isValidBitmapSize(senderW, sLen) &&
+                             isValidBitmapSize(textW, tLen);
+
+                if (valid) {
+                    NetworkEvent evt = {};
+                    evt.kind = NetworkEvent::POKE_BITMAP;
+                    strncpy(evt.sender, sender, sizeof(evt.sender) - 1);
+                    strncpy(evt.text, text, sizeof(evt.text) - 1);
+                    evt.senderBmp = sBmp;
+                    evt.senderBmpWidth = senderW;
+                    evt.senderBmpLen = sLen;
+                    evt.textBmp = tBmp;
+                    evt.textBmpWidth = textW;
+                    evt.textBmpLen = tLen;
+                    xQueueSend(networkEventQueue, &evt, pdMS_TO_TICKS(100));
+                } else {
+                    if (sBmp) free(sBmp);
+                    if (tBmp) free(tBmp);
+                    NetworkEvent evt = {};
+                    evt.kind = NetworkEvent::POKE;
+                    strncpy(evt.sender, sender, sizeof(evt.sender) - 1);
+                    strncpy(evt.text, text, sizeof(evt.text) - 1);
+                    xQueueSend(networkEventQueue, &evt, pdMS_TO_TICKS(100));
+                }
             } else {
                 NetworkEvent evt = {};
                 evt.kind = NetworkEvent::POKE;
@@ -200,7 +227,6 @@ static void wsMessage(WebsocketsClient &client, WebsocketsMessage message) {
             xQueueSend(networkEventQueue, &evt, pdMS_TO_TICKS(100));
         }
 
-        // Publish to MQTT
         mqttPublishPokeEvent(sender, text);
     }
 
@@ -228,7 +254,7 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
 
     // Poke command (JSON payload)
     if (topicStr == prefix + "/" + id + "/command") {
-        JsonDocument doc;
+        StaticJsonDocument<1024> doc;
         if (deserializeJson(doc, payload, length)) return;
         const char *cmd = doc["command"];
         if (!cmd) return;
@@ -298,7 +324,7 @@ static void mqttReconnect() {
         _mqttClient.publish(statusTopic.c_str(), "online", true);
 
         String infoTopic = getMqttPrefix() + "/" + getDeviceId() + "/info";
-        JsonDocument info;
+        StaticJsonDocument<256> info;
         info["id"]   = getDeviceId();
         info["name"] = getDeviceName();
         info["ip"]   = WiFi.localIP().toString();
@@ -426,7 +452,7 @@ void networkTask(void *param) {
 void mqttPublishPokeEvent(const char *sender, const char *text) {
     if (!getMqttEnabled() || !_mqttClient.connected()) return;
     String topic = getMqttPrefix() + "/" + getDeviceId() + "/poke";
-    JsonDocument doc;
+    StaticJsonDocument<384> doc;
     doc["sender"] = sender;
     doc["text"]   = text;
     doc["time"]   = timeManagerGetISO8601();
@@ -451,7 +477,7 @@ void mqttPublishTouchEvent(GestureType type) {
         case LONG_PRESS:  typeStr = "long_press";  break;
         default: break;
     }
-    JsonDocument doc;
+    StaticJsonDocument<128> doc;
     doc["type"] = typeStr;
     doc["time"] = timeManagerGetISO8601();
     String payload;

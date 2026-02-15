@@ -15,7 +15,7 @@ void mqttPublishHADiscovery(PubSubClient *client) {
     String prefix = getMqttPrefix();
 
     // Shared device block
-    JsonDocument devBlock;
+    StaticJsonDocument<256> devBlock;
     JsonArray ids = devBlock["ids"].to<JsonArray>();
     ids.add("qbit_" + idLow);
     devBlock["name"] = name;
@@ -26,7 +26,7 @@ void mqttPublishHADiscovery(PubSubClient *client) {
     // --- Binary sensor: online/offline status ---
     {
         String topic = "homeassistant/binary_sensor/qbit_" + idLow + "/status/config";
-        JsonDocument doc;
+        StaticJsonDocument<512> doc;
         doc["name"]         = "Status";
         doc["uniq_id"]      = "qbit_" + idLow + "_status";
         doc["object_id"]    = "qbit_" + idLow + "_status";
@@ -43,7 +43,7 @@ void mqttPublishHADiscovery(PubSubClient *client) {
     // --- Sensor: IP address ---
     {
         String topic = "homeassistant/sensor/qbit_" + idLow + "/ip/config";
-        JsonDocument doc;
+        StaticJsonDocument<512> doc;
         doc["name"]         = "IP Address";
         doc["uniq_id"]      = "qbit_" + idLow + "_ip";
         doc["object_id"]    = "qbit_" + idLow + "_ip";
@@ -59,13 +59,13 @@ void mqttPublishHADiscovery(PubSubClient *client) {
     // --- Button: poke trigger ---
     {
         String topic = "homeassistant/button/qbit_" + idLow + "/poke/config";
-        JsonDocument doc;
+        StaticJsonDocument<512> doc;
         doc["name"]         = "Poke";
         doc["uniq_id"]      = "qbit_" + idLow + "_poke";
         doc["object_id"]    = "qbit_" + idLow + "_poke";
         doc["cmd_t"]        = prefix + "/" + id + "/command";
 
-        JsonDocument pressDoc;
+        StaticJsonDocument<128> pressDoc;
         pressDoc["command"] = "poke";
         pressDoc["sender"]  = "Home Assistant";
         pressDoc["text"]    = "Poke!";
@@ -83,7 +83,7 @@ void mqttPublishHADiscovery(PubSubClient *client) {
     // --- Sensor: last poke received ---
     {
         String topic = "homeassistant/sensor/qbit_" + idLow + "/last_poke/config";
-        JsonDocument doc;
+        StaticJsonDocument<512> doc;
         doc["name"]          = "Last Poke";
         doc["uniq_id"]       = "qbit_" + idLow + "_last_poke";
         doc["object_id"]     = "qbit_" + idLow + "_last_poke";
@@ -101,7 +101,7 @@ void mqttPublishHADiscovery(PubSubClient *client) {
     // --- Switch: mute ---
     {
         String topic = "homeassistant/switch/qbit_" + idLow + "/mute/config";
-        JsonDocument doc;
+        StaticJsonDocument<384> doc;
         doc["name"]      = "Mute";
         doc["uniq_id"]   = "qbit_" + idLow + "_mute";
         doc["object_id"] = "qbit_" + idLow + "_mute";
@@ -117,7 +117,7 @@ void mqttPublishHADiscovery(PubSubClient *client) {
     // --- Sensor: touch ---
     {
         String topic = "homeassistant/sensor/qbit_" + idLow + "/touch/config";
-        JsonDocument doc;
+        StaticJsonDocument<384> doc;
         doc["name"]      = "Touch";
         doc["uniq_id"]   = "qbit_" + idLow + "_touch";
         doc["object_id"] = "qbit_" + idLow + "_touch";
@@ -134,7 +134,7 @@ void mqttPublishHADiscovery(PubSubClient *client) {
     // --- Button: next animation ---
     {
         String topic = "homeassistant/button/qbit_" + idLow + "/next/config";
-        JsonDocument doc;
+        StaticJsonDocument<384> doc;
         doc["name"]      = "Next Animation";
         doc["uniq_id"]   = "qbit_" + idLow + "_next";
         doc["object_id"] = "qbit_" + idLow + "_next";
