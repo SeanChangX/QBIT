@@ -204,8 +204,7 @@ void displayTask(void *param) {
         if (xQueueReceive(networkEventQueue, &netEvt, 0) == pdTRUE) {
             switch (netEvt.kind) {
                 case NetworkEvent::POKE:
-                    if (_state != CLAIM_PROMPT && _state != MUTE_FEEDBACK
-                        && _state != POKE_DISPLAY) {
+                    if (_state != CLAIM_PROMPT && _state != MUTE_FEEDBACK) {
                         handlePoke(netEvt.sender, netEvt.text);
                         if (getBuzzerVolume() > 0) {
                             noTone(getPinBuzzer());
@@ -216,8 +215,7 @@ void displayTask(void *param) {
                     break;
 
                 case NetworkEvent::POKE_BITMAP:
-                    if (_state != CLAIM_PROMPT && _state != MUTE_FEEDBACK
-                        && _state != POKE_DISPLAY) {
+                    if (_state != CLAIM_PROMPT && _state != MUTE_FEEDBACK) {
                         handlePokeBitmapFromPtrs(
                             netEvt.sender, netEvt.text,
                             netEvt.senderBmp, netEvt.senderBmpWidth, netEvt.senderBmpLen,

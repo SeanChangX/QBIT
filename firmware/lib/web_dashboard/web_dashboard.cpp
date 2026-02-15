@@ -2,6 +2,9 @@
 #include "gif_player.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#if defined(ESP32) || defined(ESP8266)
+#include <WiFi.h>
+#endif
 
 // ==========================================================================
 //  Upload state
@@ -507,8 +510,10 @@ static void handlePostTimezone(AsyncWebServerRequest *request) {
 // ==========================================================================
 
 void webDashboardInit(AsyncWebServer &server) {
+    // Dashboard at "/" only when STA is connected; when in AP mode (e.g. after WiFi lost
+    // and portal restarted), "/" is left for NetWizard so opening 192.168.4.1/ shows WiFi setup.
+    server.on("/", HTTP_GET, handleRoot).setFilter(ON_STA_FILTER);
     // Static assets (served from LittleFS data/ partition)
-    server.on("/",                  HTTP_GET,  handleRoot);
     server.on("/icon.svg",          HTTP_GET,  handleIcon);
     server.on("/favicon.ico",       HTTP_GET,  handleFavicon);
     server.on("/style.css",         HTTP_GET,  handleCSS);
