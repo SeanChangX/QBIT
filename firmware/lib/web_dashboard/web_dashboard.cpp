@@ -390,6 +390,30 @@ static void handlePostPins(AsyncWebServerRequest *request) {
 }
 
 // ==========================================================================
+//  Handlers -- Timezone API
+// ==========================================================================
+
+static void handleGetTimezone(AsyncWebServerRequest *request) {
+    String json = "{\"timezone\":\"" + getTimezoneIANA() + "\""
+                + ",\"offset\":" + String(getTimezoneOffset()) + "}";
+    request->send(200, "application/json", json);
+}
+
+static void handlePostTimezone(AsyncWebServerRequest *request) {
+    if (request->hasParam("tz")) {
+        String tz = request->getParam("tz")->value();
+        if (tz.length() > 0) {
+            setTimezoneIANA(tz);
+            timeManagerSetTimezone(tz);
+        }
+    }
+    if (request->hasParam("save")) {
+        saveSettings();
+    }
+    handleGetTimezone(request);
+}
+
+// ==========================================================================
 //  Init
 // ==========================================================================
 
@@ -416,4 +440,6 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/mqtt",          HTTP_POST, handlePostMqtt);
     server.on("/api/pins",          HTTP_GET,  handleGetPins);
     server.on("/api/pins",          HTTP_POST, handlePostPins);
+    server.on("/api/timezone",      HTTP_GET,  handleGetTimezone);
+    server.on("/api/timezone",      HTTP_POST, handlePostTimezone);
 }

@@ -344,6 +344,37 @@ dz.addEventListener('drop', function (e) {
   if (e.dataTransfer.files.length) uf(e.dataTransfer.files);
 });
 
+// Timezone setting -- fetch current timezone and allow saving
+(function () {
+  var tzSelect = document.getElementById('tzSelect');
+  var tzOffset = document.getElementById('tzOffset');
+  var btnTzSave = document.getElementById('btnTzSave');
+
+  fetch('/api/timezone').then(function (r) { return r.json(); }).then(function (d) {
+    if (d.iana) tzSelect.value = d.iana;
+    if (typeof d.offset === 'number') tzOffset.value = d.offset;
+  }).catch(function () {});
+
+  btnTzSave.addEventListener('click', function () {
+    btnTzSave.disabled = true;
+    var params = 'iana=' + encodeURIComponent(tzSelect.value)
+               + '&offset=' + encodeURIComponent(tzOffset.value || '0');
+    fetch('/api/timezone?' + params, { method: 'POST' })
+      .then(function () {
+        btnTzSave.classList.add('saved');
+        btnTzSave.textContent = 'Saved';
+      })
+      .catch(function () {})
+      .finally(function () {
+        btnTzSave.disabled = false;
+        setTimeout(function () {
+          btnTzSave.classList.remove('saved');
+          btnTzSave.textContent = 'Save Timezone';
+        }, 2000);
+      });
+  });
+})();
+
 // Theme toggle (dark / light), persisted in localStorage
 (function () {
   var saved = localStorage.getItem('theme');

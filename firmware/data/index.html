@@ -103,6 +103,46 @@
   </div>
 
   <div class="card">
+    <div class="card-title">Timezone</div>
+    <div class="setting">
+      <label class="setting-label">Zone</label>
+      <select id="tzSelect" class="input-select">
+        <option value="">Auto-detect</option>
+        <option value="Pacific/Midway">Pacific/Midway (UTC-11)</option>
+        <option value="Pacific/Honolulu">Pacific/Honolulu (UTC-10)</option>
+        <option value="America/Anchorage">America/Anchorage (UTC-9)</option>
+        <option value="America/Los_Angeles">America/Los_Angeles (UTC-8)</option>
+        <option value="America/Denver">America/Denver (UTC-7)</option>
+        <option value="America/Chicago">America/Chicago (UTC-6)</option>
+        <option value="America/New_York">America/New_York (UTC-5)</option>
+        <option value="America/Halifax">America/Halifax (UTC-4)</option>
+        <option value="America/Sao_Paulo">America/Sao_Paulo (UTC-3)</option>
+        <option value="Atlantic/South_Georgia">Atlantic/South_Georgia (UTC-2)</option>
+        <option value="Atlantic/Azores">Atlantic/Azores (UTC-1)</option>
+        <option value="Europe/London">Europe/London (UTC+0)</option>
+        <option value="Europe/Paris">Europe/Paris (UTC+1)</option>
+        <option value="Europe/Helsinki">Europe/Helsinki (UTC+2)</option>
+        <option value="Europe/Moscow">Europe/Moscow (UTC+3)</option>
+        <option value="Asia/Dubai">Asia/Dubai (UTC+4)</option>
+        <option value="Asia/Karachi">Asia/Karachi (UTC+5)</option>
+        <option value="Asia/Kolkata">Asia/Kolkata (UTC+5:30)</option>
+        <option value="Asia/Dhaka">Asia/Dhaka (UTC+6)</option>
+        <option value="Asia/Bangkok">Asia/Bangkok (UTC+7)</option>
+        <option value="Asia/Shanghai">Asia/Shanghai (UTC+8)</option>
+        <option value="Asia/Tokyo">Asia/Tokyo (UTC+9)</option>
+        <option value="Australia/Sydney">Australia/Sydney (UTC+10)</option>
+        <option value="Pacific/Noumea">Pacific/Noumea (UTC+11)</option>
+        <option value="Pacific/Auckland">Pacific/Auckland (UTC+12)</option>
+      </select>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Offset (s)</label>
+      <input type="number" id="tzOffset" class="input-text" style="width:100px;flex:none" placeholder="auto">
+    </div>
+    <button class="btn btn-save" id="btnTzSave">Save Timezone</button>
+  </div>
+
+  <div class="card">
     <div class="card-title">GPIO Pins</div>
     <div class="setting">
       <label class="setting-label">Touch</label>
