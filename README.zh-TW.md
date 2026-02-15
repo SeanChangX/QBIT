@@ -69,6 +69,12 @@
 | 觸控感測器 | TTP223 電容式觸控模組 | 數位輸出（觸碰時 HIGH） |
 | 蜂鳴器 | 無源蜂鳴器 | 透過 PWM (LEDC) 驅動 |
 
+### 3D 列印外殼 (STL)
+
+STL 模型檔可於 MakerWorld 下載：
+
+- [MakerWorld：QBIT - Your IoT Desk Robot (ESP32-C3)](https://makerworld.com/en/models/2400803-qbit-your-iot-desk-robot-esp32-c3#profileId-2631417)
+
 ### 接線方式
 
 以下為 ESP32-C3 Super Mini 的預設腳位配置。所有腳位皆可透過 `http://qbit.local` 網頁儀表板重新設定，設定值儲存於 NVS（重新開機後仍保留；更改腳位後需重新啟動才會生效）。

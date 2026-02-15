@@ -69,6 +69,12 @@
 | Touch Sensor | TTP223 capacitive touch module | Digital output (HIGH when touched) |
 | Buzzer | Passive buzzer | Driven via PWM (LEDC) |
 
+### 3D-Printed Case (STL)
+
+Download the STL files for the QBIT enclosure from MakerWorld:
+
+- [MakerWorld: QBIT - Your IoT Desk Robot (ESP32-C3)](https://makerworld.com/en/models/2400803-qbit-your-iot-desk-robot-esp32-c3#profileId-2631417)
+
 ### Wiring
 
 Default pin assignments for the ESP32-C3 Super Mini. All pins can be reassigned through the web dashboard at `http://qbit.local` and are stored in NVS (persistent across reboots; changes require a reboot to take effect).
