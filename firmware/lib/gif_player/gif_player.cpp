@@ -39,6 +39,8 @@ static bool               _idlePlaying    = false;
 static uint8_t            _idleFrame      = 0;
 static unsigned long      _idleLastFrameMs = 0;
 static uint8_t            _idleFrameBuf[QGIF_FRAME_SIZE];
+static uint8_t            _idleLoopCount  = 0;
+static uint8_t            _idleLoopTarget = 1;
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -277,8 +279,9 @@ void gifPlayerTick() {
     // If a file change was requested externally (e.g. touch), interrupt
     // the idle animation and fall through to the file-change handler.
     if (_fileChanged) {
-      _idlePlaying = false;
-      _idleFrame   = 0;
+      _idlePlaying  = false;
+      _idleFrame    = 0;
+      _idleLoopCount = 0;
     } else {
       uint16_t delayMs = _idleAnim->delays[_idleFrame] / _speedDivisor;
       if (delayMs < 1) delayMs = 1;
@@ -290,13 +293,17 @@ void gifPlayerTick() {
       _idleLastFrameMs = millis();
       _idleFrame++;
       if (_idleFrame >= _idleAnim->frame_count) {
-        // Idle animation finished one loop -- switch to next GIF
-        _idlePlaying = false;
-        _idleFrame   = 0;
-        String next = gifPlayerNextShuffle();
-        if (next.length() > 0) {
-          _requestedFile = next;
-          _fileChanged   = true;
+        _idleFrame = 0;
+        _idleLoopCount++;
+        if (_idleLoopCount >= _idleLoopTarget) {
+          // Idle loops done -- switch to next GIF
+          _idlePlaying   = false;
+          _idleLoopCount = 0;
+          String next = gifPlayerNextShuffle();
+          if (next.length() > 0) {
+            _requestedFile = next;
+            _fileChanged   = true;
+          }
         }
       }
       return;  // don't process normal GIF while idle is playing
@@ -341,6 +348,8 @@ void gifPlayerTick() {
       if (_idleAnim) {
         _idlePlaying     = true;
         _idleFrame       = 0;
+        _idleLoopCount   = 0;
+        _idleLoopTarget  = 1 + (esp_random() % 5);  // 1..5 random loops
         _idleLastFrameMs = 0;  // render first frame immediately
       } else {
         // No idle animation, advance directly
