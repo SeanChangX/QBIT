@@ -2,8 +2,8 @@ import { useState, useCallback, useRef, useEffect, type ReactNode } from 'react'
 
 const OVERSCAN = 4;
 const VIRTUAL_LIST_HEIGHT = 400;
-const LIST_ROW_HEIGHT = 56;
-const BAN_ROW_HEIGHT = 48;
+const LIST_ROW_HEIGHT = 68;
+const BAN_ROW_HEIGHT = 56;
 
 interface VirtualListProps {
   itemCount: number;
@@ -65,6 +65,7 @@ export function VirtualList({
           top: i * itemHeight,
           height: itemHeight,
           boxSizing: 'border-box',
+          overflow: 'hidden',
         }}
       >
         {children(i)}

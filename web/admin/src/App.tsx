@@ -368,9 +368,13 @@ export default function App() {
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<string>>(new Set());
 
   const [listRowHeight, setListRowHeight] = useState(VIRTUAL_LIST_ROW_HEIGHT);
+  const [banListRowHeight, setBanListRowHeight] = useState(VIRTUAL_BAN_ROW_HEIGHT);
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 640px)');
-    const update = (): void => setListRowHeight(mq.matches ? 100 : VIRTUAL_LIST_ROW_HEIGHT);
+    const update = (): void => {
+      setListRowHeight(mq.matches ? 132 : VIRTUAL_LIST_ROW_HEIGHT);
+      setBanListRowHeight(mq.matches ? 96 : VIRTUAL_BAN_ROW_HEIGHT);
+    };
     update();
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
@@ -593,10 +597,10 @@ export default function App() {
             </button>
           </div>
           {!collapsed.bans && (
-            <div className="admin-table-wrap">
+            <div className="admin-table-wrap admin-bans-list">
               <VirtualList
                 itemCount={bansFlat.length}
-                itemHeight={VIRTUAL_BAN_ROW_HEIGHT}
+                itemHeight={banListRowHeight}
                 containerHeight={VIRTUAL_CONTAINER_HEIGHT}
                 empty={<div className="empty-msg">No bans</div>}
               >

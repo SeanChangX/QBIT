@@ -269,7 +269,7 @@ body {
 }
 
 .section {
-  margin-bottom: 32px;
+  margin-bottom: 40px;
 }
 @media (max-width: 640px) {
   .section {
@@ -282,7 +282,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
   flex-wrap: wrap;
 }
 .section-header-row .section-title {
@@ -499,35 +499,41 @@ body {
   gap: 8px;
 }
 
+.admin-bans-list .admin-virtual-list {
+  background: var(--bg-accent);
+}
+.admin-bans-list .admin-virtual-list .admin-virtual-row {
+  border-bottom-color: var(--border);
+}
 .ban-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
-  background: var(--bg-accent);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  gap: 12px;
+  padding: 14px 16px;
   font-size: 0.9em;
-  gap: 8px;
+  min-width: 0;
 }
-@media (max-width: 640px) {
-  .ban-item {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-  }
-  .ban-item span {
-    word-break: break-all;
-  }
+.ban-item:hover {
+  background: var(--bg-hover);
 }
-
 .ban-item span {
   color: var(--text-secondary);
+  min-width: 0;
+  word-break: break-word;
 }
-
 .ban-item code {
   color: var(--red-light);
   font-size: 0.9em;
+}
+@media (max-width: 640px) {
+  .ban-item {
+    flex-wrap: wrap;
+  }
+  .ban-item .btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .admin-loading {
@@ -552,12 +558,33 @@ body {
   display: flex;
   align-items: stretch;
 }
+@media (max-width: 640px) {
+  .admin-virtual-row {
+    border-bottom: none;
+    padding-bottom: 8px;
+    position: relative;
+  }
+  .admin-virtual-row::after {
+    content: '';
+    position: absolute;
+    left: 16px;
+    right: 16px;
+    bottom: 0;
+    height: 1px;
+    background: var(--border);
+    opacity: 0.7;
+  }
+  .admin-virtual-row:last-child::after {
+    display: none;
+  }
+}
 .admin-virtual-row > * {
   flex: 1;
   min-height: 0;
 }
 .admin-virtual-row:last-child {
   border-bottom: none;
+  padding-bottom: 0;
 }
 .admin-virtual-empty.empty-msg {
   padding: 24px;
@@ -738,7 +765,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--border);
   font-size: 0.9em;
 }
@@ -754,6 +781,8 @@ body {
   .admin-user-row,
   .admin-claim-row {
     flex-wrap: wrap;
+    padding-bottom: 20px;
+    border-bottom: none;
   }
   .admin-user-info,
   .admin-claim-info {
@@ -763,7 +792,7 @@ body {
   .admin-user-actions,
   .admin-claim-actions {
     width: 100%;
-    padding-top: 6px;
+    padding-top: 10px;
     margin-left: 0;
   }
   .admin-user-actions .btn,
@@ -793,7 +822,7 @@ body {
 .admin-claim-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
   flex: 1;
 }
