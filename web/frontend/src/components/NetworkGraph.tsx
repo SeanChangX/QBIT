@@ -100,23 +100,40 @@ export default function NetworkGraph({
           smooth: { enabled: true, type: 'continuous', roundness: 0.5 },
         },
         physics: {
-          enabled: true,
           barnesHut: {
-            gravitationalConstant: -2800,
-            centralGravity: 0.18,
-            springLength: 140,
-            springConstant: 0.028,
+            gravitationalConstant: -3000,
+            centralGravity: 0.3,
+            springLength: 130,
+            springConstant: 0.04,
           },
-          stabilization: { enabled: false },
+          stabilization: { iterations: 100 },
         },
         interaction: {
           hover: true,
           tooltipDelay: 200,
           selectable: true,
           dragNodes: true,
+          dragView: true,
+          zoomView: true,
         },
       }
     );
+
+    const net = networkRef.current;
+
+    // When user pans the view (drag canvas) or zooms: run physics so graph "floats" then settles
+    const triggerFloatThenSettle = (): void => {
+      net.setOptions({ physics: { enabled: true } });
+      net.stabilize(100);
+    };
+
+    net.on('dragEnd', (params: { nodes: string[] }) => {
+      if (params.nodes.length === 0) triggerFloatThenSettle();
+    });
+    net.on('zoom', () => triggerFloatThenSettle());
+    net.on('stabilized', () => {
+      net.setOptions({ physics: { enabled: false } });
+    });
 
     // Click handler -- open poke dialog for device nodes or user poke for user nodes (self not clickable)
     networkRef.current.on('click', (params: { nodes: string[] }) => {
