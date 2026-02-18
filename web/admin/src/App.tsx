@@ -366,6 +366,16 @@ export default function App() {
   }, [devices, deviceSortBy, deviceSortOrder]);
 
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<string>>(new Set());
+
+  const [listRowHeight, setListRowHeight] = useState(VIRTUAL_LIST_ROW_HEIGHT);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)');
+    const update = (): void => setListRowHeight(mq.matches ? 100 : VIRTUAL_LIST_ROW_HEIGHT);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
   const toggleDeviceSelection = useCallback((id: string) => {
     setSelectedDeviceIds((prev) => {
       const next = new Set(prev);
@@ -645,7 +655,7 @@ export default function App() {
           {!collapsed.users && (
             <VirtualList
               itemCount={users.length}
-              itemHeight={VIRTUAL_LIST_ROW_HEIGHT}
+              itemHeight={listRowHeight}
               containerHeight={VIRTUAL_CONTAINER_HEIGHT}
               empty={!loading ? <div className="empty-msg">No users yet</div> : undefined}
             >
@@ -715,7 +725,7 @@ export default function App() {
           {!collapsed.claims && (
             <VirtualList
               itemCount={claims.length}
-              itemHeight={VIRTUAL_LIST_ROW_HEIGHT}
+              itemHeight={listRowHeight}
               containerHeight={VIRTUAL_CONTAINER_HEIGHT}
               empty={!loading ? <div className="empty-msg">No claims</div> : undefined}
             >

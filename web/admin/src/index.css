@@ -768,7 +768,8 @@ body {
   }
   .admin-user-actions .btn,
   .admin-claim-actions .btn {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     text-align: center;
     justify-content: center;
   }
