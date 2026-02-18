@@ -534,6 +534,188 @@ body {
   font-size: 0.85em;
   color: var(--text-muted);
 }
+.admin-virtual-list,
+.admin-virtual-empty {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+}
+.admin-virtual-empty {
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.admin-virtual-row {
+  border-bottom: 1px solid var(--border);
+  padding: 0;
+  display: flex;
+  align-items: stretch;
+}
+.admin-virtual-row > * {
+  flex: 1;
+  min-height: 0;
+}
+.admin-virtual-row:last-child {
+  border-bottom: none;
+}
+.admin-virtual-empty.empty-msg {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.admin-devices-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.admin-toolbar-action {
+  margin-left: auto;
+}
+
+/* Sort by: pill group + order toggle */
+.admin-sort-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.admin-sort-label {
+  font-size: 0.8em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.admin-sort-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.admin-pill {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-accent);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.admin-pill:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+  color: var(--text-primary);
+}
+.admin-pill-active {
+  background: var(--red);
+  border-color: var(--red);
+  color: white;
+}
+.admin-pill-active:hover {
+  background: var(--red-light);
+  border-color: var(--red-light);
+  color: white;
+}
+
+.admin-sort-order {
+  display: flex;
+  gap: 2px;
+  margin-left: 4px;
+}
+.admin-order-btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-accent);
+  color: var(--text-muted);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.admin-order-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+.admin-order-btn-active {
+  background: var(--bg-hover);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* Custom checkbox */
+.admin-th-checkbox,
+.admin-td-checkbox {
+  width: 44px;
+  text-align: center;
+  vertical-align: middle;
+}
+.admin-checkbox-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 4px;
+  margin: -4px;
+  border-radius: 6px;
+}
+.admin-checkbox-wrap:hover .admin-checkbox-box {
+  border-color: var(--text-muted);
+}
+.admin-checkbox {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.admin-checkbox-box {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  position: relative;
+}
+.admin-checkbox-box::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 5px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: scale(0) rotate(45deg);
+  transition: transform 0.15s;
+}
+.admin-checkbox:checked + .admin-checkbox-box {
+  background: var(--red);
+  border-color: var(--red);
+}
+.admin-checkbox:checked + .admin-checkbox-box::after {
+  transform: scale(1) rotate(45deg);
+}
+.admin-checkbox:focus-visible + .admin-checkbox-box {
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--red);
+}
+
 .admin-table-fixed {
   min-height: 120px;
 }
@@ -569,18 +751,23 @@ body {
   background: var(--bg-hover);
 }
 @media (max-width: 640px) {
-  .admin-user-row {
+  .admin-user-row,
+  .admin-claim-row {
     flex-wrap: wrap;
   }
-  .admin-user-info {
+  .admin-user-info,
+  .admin-claim-info {
     min-width: 0;
     flex: 1 1 calc(100% - 56px);
   }
-  .admin-user-actions {
+  .admin-user-actions,
+  .admin-claim-actions {
     width: 100%;
     padding-top: 6px;
+    margin-left: 0;
   }
-  .admin-user-actions .btn {
+  .admin-user-actions .btn,
+  .admin-claim-actions .btn {
     width: 100%;
     text-align: center;
     justify-content: center;
@@ -631,8 +818,15 @@ body {
 .admin-status-offline {
   color: var(--text-muted);
 }
-.admin-user-actions {
+.admin-user-actions,
+.admin-claim-actions {
   flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.admin-claim-actions .btn {
+  margin-left: auto;
 }
 
 .admin-table-avatar,

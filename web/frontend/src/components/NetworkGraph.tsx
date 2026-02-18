@@ -100,13 +100,14 @@ export default function NetworkGraph({
           smooth: { enabled: true, type: 'continuous', roundness: 0.5 },
         },
         physics: {
+          enabled: true,
           barnesHut: {
-            gravitationalConstant: -3000,
-            centralGravity: 0.3,
-            springLength: 130,
-            springConstant: 0.04,
+            gravitationalConstant: -2800,
+            centralGravity: 0.18,
+            springLength: 140,
+            springConstant: 0.028,
           },
-          stabilization: { iterations: 100 },
+          stabilization: { enabled: false },
         },
         interaction: {
           hover: true,

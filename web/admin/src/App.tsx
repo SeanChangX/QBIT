@@ -1,4 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import {
+  VirtualList,
+  VIRTUAL_CONTAINER_HEIGHT,
+  VIRTUAL_LIST_ROW_HEIGHT,
+  VIRTUAL_BAN_ROW_HEIGHT,
+} from './VirtualScroll';
 
 interface Session {
   socketId: string;
@@ -35,7 +41,8 @@ interface Device {
   ip: string;
   publicIp?: string;
   version: string;
-  connectedAt: string;
+  lastSeen: string;
+  status: 'online' | 'offline';
 }
 
 interface BannedList {
@@ -284,8 +291,112 @@ export default function App() {
     [refresh, handleUnauthorized]
   );
 
+  const handleDeleteUser = useCallback(
+    async (userId: string) => {
+      if (!confirm(`Delete user record "${userId}"? This cannot be undone.`)) return;
+      try {
+        await del(`/api/users/${encodeURIComponent(userId)}`, {});
+        await refresh(false);
+      } catch (e) {
+        if ((e instanceof Error && e.message) === 'UNAUTHORIZED') handleUnauthorized();
+        else setError(e instanceof Error ? e.message : 'Delete user failed');
+      }
+    },
+    [refresh, handleUnauthorized]
+  );
+
+  const handleUnclaim = useCallback(
+    async (deviceId: string) => {
+      if (!confirm('Remove claim for this device? The device will become unclaimed.')) return;
+      try {
+        await del(`/api/claim/${encodeURIComponent(deviceId)}`, {});
+        await refresh(false);
+      } catch (e) {
+        if ((e instanceof Error && e.message) === 'UNAUTHORIZED') handleUnauthorized();
+        else setError(e instanceof Error ? e.message : 'Unclaim failed');
+      }
+    },
+    [refresh, handleUnauthorized]
+  );
+
+  type DeviceSortKey = 'id' | 'name' | 'ip' | 'publicIp' | 'version' | 'lastSeen';
+  const [deviceSortBy, setDeviceSortBy] = useState<DeviceSortKey>('lastSeen');
+  const [deviceSortOrder, setDeviceSortOrder] = useState<'asc' | 'desc'>('desc');
+  const sortedDevices = useMemo(() => {
+    const list = [...devices];
+    const cmp = (a: Device, b: Device): number => {
+      let va: string | number;
+      let vb: string | number;
+      switch (deviceSortBy) {
+        case 'id':
+          va = a.id;
+          vb = b.id;
+          break;
+        case 'name':
+          va = a.name;
+          vb = b.name;
+          break;
+        case 'ip':
+          va = a.ip;
+          vb = b.ip;
+          break;
+        case 'publicIp':
+          va = a.publicIp ?? '';
+          vb = b.publicIp ?? '';
+          break;
+        case 'version':
+          va = a.version;
+          vb = b.version;
+          break;
+        case 'lastSeen':
+        default:
+          va = new Date(a.lastSeen).getTime();
+          vb = new Date(b.lastSeen).getTime();
+          break;
+      }
+      if (typeof va === 'string' && typeof vb === 'string') {
+        const r = va.localeCompare(vb);
+        return deviceSortOrder === 'asc' ? r : -r;
+      }
+      const r = (va as number) - (vb as number);
+      return deviceSortOrder === 'asc' ? r : -r;
+    };
+    list.sort(cmp);
+    return list;
+  }, [devices, deviceSortBy, deviceSortOrder]);
+
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<string>>(new Set());
+  const toggleDeviceSelection = useCallback((id: string) => {
+    setSelectedDeviceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  const toggleSelectAllDevices = useCallback(() => {
+    if (selectedDeviceIds.size === sortedDevices.length) {
+      setSelectedDeviceIds(new Set());
+    } else {
+      setSelectedDeviceIds(new Set(sortedDevices.map((d) => d.id)));
+    }
+  }, [sortedDevices, selectedDeviceIds.size]);
+  const handleDeleteSelectedDevices = useCallback(async () => {
+    if (selectedDeviceIds.size === 0) return;
+    if (!confirm(`Delete ${selectedDeviceIds.size} device record(s)? This cannot be undone.`)) return;
+    try {
+      await del('/api/devices', { deviceIds: [...selectedDeviceIds] });
+      setSelectedDeviceIds(new Set());
+      await refresh(false);
+    } catch (e) {
+      if ((e instanceof Error && e.message) === 'UNAUTHORIZED') handleUnauthorized();
+      else setError(e instanceof Error ? e.message : 'Delete devices failed');
+    }
+  }, [selectedDeviceIds, refresh, handleUnauthorized]);
+
   // Collapsible section state (all collapsed by default except sessions)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({
+    bans: true,
     users: true,
     claims: true,
     sessions: false,
@@ -315,6 +426,15 @@ export default function App() {
     });
     return m;
   }, [devices, claims]);
+
+  // Flatten bans for virtual list: [{ type: 'user'|'ip'|'device', id: string }, ...]
+  const bansFlat = useMemo(() => {
+    const out: { type: 'user' | 'ip' | 'device'; id: string }[] = [];
+    (bans.userIds ?? []).forEach((id) => out.push({ type: 'user', id }));
+    (bans.ips ?? []).forEach((ip) => out.push({ type: 'ip', id: ip }));
+    (bans.deviceIds ?? []).forEach((id) => out.push({ type: 'device', id }));
+    return out;
+  }, [bans]);
 
   return (
     <div className="app">
@@ -448,44 +568,64 @@ export default function App() {
         </section>
 
         <section className="section">
-          <h2 className="section-title">Current bans</h2>
-          <div className="admin-table-wrap">
-            <div className="bans-list">
-              {bans.userIds.length === 0 && bans.ips.length === 0 && (bans.deviceIds?.length ?? 0) === 0 && (
-                <div className="empty-msg">No bans</div>
-              )}
-              {(bans.userIds ?? []).map((id) => {
-                const u = userMap.get(id);
-                return (
-                  <div key={`u-${id}`} className="ban-item">
-                    <span>
-                      User: {u ? <strong>{u.displayName}</strong> : null}
-                      {' '}<code>{id}</code>
-                    </span>
-                    <button className="btn btn-ghost" onClick={() => handleUnbanUser(id)}>Unban</button>
-                  </div>
-                );
-              })}
-              {(bans.ips ?? []).map((ip) => (
-                <div key={`i-${ip}`} className="ban-item">
-                  <span>IP: <code>{ip}</code></span>
-                  <button className="btn btn-ghost" onClick={() => handleUnbanIp(ip)}>Unban</button>
-                </div>
-              ))}
-              {(bans.deviceIds ?? []).map((id) => {
-                const dName = deviceNameMap.get(id);
-                return (
-                  <div key={`d-${id}`} className="ban-item">
-                    <span>
-                      Device: {dName ? <strong>{dName}</strong> : null}
-                      {' '}<code>{id}</code>
-                    </span>
-                    <button className="btn btn-ghost" onClick={() => handleUnbanDevice(id)}>Unban</button>
-                  </div>
-                );
-              })}
-            </div>
+          <div className="section-header-row">
+            <button className="section-toggle" onClick={() => toggle('bans')}>
+              <span className={`section-chevron${collapsed.bans ? '' : ' section-chevron-open'}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </span>
+              <h2 className="section-title">
+                Current bans (
+                {(bans.userIds?.length ?? 0) + (bans.ips?.length ?? 0) + (bans.deviceIds?.length ?? 0)}
+                )
+              </h2>
+            </button>
           </div>
+          {!collapsed.bans && (
+            <div className="admin-table-wrap">
+              <VirtualList
+                itemCount={bansFlat.length}
+                itemHeight={VIRTUAL_BAN_ROW_HEIGHT}
+                containerHeight={VIRTUAL_CONTAINER_HEIGHT}
+                empty={<div className="empty-msg">No bans</div>}
+              >
+                {(i) => {
+                  const entry = bansFlat[i];
+                  if (entry.type === 'user') {
+                    const u = userMap.get(entry.id);
+                    return (
+                      <div className="ban-item">
+                        <span>
+                          User: {u ? <strong>{u.displayName}</strong> : null}
+                          {' '}<code>{entry.id}</code>
+                        </span>
+                        <button className="btn btn-ghost" onClick={() => handleUnbanUser(entry.id)}>Unban</button>
+                      </div>
+                    );
+                  }
+                  if (entry.type === 'ip') {
+                    return (
+                      <div className="ban-item">
+                        <span>IP: <code>{entry.id}</code></span>
+                        <button className="btn btn-ghost" onClick={() => handleUnbanIp(entry.id)}>Unban</button>
+                      </div>
+                    );
+                  }
+                  const dName = deviceNameMap.get(entry.id);
+                  return (
+                    <div className="ban-item">
+                      <span>
+                        Device: {dName ? <strong>{dName}</strong> : null}
+                        {' '}<code>{entry.id}</code>
+                      </span>
+                      <button className="btn btn-ghost" onClick={() => handleUnbanDevice(entry.id)}>Unban</button>
+                    </div>
+                  );
+                }}
+              </VirtualList>
+            </div>
+          )}
         </section>
 
         <section className="section">
@@ -503,46 +643,58 @@ export default function App() {
             </div>
           </div>
           {!collapsed.users && (
-            <div className="admin-scroll-list">
-              {users.length === 0 && !loading && (
-                <div className="empty-msg">No users yet</div>
-              )}
-              {users.map((u) => (
-                <div key={u.userId} className="admin-user-row">
-                  {u.avatar ? (
-                    <img
-                      src={u.avatar}
-                      alt=""
-                      className="admin-avatar"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                    />
-                  ) : (
-                    <span className="admin-avatar-placeholder" />
-                  )}
-                  <div className="admin-user-info">
-                    <span className="admin-user-name">{u.displayName}</span>
-                    <span className="admin-user-email">{u.email}</span>
-                    <span className="admin-user-meta">
-                      {u.status === 'online' ? (
-                        <span className="admin-status-online">Online</span>
-                      ) : (
-                        <span className="admin-status-offline">Offline</span>
-                      )}
-                      {' · Last seen '}
-                      {new Date(u.lastSeen).toLocaleString()}
-                    </span>
+            <VirtualList
+              itemCount={users.length}
+              itemHeight={VIRTUAL_LIST_ROW_HEIGHT}
+              containerHeight={VIRTUAL_CONTAINER_HEIGHT}
+              empty={!loading ? <div className="empty-msg">No users yet</div> : undefined}
+            >
+              {(i) => {
+                const u = users[i];
+                return (
+                  <div className="admin-user-row">
+                    {u.avatar ? (
+                      <img
+                        src={u.avatar}
+                        alt=""
+                        className="admin-avatar"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <span className="admin-avatar-placeholder" />
+                    )}
+                    <div className="admin-user-info">
+                      <span className="admin-user-name">{u.displayName}</span>
+                      <span className="admin-user-email">{u.email}</span>
+                      <span className="admin-user-meta">
+                        {u.status === 'online' ? (
+                          <span className="admin-status-online">Online</span>
+                        ) : (
+                          <span className="admin-status-offline">Offline</span>
+                        )}
+                        {' · Last seen '}
+                        {new Date(u.lastSeen).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="admin-user-actions">
+                      <button
+                        className="btn btn-danger"
+                        onClick={() => handleBanSessionUser(u.userId)}
+                      >
+                        Ban user
+                      </button>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => handleDeleteUser(u.userId)}
+                        title="Delete user record"
+                      >
+                        Delete user
+                      </button>
+                    </div>
                   </div>
-                  <div className="admin-user-actions">
-                    <button
-                      className="btn btn-danger"
-                      onClick={() => handleBanSessionUser(u.userId)}
-                    >
-                      Ban user
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                );
+              }}
+            </VirtualList>
           )}
         </section>
 
@@ -561,30 +713,44 @@ export default function App() {
             </div>
           </div>
           {!collapsed.claims && (
-            <div className="admin-scroll-list">
-              {claims.length === 0 && !loading && (
-                <div className="empty-msg">No claims</div>
-              )}
-              {claims.map((c) => (
-                <div key={c.deviceId} className="admin-claim-row">
-                  {c.userAvatar ? (
-                    <img
-                      src={c.userAvatar}
-                      alt=""
-                      className="admin-avatar"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                    />
-                  ) : (
-                    <span className="admin-avatar-placeholder" />
-                  )}
-                  <div className="admin-claim-info">
-                    <span className="admin-claim-device">{c.deviceName || c.deviceId}</span>
-                    <span className="admin-claim-user">Claimed by {c.userName}</span>
-                    <span className="admin-claim-meta">{new Date(c.claimedAt).toLocaleString()}</span>
+            <VirtualList
+              itemCount={claims.length}
+              itemHeight={VIRTUAL_LIST_ROW_HEIGHT}
+              containerHeight={VIRTUAL_CONTAINER_HEIGHT}
+              empty={!loading ? <div className="empty-msg">No claims</div> : undefined}
+            >
+              {(i) => {
+                const c = claims[i];
+                return (
+                  <div className="admin-claim-row">
+                    {c.userAvatar ? (
+                      <img
+                        src={c.userAvatar}
+                        alt=""
+                        className="admin-avatar"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <span className="admin-avatar-placeholder" />
+                    )}
+                    <div className="admin-claim-info">
+                      <span className="admin-claim-device">{c.deviceName || c.deviceId}</span>
+                      <span className="admin-claim-user">Claimed by {c.userName}</span>
+                      <span className="admin-claim-meta">{new Date(c.claimedAt).toLocaleString()}</span>
+                    </div>
+                    <div className="admin-claim-actions">
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => handleUnclaim(c.deviceId)}
+                        title="Remove claim"
+                      >
+                        Unclaim
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                );
+              }}
+            </VirtualList>
           )}
         </section>
 
@@ -603,7 +769,7 @@ export default function App() {
             </div>
           </div>
           {!collapsed.sessions && (
-            <div className="admin-table-wrap admin-table-fixed">
+            <div className="admin-table-wrap admin-table-fixed" style={{ maxHeight: VIRTUAL_CONTAINER_HEIGHT, overflow: 'auto' }}>
               <table className="admin-table">
                 <thead>
                   <tr>
@@ -677,43 +843,140 @@ export default function App() {
             </div>
           </div>
           {!collapsed.devices && (
-            <div className="admin-table-wrap admin-table-fixed">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Name</th>
-                    <th>Local IP</th>
-                    <th>Public IP</th>
-                    <th>Version</th>
-                    <th>Connected</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {devices.length === 0 && !loading && (
+            <>
+              <div className="admin-devices-toolbar">
+                <div className="admin-sort-group" role="group" aria-label="Sort devices">
+                  <span className="admin-sort-label">Sort by</span>
+                  <div className="admin-sort-pills">
+                    {(
+                      [
+                        ['id', 'ID'],
+                        ['name', 'Name'],
+                        ['ip', 'Local IP'],
+                        ['publicIp', 'Public IP'],
+                        ['version', 'Version'],
+                        ['lastSeen', 'Last seen'],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className={`admin-pill${deviceSortBy === key ? ' admin-pill-active' : ''}`}
+                        onClick={() => setDeviceSortBy(key)}
+                        aria-pressed={deviceSortBy === key}
+                        aria-label={`Sort by ${label}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="admin-sort-order">
+                    <button
+                      type="button"
+                      className={`admin-order-btn${deviceSortOrder === 'asc' ? ' admin-order-btn-active' : ''}`}
+                      onClick={() => setDeviceSortOrder('asc')}
+                      aria-pressed={deviceSortOrder === 'asc'}
+                      title="Ascending"
+                      aria-label="Ascending order"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 15l-6-6-6 6" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      className={`admin-order-btn${deviceSortOrder === 'desc' ? ' admin-order-btn-active' : ''}`}
+                      onClick={() => setDeviceSortOrder('desc')}
+                      aria-pressed={deviceSortOrder === 'desc'}
+                      title="Descending"
+                      aria-label="Descending order"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                {selectedDeviceIds.size > 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-danger admin-toolbar-action"
+                    onClick={handleDeleteSelectedDevices}
+                  >
+                    Delete selected ({selectedDeviceIds.size})
+                  </button>
+                )}
+              </div>
+              <div className="admin-table-wrap admin-table-fixed" style={{ maxHeight: VIRTUAL_CONTAINER_HEIGHT, overflow: 'auto' }}>
+                <table className="admin-table">
+                  <thead>
                     <tr>
-                      <td colSpan={7} className="empty-msg">No devices</td>
+                      <th className="admin-th-checkbox">
+                        <label className="admin-checkbox-wrap">
+                          <input
+                            type="checkbox"
+                            checked={sortedDevices.length > 0 && selectedDeviceIds.size === sortedDevices.length}
+                            onChange={toggleSelectAllDevices}
+                            aria-label="Select all devices"
+                            className="admin-checkbox"
+                          />
+                          <span className="admin-checkbox-box" aria-hidden="true" />
+                        </label>
+                      </th>
+                      <th>ID</th>
+                      <th>Name</th>
+                      <th>Status</th>
+                      <th>Local IP</th>
+                      <th>Public IP</th>
+                      <th>Version</th>
+                      <th>Last seen</th>
+                      <th>Actions</th>
                     </tr>
-                  )}
-                  {devices.map((d) => (
-                    <tr key={d.id}>
-                      <td><code style={{ fontSize: '0.85em' }}>{d.id}</code></td>
-                      <td>{d.name}</td>
-                      <td>{d.ip}</td>
-                      <td>{d.publicIp || '-'}</td>
-                      <td>{d.version}</td>
-                      <td>{new Date(d.connectedAt).toLocaleString()}</td>
-                      <td>
-                        <button className="btn btn-danger" onClick={() => handleBanDevice(d.id)}>
-                          Ban device
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {sortedDevices.length === 0 && !loading && (
+                      <tr>
+                        <td colSpan={9} className="empty-msg">No devices</td>
+                      </tr>
+                    )}
+                    {sortedDevices.map((d) => (
+                      <tr key={d.id}>
+                        <td className="admin-td-checkbox">
+                          <label className="admin-checkbox-wrap">
+                            <input
+                              type="checkbox"
+                              checked={selectedDeviceIds.has(d.id)}
+                              onChange={() => toggleDeviceSelection(d.id)}
+                              aria-label={`Select ${d.name}`}
+                              className="admin-checkbox"
+                            />
+                            <span className="admin-checkbox-box" aria-hidden="true" />
+                          </label>
+                        </td>
+                        <td><code style={{ fontSize: '0.85em' }}>{d.id}</code></td>
+                        <td>{d.name}</td>
+                        <td>
+                          {d.status === 'online' ? (
+                            <span className="admin-status-online">Online</span>
+                          ) : (
+                            <span className="admin-status-offline">Offline</span>
+                          )}
+                        </td>
+                        <td>{d.ip}</td>
+                        <td>{d.publicIp || '-'}</td>
+                        <td>{d.version}</td>
+                        <td>{new Date(d.lastSeen).toLocaleString()}</td>
+                        <td>
+                          <button className="btn btn-danger" onClick={() => handleBanDevice(d.id)}>
+                            Ban device
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </section>
       </main>

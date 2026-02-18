@@ -5,8 +5,14 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
-import { validate } from '../middleware/validate';
-import { adminLoginSchema, adminBanSchema } from '../schemas';
+import { validate, validateParams } from '../middleware/validate';
+import {
+  adminLoginSchema,
+  adminBanSchema,
+  adminDevicesDeleteSchema,
+  adminUserIdParamSchema,
+  adminDeviceIdParamSchema,
+} from '../schemas';
 import {
   ADMIN_USERNAME,
   ADMIN_PASSWORD,
@@ -108,16 +114,32 @@ router.get('/users', adminAuth, (_req, res) => {
   res.json(userService.getAllUsers(onlineIds));
 });
 
+router.delete('/users/:userId', adminAuth, validateParams(adminUserIdParamSchema), (req, res) => {
+  const userId = req.params.userId as string;
+  const deleted = userService.deleteUser(userId);
+  if (!deleted) return res.status(404).json({ error: 'User not found' });
+  logger.info({ userId }, 'User record deleted');
+  res.json({ ok: true });
+});
+
 router.get('/devices', adminAuth, (_req, res) => {
-  res.json(deviceService.getDeviceList());
+  res.json(deviceService.getDeviceRecordList());
+});
+
+router.delete('/devices', adminAuth, validate(adminDevicesDeleteSchema), (req, res) => {
+  const { deviceIds } = req.body as { deviceIds: string[] };
+  deviceService.deleteDeviceRecords(deviceIds);
+  logger.info({ deviceIds }, 'Device records deleted');
+  res.json({ ok: true });
 });
 
 router.get('/claims', adminAuth, (_req, res) => {
   const claims = claimService.getAllClaims();
-  const devices = deviceService.getDevicesRaw();
+  const recordList = deviceService.getDeviceRecordList();
+  const nameByDevice = new Map(recordList.map((r) => [r.id, r.name]));
   const list = Object.entries(claims).map(([deviceId, c]) => ({
     deviceId,
-    deviceName: devices.get(deviceId)?.name ?? null,
+    deviceName: deviceService.getDevicesRaw().get(deviceId)?.name ?? nameByDevice.get(deviceId) ?? null,
     userId: c.userId,
     userName: c.userName,
     userAvatar: c.userAvatar,
@@ -148,6 +170,16 @@ router.delete('/ban', adminAuth, validate(adminBanSchema), (req, res) => {
   const { userId, ip, deviceId } = req.body;
   banService.removeBan(userId, ip, deviceId);
   logger.info({ userId, ip, deviceId }, 'Ban removed');
+  res.json({ ok: true });
+});
+
+router.delete('/claim/:deviceId', adminAuth, validateParams(adminDeviceIdParamSchema), (req, res) => {
+  const deviceId = req.params.deviceId as string;
+  const claim = claimService.getClaimByDevice(deviceId);
+  if (!claim) return res.status(404).json({ error: 'No claim found for this device' });
+  claimService.removeClaim(deviceId);
+  deviceService.broadcastDevices();
+  logger.info({ deviceId }, 'Claim removed by admin');
   res.json({ ok: true });
 });
 

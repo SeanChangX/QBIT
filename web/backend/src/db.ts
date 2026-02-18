@@ -65,6 +65,16 @@ db.exec(`
     size       INTEGER,
     frameCount INTEGER
   );
+
+  CREATE TABLE IF NOT EXISTS device_records (
+    deviceId   TEXT PRIMARY KEY,
+    name       TEXT,
+    ip         TEXT,
+    publicIp   TEXT,
+    version    TEXT,
+    lastSeen   TEXT,
+    status     TEXT
+  );
 `);
 
 
