@@ -69,6 +69,12 @@
 | Touch Sensor | TTP223 capacitive touch module | Digital output (HIGH when touched) |
 | Buzzer | Passive buzzer | Driven via PWM (LEDC) |
 
+### 3D-Printed Case (STL)
+
+Download the STL files for the QBIT enclosure from MakerWorld:
+
+- [MakerWorld: QBIT - Your IoT Desk Robot (ESP32-C3)](https://makerworld.com/en/models/2400803-qbit-your-iot-desk-robot-esp32-c3#profileId-2631417)
+
 ### Wiring
 
 Default pin assignments for the ESP32-C3 Super Mini. All pins can be reassigned through the web dashboard at `http://qbit.local` and are stored in NVS (persistent across reboots; changes require a reboot to take effect).
@@ -105,14 +111,14 @@ The easiest way to flash QBIT firmware is through the browser-based flasher. No 
 
 ### Initial Wi-Fi Setup
 
-After flashing, the QBIT boots into Wi-Fi provisioning mode:
+After flashing, if Wi-Fi is not yet configured, QBIT enters Wi-Fi setup mode:
 
-1. The OLED displays: `[ Wi-Fi Setup ] Connect to 'QBIT' AP to set Wi-Fi.`
-2. Connect your phone or computer to the `QBIT` Wi-Fi access point.
-3. A captive portal opens automatically. Select your home Wi-Fi network and enter the password.
-4. QBIT saves the credentials to NVS and reboots.
+1. The OLED shows a **QR code** (SSID and password) by default. **Tap** the touch sensor to switch to text: SSID `QBIT` and password (device MAC last 8 hex digits, e.g. `1A2B3C4D`).
+2. Connect your phone or computer to the **QBIT** Wi-Fi access point using the password shown on screen.
+3. Once connected to the AP, a **captive portal** opens automatically (or open a browser manually to the setup page). Select your home Wi-Fi and enter its password.
+4. Credentials are saved to NVS and the device reconnects to your home Wi-Fi; you can then access the dashboard at `http://qbit.local`.
 
-If the provisioning screen is displayed for more than 10 seconds without user action, QBIT begins playing animations automatically while keeping the AP open for configuration.
+If Wi-Fi is lost for about 30 seconds, QBIT automatically opens the AP again so you can reconfigure.
 
 ### Device Dashboard
 
@@ -221,18 +227,26 @@ Once connected, the device publishes HA discovery payloads that automatically cr
 | Status | Binary Sensor | Online/offline connectivity status |
 | IP | Sensor | Device local IP address |
 | Poke | Button | Send a poke message to the device |
-| Last Poke | Sensor | Last received poke (sender name, message text as attributes) |
+| Last Poke | Sensor | Last received poke (sender, message, time as attributes) |
+| Mute | Switch | Toggle buzzer mute (ON = muted) |
+| Touch | Sensor | Touch gesture: `single_tap`, `double_tap`, `long_press` |
+| Next Animation | Button | Switch to the next .qgif animation |
 
 <details>
 <summary><strong>MQTT topics</strong> (default prefix <code>qbit</code>)</summary>
 <br>
 
-| Topic | Description |
-|---|---|
-| `qbit/<id>/status` | `online` / `offline` (retained, with LWT) |
-| `qbit/<id>/info` | Device info JSON (`id`, `name`, `ip`) |
-| `qbit/<id>/command` | Command input (subscribe). Accepts `{"command":"poke","sender":"...","text":"..."}` |
-| `qbit/<id>/poke` | Poke event output (published when a poke is received from any source) |
+| Topic | Dir | Description |
+|---|---|---|
+| `qbit/<id>/status` | Pub | `online` / `offline` (retained, with LWT) |
+| `qbit/<id>/info` | Pub | Device info JSON (`id`, `name`, `ip`) |
+| `qbit/<id>/command` | Sub | Commands. JSON: `{"command":"poke","sender":"...","text":"..."}` |
+| `qbit/<id>/poke` | Pub | Poke event JSON (`sender`, `text`, `time`) |
+| `qbit/<id>/mute/state` | Pub | Mute state `ON` / `OFF` (retained) |
+| `qbit/<id>/mute/set` | Sub | Set mute: `ON` or `OFF` |
+| `qbit/<id>/touch` | Pub | Touch event JSON (`type`: gesture type) |
+| `qbit/<id>/animation/state` | Pub | Currently playing animation filename (retained) |
+| `qbit/<id>/animation/next` | Sub | Trigger switch to next animation (no payload) |
 
 </details>
 

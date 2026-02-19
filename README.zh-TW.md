@@ -69,6 +69,12 @@
 | 觸控感測器 | TTP223 電容式觸控模組 | 數位輸出（觸碰時 HIGH） |
 | 蜂鳴器 | 無源蜂鳴器 | 透過 PWM (LEDC) 驅動 |
 
+### 3D 列印外殼 (STL)
+
+STL 模型檔可於 MakerWorld 下載：
+
+- [MakerWorld：QBIT - Your IoT Desk Robot (ESP32-C3)](https://makerworld.com/en/models/2400803-qbit-your-iot-desk-robot-esp32-c3#profileId-2631417)
+
 ### 接線方式
 
 以下為 ESP32-C3 Super Mini 的預設腳位配置。所有腳位皆可透過 `http://qbit.local` 網頁儀表板重新設定，設定值儲存於 NVS（重新開機後仍保留；更改腳位後需重新啟動才會生效）。
@@ -105,14 +111,14 @@ I2C 匯流排運行於 400 kHz。若 OLED 模組已內建上拉電阻（大多�
 
 ### 初始 Wi-Fi 設定
 
-燒錄完成後，QBIT 會進入 Wi-Fi 配置模式：
+燒錄完成後若尚未設定 Wi-Fi，QBIT 會進入 Wi-Fi 設定模式：
 
-1. OLED 顯示：`[ Wi-Fi Setup ] Connect to 'QBIT' AP to set Wi-Fi.`
-2. 使用手機或電腦連接 `QBIT` Wi-Fi 熱點。
-3. 系統會自動開啟 Captive Portal。選擇家中的 Wi-Fi 網路並輸入密碼。
-4. QBIT 將憑證儲存至 NVS 並重新啟動。
+1. OLED 預設顯示 **QR code**（SSID 與密碼），可**點擊觸控**切換為文字：SSID `QBIT`、密碼（裝置 MAC 末八碼十六進位，例如 `1A2B3C4D`）。
+2. 使用手機或電腦連接 **QBIT** Wi-Fi 熱點，輸入畫面上顯示的密碼。
+3. 連上熱點後，系統會自動開啟 **Captive Portal**（或手動開啟瀏覽器連至設定頁）。選擇家中的 Wi-Fi 並輸入密碼。
+4. 憑證儲存於 NVS，裝置會重新連線至家中 Wi-Fi；之後可透過 `http://qbit.local` 存取儀表板。
 
-若配置畫面顯示超過 10 秒仍無操作，QBIT 會自動開始播放動畫，同時 AP 熱點保持開放供設定使用。
+Wi-Fi 斷線超過約 30 秒時，QBIT 會自動再次開啟 AP 熱點，可重新進行設定。
 
 ### 裝置儀表板
 
@@ -221,18 +227,26 @@ QBIT 支援本機 MQTT 整合，並自動產生 Home Assistant 探索配置。�
 | 狀態 | 二進位感測器 | 上線/離線連線狀態 |
 | IP | 感測器 | 裝置區域 IP 位址 |
 | 戳一下 | 按鈕 | 向裝置傳送戳一下訊息 |
-| 最近的戳 | 感測器 | 最後收到的戳一下（發送者名稱、訊息文字作為屬性） |
+| 最近的戳 | 感測器 | 最後收到的戳一下（發送者、訊息、時間為屬性） |
+| 靜音 | 開關 | 切換蜂鳴器靜音（開=靜音） |
+| 觸控 | 感測器 | 觸控手勢：`single_tap`、`double_tap`、`long_press` |
+| 下一個動畫 | 按鈕 | 切換至下一首 .qgif 動畫 |
 
 <details>
 <summary><strong>MQTT 主題</strong>（預設前綴 <code>qbit</code>）</summary>
 <br>
 
-| 主題 | 說明 |
-|---|---|
-| `qbit/<id>/status` | `online` / `offline`（retained，附帶 LWT） |
-| `qbit/<id>/info` | 裝置資訊 JSON（`id`、`name`、`ip`） |
-| `qbit/<id>/command` | 命令輸入（訂閱）。接受 `{"command":"poke","sender":"...","text":"..."}` |
-| `qbit/<id>/poke` | 戳一下事件輸出（從任何來源收到戳一下時發佈） |
+| 主題 | 方向 | 說明 |
+|---|---|---|
+| `qbit/<id>/status` | 發佈 | `online` / `offline`（retained，附 LWT） |
+| `qbit/<id>/info` | 發佈 | 裝置資訊 JSON（`id`、`name`、`ip`） |
+| `qbit/<id>/command` | 訂閱 | 命令。JSON：`{"command":"poke","sender":"...","text":"..."}` |
+| `qbit/<id>/poke` | 發佈 | 戳一下事件 JSON（`sender`、`text`、`time`） |
+| `qbit/<id>/mute/state` | 發佈 | 靜音狀態 `ON` / `OFF`（retained） |
+| `qbit/<id>/mute/set` | 訂閱 | 設定靜音：`ON` 或 `OFF` |
+| `qbit/<id>/touch` | 發佈 | 觸控事件 JSON（`type`：手勢類型） |
+| `qbit/<id>/animation/state` | 發佈 | 目前播放的動畫檔名（retained） |
+| `qbit/<id>/animation/next` | 訂閱 | 觸發切換至下一首動畫（無酬載） |
 
 </details>
 

@@ -52,6 +52,7 @@ static unsigned long _historyLastScrollMs = 0;
 static bool          _offlineShown = false;
 static unsigned long _offlineStartMs = 0;
 static const char*   _offlineMsg = nullptr;
+static bool          _serverOfflineNotified = false;
 
 // WiFi setup: QR vs text toggle
 static bool _wifiSetupShowQR = true;
@@ -203,8 +204,7 @@ void displayTask(void *param) {
         if (xQueueReceive(networkEventQueue, &netEvt, 0) == pdTRUE) {
             switch (netEvt.kind) {
                 case NetworkEvent::POKE:
-                    if (_state != CLAIM_PROMPT && _state != MUTE_FEEDBACK
-                        && _state != POKE_DISPLAY) {
+                    if (_state != CLAIM_PROMPT && _state != MUTE_FEEDBACK) {
                         handlePoke(netEvt.sender, netEvt.text);
                         if (getBuzzerVolume() > 0) {
                             noTone(getPinBuzzer());
@@ -215,23 +215,21 @@ void displayTask(void *param) {
                     break;
 
                 case NetworkEvent::POKE_BITMAP:
-                    if (_state != CLAIM_PROMPT && _state != MUTE_FEEDBACK
-                        && _state != POKE_DISPLAY) {
-                        // Pass pre-decoded bitmap pointers to poke handler
-                        // (ownership transferred — poke handler will free)
+                    if (_state != CLAIM_PROMPT && _state != MUTE_FEEDBACK) {
                         handlePokeBitmapFromPtrs(
                             netEvt.sender, netEvt.text,
                             netEvt.senderBmp, netEvt.senderBmpWidth, netEvt.senderBmpLen,
                             netEvt.textBmp, netEvt.textBmpWidth, netEvt.textBmpLen);
+                        netEvt.senderBmp = nullptr;
+                        netEvt.textBmp   = nullptr;
                         if (getBuzzerVolume() > 0) {
                             noTone(getPinBuzzer());
                             rtttl::begin(getPinBuzzer(), POKE_MELODY);
                         }
                         enterState(POKE_DISPLAY);
                     } else {
-                        // Not in a state to show — free the allocated bitmaps
-                        if (netEvt.senderBmp) free(netEvt.senderBmp);
-                        if (netEvt.textBmp) free(netEvt.textBmp);
+                        if (netEvt.senderBmp) { free(netEvt.senderBmp); netEvt.senderBmp = nullptr; }
+                        if (netEvt.textBmp)   { free(netEvt.textBmp);   netEvt.textBmp   = nullptr; }
                     }
                     break;
 
@@ -264,11 +262,14 @@ void displayTask(void *param) {
                     break;
 
                 case NetworkEvent::WS_STATUS:
-                    if (!netEvt.connected && _state == GIF_PLAYBACK && !_offlineShown) {
+                    if (!netEvt.connected && _state == GIF_PLAYBACK && !_serverOfflineNotified) {
+                        _serverOfflineNotified = true;
                         _offlineShown = true;
                         _offlineStartMs = now;
                         _offlineMsg = "Server Offline";
                         showText(_offlineMsg);
+                    } else if (netEvt.connected) {
+                        _serverOfflineNotified = false;
                     }
                     break;
 

@@ -8,8 +8,19 @@ import { Server as HttpServer } from 'http';
 import { DEVICE_API_KEY, MAX_DEVICE_CONNECTIONS } from '../config';
 import { isBannedDevice, isBanned } from './ban.service';
 import * as claimService from './claim.service';
+import db from '../db';
 import logger from '../logger';
 import type { DeviceState, PendingClaim, ClaimInfo } from '../types';
+
+// Device records (persisted for admin: online + offline)
+const stmtRecordUpsert = db.prepare(
+  'INSERT OR REPLACE INTO device_records (deviceId, name, ip, publicIp, version, lastSeen, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
+);
+const stmtRecordUpdateOffline = db.prepare(
+  'UPDATE device_records SET status = ?, lastSeen = ? WHERE deviceId = ?'
+);
+const stmtRecordAll = db.prepare('SELECT deviceId, name, ip, publicIp, version, lastSeen, status FROM device_records');
+const stmtRecordDelete = db.prepare('DELETE FROM device_records WHERE deviceId = ?');
 
 // ---------------------------------------------------------------------------
 //  State
@@ -46,6 +57,65 @@ export function getDeviceList() {
       claimedBy: claim ? { userName: claim.userName, userAvatar: claim.userAvatar } : null,
     };
   });
+}
+
+export interface DeviceRecordItem {
+  id: string;
+  name: string;
+  ip: string;
+  publicIp?: string;
+  version: string;
+  lastSeen: string;
+  status: 'online' | 'offline';
+}
+
+export function getDeviceRecordList(): DeviceRecordItem[] {
+  const now = new Date().toISOString();
+  const rows = stmtRecordAll.all() as {
+    deviceId: string;
+    name: string;
+    ip: string;
+    publicIp: string | null;
+    version: string;
+    lastSeen: string;
+    status: string;
+  }[];
+  const liveMap = new Map(Array.from(devices.entries()).map(([id, d]) => [id, d]));
+  return rows.map((r) => {
+    const live = liveMap.get(r.deviceId);
+    if (live) {
+      return {
+        id: r.deviceId,
+        name: live.name,
+        ip: live.ip,
+        publicIp: live.publicIp,
+        version: live.version,
+        lastSeen: live.connectedAt.toISOString(),
+        status: 'online' as const,
+      };
+    }
+    return {
+      id: r.deviceId,
+      name: r.name,
+      ip: r.ip,
+      publicIp: r.publicIp ?? undefined,
+      version: r.version,
+      lastSeen: r.lastSeen,
+      status: (r.status === 'online' ? 'online' : 'offline') as 'online' | 'offline',
+    };
+  });
+}
+
+export function deleteDeviceRecords(deviceIds: string[]): void {
+  for (const id of deviceIds) {
+    stmtRecordDelete.run(id);
+    const dev = devices.get(id);
+    if (dev) {
+      dev.ws.close();
+      devices.delete(id);
+    }
+  }
+  if (deviceIds.length > 0) broadcastDevices();
 }
 
 export function broadcastDevices(): void {
@@ -212,15 +282,21 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
             existing.ws.close();
           }
 
+          const connectedAt = existing?.ws === ws ? existing.connectedAt : new Date();
+          const name = msg.name || msg.id;
+          const version = msg.version || '1.0.0';
+          const ip = msg.ip || '';
           devices.set(msg.id, {
             id: msg.id,
-            name: msg.name || msg.id,
-            ip: msg.ip || '',
+            name,
+            ip,
             publicIp,
-            version: msg.version || '1.0.0',
+            version,
             ws,
-            connectedAt: existing?.ws === ws ? existing.connectedAt : new Date(),
+            connectedAt,
           });
+          const lastSeen = connectedAt.toISOString();
+          stmtRecordUpsert.run(msg.id, name, ip, publicIp, version, lastSeen, 'online');
 
           broadcastDevices();
           logger.info({ deviceId: msg.id, name: msg.name, localIp: msg.ip, publicIp }, 'Device online');
@@ -262,6 +338,8 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
       if (deviceId) {
         const registered = devices.get(deviceId);
         if (registered && registered.ws === ws) {
+          const now = new Date().toISOString();
+          stmtRecordUpdateOffline.run('offline', now, deviceId);
           devices.delete(deviceId);
           broadcastDevices();
           logger.info({ deviceId }, 'Device offline');

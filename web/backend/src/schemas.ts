@@ -47,3 +47,16 @@ export const adminBanSchema = z
   .refine((data) => data.userId || data.ip || data.deviceId, {
     message: 'At least one of userId, ip, or deviceId is required',
   });
+
+// DELETE /api/devices (admin batch delete device records)
+export const adminDevicesDeleteSchema = z.object({
+  deviceIds: z.array(z.string().min(1).max(128).regex(/^[a-zA-Z0-9-]+$/)).min(1).max(100),
+});
+
+// Admin path params (validate to avoid malformed IDs)
+export const adminUserIdParamSchema = z.object({
+  userId: z.string().min(1).max(256).regex(/^[a-zA-Z0-9@._+-]+$/),
+});
+export const adminDeviceIdParamSchema = z.object({
+  deviceId: z.string().min(1).max(128).regex(/^[a-zA-Z0-9-]+$/),
+});

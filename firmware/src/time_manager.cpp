@@ -105,7 +105,7 @@ void timeManagerDetectTimezone() {
 
     if (httpCode == 200) {
         String payload = http.getString();
-        JsonDocument doc;
+        StaticJsonDocument<256> doc;
         if (!deserializeJson(doc, payload)) {
             const char *tz = doc["timezone"];
             if (tz) {

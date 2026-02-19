@@ -17,6 +17,7 @@ const stmtUpsert = db.prepare(`
     lastSeen = excluded.lastSeen
 `);
 const stmtUpdateLastSeen = db.prepare('UPDATE users SET lastSeen = ? WHERE userId = ?');
+const stmtDelete = db.prepare('DELETE FROM users WHERE userId = ?');
 
 export function getUserById(userId: string): AppUser | null {
   const row = stmtGet.get(userId) as { userId: string; displayName: string; email: string; avatar: string } | undefined;
@@ -34,6 +35,11 @@ export function upsertUser(
 
 export function setUserOffline(userId: string): void {
   stmtUpdateLastSeen.run(new Date().toISOString(), userId);
+}
+
+export function deleteUser(userId: string): boolean {
+  const result = stmtDelete.run(userId);
+  return result.changes > 0;
 }
 
 export function getAllUsers(onlineUserIds: Set<string>): KnownUser[] {
