@@ -283,7 +283,9 @@ static void checkFirmwareVersionOnce() {
         Serial.println("[Version] No version in JSON");
         return;
     }
-    if (strcmp(remoteVer, kQbitVersion) != 0) {
+    const char *remoteNorm = (remoteVer[0] == 'v' || remoteVer[0] == 'V') ? (remoteVer + 1) : remoteVer;
+    const char *localNorm  = (kQbitVersion[0] == 'v' || kQbitVersion[0] == 'V') ? (kQbitVersion + 1) : kQbitVersion;
+    if (strcmp(remoteNorm, localNorm) != 0) {
         updateAvailable = true;
         strncpy(updateAvailableVersion, remoteVer, UPDATE_AVAILABLE_VERSION_LEN - 1);
         updateAvailableVersion[UPDATE_AVAILABLE_VERSION_LEN - 1] = '\0';
