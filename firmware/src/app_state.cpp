@@ -18,3 +18,6 @@ U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(
 const char *kQbitVersion = (QBIT_VERSION[0] != '\0')
                            ? QBIT_VERSION
                            : "dev-build";
+
+volatile bool updateAvailable = false;
+char         updateAvailableVersion[UPDATE_AVAILABLE_VERSION_LEN] = "";

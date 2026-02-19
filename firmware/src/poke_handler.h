@@ -28,6 +28,9 @@ void showPokeBitmap();
 
 // Render a history record with bitmap data and a header line.
 void showPokeHistoryBitmap(const PokeRecord *rec, const char *header, int16_t scrollX = 0);
+// Render a text-only history record with wrap scroll (like bitmap). Use pokeGetHistoryTextWidths for scroll logic.
+void showPokeHistoryText(const PokeRecord *rec, const char *header, int16_t senderScroll, int16_t messageScroll);
+void pokeGetHistoryTextWidths(const PokeRecord *rec, uint16_t *outSenderW, uint16_t *outMessageW);
 
 // Free heap-allocated poke bitmap buffers.
 void freePokeBitmaps();
@@ -41,6 +44,8 @@ bool     pokeIsBitmapMode();
 uint16_t pokeMaxWidth();
 void     pokeSetActive(bool active);
 unsigned long pokeStartMs();
+// Current message (read-only; non-null only when active and text-only). Use to avoid overwriting custom text with "Poke!".
+const char* pokeGetCurrentMessage();
 
 // --- History ring buffer ---
 void        pokeAddToHistory(const char *sender, const char *text, time_t timestamp);

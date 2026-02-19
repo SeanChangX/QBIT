@@ -19,6 +19,7 @@
 
 #include <NonBlockingRtttl.h>
 #include <WiFi.h>
+#include <stdio.h>
 
 // ==========================================================================
 //  Configuration
@@ -31,6 +32,7 @@
 #define HISTORY_IDLE_MS      3000
 #define MUTE_FEEDBACK_MS     2000
 #define OFFLINE_OVERLAY_MS   2000
+#define UPDATE_PROMPT_MS     8000
 
 // ==========================================================================
 //  Internal state
@@ -47,6 +49,11 @@ static uint8_t _bootFrame = 0;
 static uint8_t _historyIndex = 0;
 static int16_t _historyScrollOffset = 0;
 static unsigned long _historyLastScrollMs = 0;
+// Text-only history: separate scroll like bitmap
+static uint16_t _historyTextSenderWidth = 0;
+static uint16_t _historyTextMessageWidth = 0;
+static int16_t _historyTextSenderScrollOffset = 0;
+static int16_t _historyTextMessageScrollOffset = 0;
 
 // Offline overlay
 static bool          _offlineShown = false;
@@ -122,12 +129,13 @@ static void showPokeHistoryEntry(uint8_t index) {
     _historyLastScrollMs = millis();
 
     if (rec->hasBitmaps) {
+        _historyScrollOffset = 0;
         showPokeHistoryBitmap(rec, timeBuf, 0);
     } else {
-        showText(timeBuf,
-                 rec->sender.c_str(),
-                 rec->text.c_str(),
-                 "");
+        pokeGetHistoryTextWidths(rec, &_historyTextSenderWidth, &_historyTextMessageWidth);
+        _historyTextSenderScrollOffset = 0;
+        _historyTextMessageScrollOffset = 0;
+        showPokeHistoryText(rec, timeBuf, 0, 0);
     }
 }
 
@@ -176,8 +184,9 @@ void displayTask(void *param) {
         enterState(CONNECTED_INFO);
         String ip = WiFi.localIP().toString();
         showText("[ Wi-Fi Connected ]",
+                 "",
                  ip.c_str(),
-                 "http://qbit.local", "");
+                 "http://qbit.local");
     } else {
         enterState(WIFI_SETUP);
         _wifiSetupShowQR = true;
@@ -205,6 +214,11 @@ void displayTask(void *param) {
             switch (netEvt.kind) {
                 case NetworkEvent::POKE:
                     if (_state != CLAIM_PROMPT && _state != MUTE_FEEDBACK) {
+                        // Avoid overwriting custom poke text with generic "Poke!" (e.g. from HA button when text entity was used)
+                        const char *cur = pokeGetCurrentMessage();
+                        if (cur && _state == POKE_DISPLAY && strcmp(netEvt.text, "Poke!") == 0 && strcmp(cur, "Poke!") != 0) {
+                            break;
+                        }
                         handlePoke(netEvt.sender, netEvt.text);
                         if (getBuzzerVolume() > 0) {
                             noTone(getPinBuzzer());
@@ -248,8 +262,9 @@ void displayTask(void *param) {
                             enterState(CONNECTED_INFO);
                             String ip = WiFi.localIP().toString();
                             showText("[ Wi-Fi Connected ]",
+                                     "",
                                      ip.c_str(),
-                                     "http://qbit.local", "");
+                                     "http://qbit.local");
                         }
                     } else {
                         if (_state == GIF_PLAYBACK && !_offlineShown) {
@@ -427,8 +442,9 @@ void displayTask(void *param) {
                     enterState(CONNECTED_INFO);
                     String ip = WiFi.localIP().toString();
                     showText("[ Wi-Fi Connected ]",
+                             "",
                              ip.c_str(),
-                             "http://qbit.local", "");
+                             "http://qbit.local");
                 }
                 break;
 
@@ -450,21 +466,32 @@ void displayTask(void *param) {
                     _offlineMsg = nullptr;
                 }
 
-                // Normal GIF playback
-                if (!_offlineShown) {
+                // Update available prompt (once per boot)
+                if (updateAvailable) {
+                    static unsigned long updatePromptStartMs = 0;
+                    if (updatePromptStartMs == 0) updatePromptStartMs = now;
+                    char curLine[32], latLine[32];
+                    snprintf(curLine, sizeof(curLine), "Current: %s", kQbitVersion);
+                    snprintf(latLine, sizeof(latLine), "Latest: %s", updateAvailableVersion);
+                    showText("[ Update available ]", "", curLine, latLine);
+                    if (now - updatePromptStartMs >= UPDATE_PROMPT_MS) {
+                        updateAvailable = false;
+                        updatePromptStartMs = 0;
+                    }
+                } else if (!_offlineShown) {
                     gifPlayerTick();
                 }
                 break;
 
             case POKE_DISPLAY:
                 {
-                    unsigned long timeout = pokeIsBitmapMode() && (pokeMaxWidth() > 128)
+                    unsigned long timeout = (pokeMaxWidth() > 128)
                         ? POKE_SCROLL_DISPLAY_MS : POKE_DISPLAY_MS;
                     if (elapsed > timeout) {
                         pokeSetActive(false);
                         freePokeBitmaps();
                         enterState(GIF_PLAYBACK);
-                    } else if (pokeIsBitmapMode()) {
+                    } else {
                         pokeAdvanceScroll();
                     }
                 }
@@ -487,10 +514,13 @@ void displayTask(void *param) {
 
             case HISTORY_POKE:
                 {
-                    // Determine if this entry needs scrolling
                     PokeRecord *hRec = pokeGetHistory(_historyIndex);
-                    bool needsScroll = hRec && hRec->hasBitmaps &&
-                        max(hRec->senderBmpW, hRec->textBmpW) > 128;
+                    bool needsScroll = false;
+                    if (hRec && hRec->hasBitmaps) {
+                        needsScroll = max(hRec->senderBmpW, hRec->textBmpW) > 128;
+                    } else if (hRec) {
+                        needsScroll = _historyTextSenderWidth > 128 || _historyTextMessageWidth > 128;
+                    }
                     unsigned long timeout = needsScroll ? POKE_SCROLL_DISPLAY_MS : HISTORY_IDLE_MS;
 
                     if (elapsed >= timeout) {
@@ -499,17 +529,41 @@ void displayTask(void *param) {
                         unsigned long nowMs = millis();
                         if (nowMs - _historyLastScrollMs >= POKE_SCROLL_INTERVAL_MS) {
                             _historyLastScrollMs = nowMs;
-                            _historyScrollOffset += POKE_SCROLL_PX;
-                            uint16_t maxW = max(hRec->senderBmpW, hRec->textBmpW);
-                            uint16_t virtualW = maxW + 64;
-                            if (_historyScrollOffset >= (int16_t)virtualW) {
-                                _historyScrollOffset -= (int16_t)virtualW;
+                            if (hRec->hasBitmaps) {
+                                _historyScrollOffset += POKE_SCROLL_PX;
+                                uint16_t maxW = max(hRec->senderBmpW, hRec->textBmpW);
+                                uint16_t virtualW = maxW + 64;
+                                if (_historyScrollOffset >= (int16_t)virtualW) {
+                                    _historyScrollOffset -= (int16_t)virtualW;
+                                }
+                                char timeBuf[24];
+                                struct tm ti;
+                                localtime_r(&hRec->timestamp, &ti);
+                                strftime(timeBuf, sizeof(timeBuf), "[ %m/%d %H:%M:%S ]", &ti);
+                                showPokeHistoryBitmap(hRec, timeBuf, _historyScrollOffset);
+                            } else {
+                                if (_historyTextSenderWidth > 128) {
+                                    _historyTextSenderScrollOffset += POKE_SCROLL_PX;
+                                    uint16_t vw = _historyTextSenderWidth + 64;
+                                    if (_historyTextSenderScrollOffset >= (int16_t)vw) {
+                                        _historyTextSenderScrollOffset -= (int16_t)vw;
+                                    }
+                                }
+                                if (_historyTextMessageWidth > 128) {
+                                    _historyTextMessageScrollOffset += POKE_SCROLL_PX;
+                                    uint16_t vw = _historyTextMessageWidth + 64;
+                                    if (_historyTextMessageScrollOffset >= (int16_t)vw) {
+                                        _historyTextMessageScrollOffset -= (int16_t)vw;
+                                    }
+                                }
+                                char timeBuf[24];
+                                struct tm ti;
+                                localtime_r(&hRec->timestamp, &ti);
+                                strftime(timeBuf, sizeof(timeBuf), "[ %m/%d %H:%M:%S ]", &ti);
+                                int16_t sr = (_historyTextSenderWidth > 128) ? _historyTextSenderScrollOffset : 0;
+                                int16_t mr = (_historyTextMessageWidth > 128) ? _historyTextMessageScrollOffset : 0;
+                                showPokeHistoryText(hRec, timeBuf, sr, mr);
                             }
-                            char timeBuf[24];
-                            struct tm ti;
-                            localtime_r(&hRec->timestamp, &ti);
-                            strftime(timeBuf, sizeof(timeBuf), "[ %m/%d %H:%M:%S ]", &ti);
-                            showPokeHistoryBitmap(hRec, timeBuf, _historyScrollOffset);
                         }
                     }
                 }
