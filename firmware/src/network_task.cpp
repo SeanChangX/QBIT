@@ -9,6 +9,8 @@
 #include "poke_handler.h"
 
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
 #include <NetWizard.h>
 #include <ESPmDNS.h>
 #include <ArduinoJson.h>
@@ -69,6 +71,8 @@ static unsigned long _mqttLastReconnect = 0;
 static bool          _wifiConnected = false;
 static unsigned long _wifiLostMs    = 0;
 static bool          _portalRestartedForReconnect = false;
+static unsigned long _versionCheckAfterMs = 0;  // run version check after this time
+static unsigned long _tzCheckAfterMs     = 0;  // run timezone detection after this time
 
 // ==========================================================================
 //  WebSocket helpers
@@ -240,8 +244,72 @@ static void wsMessage(WebsocketsClient &client, WebsocketsMessage message) {
 }
 
 // ==========================================================================
+//  Firmware version check (HTTPS GET latest.json), deferred ~15s after WiFi
+// ==========================================================================
+#define VERSION_CHECK_URL "https://seanchangx.github.io/QBIT/latest.json"
+#define VERSION_CHECK_TIMEOUT_MS 45000  // HTTPClient uses ms (compare with millis())
+
+static void checkFirmwareVersionOnce() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+
+    Serial.println("[Version] Checking...");
+    WiFiClientSecure client;
+    client.setInsecure();
+    client.setTimeout(20);
+    HTTPClient http;
+    if (!http.begin(client, VERSION_CHECK_URL)) {
+        Serial.println("[Version] HTTP begin failed");
+        return;
+    }
+    http.setTimeout(VERSION_CHECK_TIMEOUT_MS);
+    int code = http.GET();
+    if (code != 200) {
+        Serial.printf("[Version] GET failed: %d\n", code);
+        http.end();
+        return;
+    }
+    String payload = http.getString();
+    http.end();
+
+    StaticJsonDocument<384> doc;
+    if (deserializeJson(doc, payload)) {
+        Serial.println("[Version] JSON parse failed");
+        return;
+    }
+    const char *remoteVer = doc["version"];
+    if (!remoteVer || remoteVer[0] == '\0') {
+        Serial.println("[Version] No version in JSON");
+        return;
+    }
+    if (strcmp(remoteVer, kQbitVersion) != 0) {
+        updateAvailable = true;
+        strncpy(updateAvailableVersion, remoteVer, UPDATE_AVAILABLE_VERSION_LEN - 1);
+        updateAvailableVersion[UPDATE_AVAILABLE_VERSION_LEN - 1] = '\0';
+        Serial.printf("[Version] Update available: %s (current: %s)\n", remoteVer, kQbitVersion);
+    } else {
+        Serial.printf("[Version] Up to date: %s\n", kQbitVersion);
+    }
+}
+
+// ==========================================================================
 //  MQTT helpers
 // ==========================================================================
+#define POKE_MQTT_TEXT_MAX 25  // max chars for poke message (no bitmap path)
+static char _haStoredPokeText[POKE_MQTT_TEXT_MAX + 1] = {0};  // typed in HA; used when Poke button is pressed
+
+// Sanitize and truncate to maxLen: printable ASCII only, null-terminated.
+static void sanitizePokeText(char *dst, size_t dstSize, const char *src, size_t maxLen) {
+    if (!dst || dstSize == 0) return;
+    size_t di = 0;
+    const size_t cap = (maxLen + 1 < dstSize) ? maxLen + 1 : dstSize;
+    while (di < cap - 1 && src && *src) {
+        unsigned char c = (unsigned char)*src++;
+        if (c >= 0x20 && c <= 0x7E) dst[di++] = (char)c;
+    }
+    dst[di] = '\0';
+}
 
 static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     String topicStr = String(topic);
@@ -252,23 +320,47 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
     String rawPayload = "";
     for (unsigned int i = 0; i < length; i++) rawPayload += (char)payload[i];
 
-    // Poke command (JSON payload)
+    // Poke command (JSON payload). If user typed in HA text entity, use that; else use payload text (default "Poke!").
     if (topicStr == prefix + "/" + id + "/command") {
         StaticJsonDocument<1024> doc;
         if (deserializeJson(doc, payload, length)) return;
         const char *cmd = doc["command"];
         if (!cmd) return;
         if (strcmp(cmd, "poke") == 0) {
-            const char *sender = doc["sender"] | "MQTT";
+            const char *sender = doc["sender"] | "Home Assistant";
             const char *text   = doc["text"]   | "Poke!";
             NetworkEvent evt = {};
             evt.kind = NetworkEvent::POKE;
-            strncpy(evt.sender, sender, sizeof(evt.sender) - 1);
-            strncpy(evt.text, text, sizeof(evt.text) - 1);
+            sanitizePokeText(evt.sender, sizeof(evt.sender), sender, POKE_MQTT_TEXT_MAX);
+            if (evt.sender[0] == '\0') strcpy(evt.sender, "Home Assistant");
+            if (_haStoredPokeText[0] != '\0') {
+                strncpy(evt.text, _haStoredPokeText, sizeof(evt.text) - 1);
+                evt.text[sizeof(evt.text) - 1] = '\0';
+            } else {
+                sanitizePokeText(evt.text, sizeof(evt.text), text, POKE_MQTT_TEXT_MAX);
+                if (evt.text[0] == '\0') strcpy(evt.text, "Poke!");
+            }
             xQueueSend(networkEventQueue, &evt, pdMS_TO_TICKS(100));
-            mqttPublishPokeEvent(sender, text);
-            Serial.printf("[MQTT] Poke from %s: %s\n", sender, text);
+            mqttPublishPokeEvent(evt.sender, evt.text);
+            Serial.printf("[MQTT] Poke from %s: %s\n", evt.sender, evt.text);
         }
+        return;
+    }
+
+    // HA text entity: store only (no poke). When user presses Poke button we use this or "Poke!".
+    if (topicStr == prefix + "/" + id + "/poke_text/set") {
+        const char *textSrc = rawPayload.c_str();
+        if (length > 0 && payload[0] == '{') {
+            StaticJsonDocument<256> doc;
+            if (!deserializeJson(doc, payload, length)) {
+                const char *v = doc["value"].as<const char*>();
+                if (!v || !v[0]) v = doc["text"].as<const char*>();
+                if (!v || !v[0]) v = doc["message"].as<const char*>();
+                if (!v || !v[0]) v = doc["state"].as<const char*>();
+                if (v && v[0]) textSrc = v;
+            }
+        }
+        sanitizePokeText(_haStoredPokeText, sizeof(_haStoredPokeText), textSrc, POKE_MQTT_TEXT_MAX);
         return;
     }
 
@@ -336,6 +428,7 @@ static void mqttReconnect() {
         String id = getDeviceId();
         String prefix = getMqttPrefix();
         _mqttClient.subscribe((prefix + "/" + id + "/command").c_str());
+        _mqttClient.subscribe((prefix + "/" + id + "/poke_text/set").c_str());
         _mqttClient.subscribe((prefix + "/" + id + "/mute/set").c_str());
         _mqttClient.subscribe((prefix + "/" + id + "/animation/next").c_str());
 
@@ -403,14 +496,10 @@ void networkTask(void *param) {
                     evt.connected = true;
                     xQueueSend(networkEventQueue, &evt, 0);
 
-                    // Detect timezone on first connect (only if user hasn't saved one)
-                    static bool tzDetected = false;
-                    if (!tzDetected) {
-                        tzDetected = true;
-                        if (getTimezoneIANA().length() == 0) {
-                            timeManagerDetectTimezone();
-                        }
-                    }
+                    // Defer timezone and version check so we don't block MQTT/WS (no blocking in this block)
+                    if (getTimezoneIANA().length() == 0)
+                        _tzCheckAfterMs = millis() + 5000;
+                    _versionCheckAfterMs = millis() + 15000;
                 }
                 if (_portalRestartedForReconnect) {
                     _portalRestartedForReconnect = false;
@@ -439,6 +528,18 @@ void networkTask(void *param) {
                 mqttReconnect();
             }
             _mqttClient.loop();
+        }
+
+        // --- Deferred timezone detection (~5s after WiFi connect) ---
+        if (_tzCheckAfterMs > 0 && millis() >= _tzCheckAfterMs) {
+            _tzCheckAfterMs = 0;
+            if (getTimezoneIANA().length() == 0)
+                timeManagerDetectTimezone();
+        }
+        // --- Deferred version check (~15s after WiFi connect) ---
+        if (_versionCheckAfterMs > 0 && millis() >= _versionCheckAfterMs) {
+            _versionCheckAfterMs = 0;
+            checkFirmwareVersionOnce();
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));

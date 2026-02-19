@@ -25,6 +25,17 @@ static bool     _pokeBitmapMode   = false;
 static int16_t  _pokeScrollOffset = 0;
 static unsigned long _pokeLastScrollMs = 0;
 
+// Text-only poke (for scroll, same layout as bitmap: title fixed, sender/message scroll separately)
+#define POKE_TEXT_SENDER_LEN  33
+#define POKE_TEXT_MESSAGE_LEN 65
+static char     _pokeTextSender[POKE_TEXT_SENDER_LEN];
+static char     _pokeTextMessage[POKE_TEXT_MESSAGE_LEN];
+static int16_t  _pokeTextSenderScrollOffset  = 0;
+static int16_t  _pokeTextMessageScrollOffset = 0;
+static uint16_t _pokeTextSenderWidth         = 0;
+static uint16_t _pokeTextMessageWidth        = 0;
+static uint16_t _pokeTextMaxWidth            = 0;
+
 // History ring buffer (3 entries)
 #define POKE_HISTORY_SIZE 3
 static PokeRecord _pokeHistory[POKE_HISTORY_SIZE];
@@ -51,8 +62,15 @@ bool     pokeIsBitmapMode() { return _pokeBitmapMode; }
 void     pokeSetActive(bool active) { _pokeActive = active; }
 unsigned long pokeStartMs() { return _pokeStartMs; }
 
+const char* pokeGetCurrentMessage() {
+    if (!_pokeActive || _pokeBitmapMode) return nullptr;
+    return _pokeTextMessage;
+}
+
 uint16_t pokeMaxWidth() {
-    return max(_pokeSenderWidth, _pokeTextWidth);
+    if (_pokeBitmapMode)
+        return max(_pokeSenderWidth, _pokeTextWidth);
+    return _pokeTextMaxWidth;
 }
 
 // ==========================================================================
@@ -174,23 +192,40 @@ void showPokeBitmap() {
 //  Advance scroll (called from display task tick)
 // ==========================================================================
 
+static void showPokeText(int16_t senderScroll, int16_t messageScroll);
+
 bool pokeAdvanceScroll() {
     unsigned long now = millis();
     if (now - _pokeLastScrollMs < POKE_SCROLL_INTERVAL_MS) return false;
     _pokeLastScrollMs = now;
 
-    uint16_t maxWidth = pokeMaxWidth();
-    if (maxWidth <= 128) return false;
-
-    // Circular scroll — no reset, just keep incrementing
-    _pokeScrollOffset += POKE_SCROLL_PX;
-    // Wrap around at virtualWidth (bmpWidth + 64px gap)
-    uint16_t virtualWidth = maxWidth + 64;
-    if (_pokeScrollOffset >= (int16_t)virtualWidth) {
-        _pokeScrollOffset -= (int16_t)virtualWidth;
+    if (_pokeBitmapMode) {
+        uint16_t maxWidth = pokeMaxWidth();
+        if (maxWidth <= 128) return false;
+        _pokeScrollOffset += POKE_SCROLL_PX;
+        uint16_t virtualWidth = maxWidth + 64;
+        if (_pokeScrollOffset >= (int16_t)virtualWidth) {
+            _pokeScrollOffset -= (int16_t)virtualWidth;
+        }
+        showPokeBitmap();
+        return true;
     }
 
-    showPokeBitmap();
+    // Text-only: advance sender and message scroll independently
+    if (_pokeTextSenderWidth <= 128 && _pokeTextMessageWidth <= 128) return false;
+    if (_pokeTextSenderWidth > 128) {
+        _pokeTextSenderScrollOffset += POKE_SCROLL_PX;
+        uint16_t vw = _pokeTextSenderWidth + 64;
+        if (_pokeTextSenderScrollOffset >= (int16_t)vw) _pokeTextSenderScrollOffset -= (int16_t)vw;
+    }
+    if (_pokeTextMessageWidth > 128) {
+        _pokeTextMessageScrollOffset += POKE_SCROLL_PX;
+        uint16_t vw = _pokeTextMessageWidth + 64;
+        if (_pokeTextMessageScrollOffset >= (int16_t)vw) _pokeTextMessageScrollOffset -= (int16_t)vw;
+    }
+    int16_t sr = (_pokeTextSenderWidth > 128) ? _pokeTextSenderScrollOffset : 0;
+    int16_t mr = (_pokeTextMessageWidth > 128) ? _pokeTextMessageScrollOffset : 0;
+    showPokeText(sr, mr);
     return true;
 }
 
@@ -225,20 +260,110 @@ void showPokeHistoryBitmap(const PokeRecord *rec, const char *header, int16_t sc
     u8g2.sendBuffer();
 }
 
+void pokeGetHistoryTextWidths(const PokeRecord *rec, uint16_t *outSenderW, uint16_t *outMessageW) {
+    u8g2.setFont(u8g2_font_6x13_tr);
+    *outSenderW  = rec->sender.length() ? (uint16_t)u8g2.getStrWidth(rec->sender.c_str()) : 0;
+    u8g2.setFont(u8g2_font_7x14_tr);
+    *outMessageW = rec->text.length()   ? (uint16_t)u8g2.getStrWidth(rec->text.c_str())   : 0;
+}
+
+void showPokeHistoryText(const PokeRecord *rec, const char *header, int16_t senderScroll, int16_t messageScroll) {
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x13_tr);
+    u8g2.drawStr(4, 13, header);
+    const char *sStr = rec->sender.length() ? rec->sender.c_str() : "-";
+    const char *tStr = rec->text.length()   ? rec->text.c_str()   : "Poke!";
+    uint16_t senderW  = (uint16_t)u8g2.getStrWidth(sStr);
+    u8g2.setFont(u8g2_font_7x14_tr);
+    uint16_t messageW = (uint16_t)u8g2.getStrWidth(tStr);
+
+    u8g2.setFont(u8g2_font_6x13_tr);
+    int16_t sx = 4 - senderScroll;
+    u8g2.drawStr(sx, 28, sStr);
+    if (senderW > 128) {
+        uint16_t vw = senderW + 64;
+        u8g2.drawStr(sx + (int16_t)vw, 28, sStr);
+    }
+    // Blank line between sender and message
+    u8g2.setFont(u8g2_font_7x14_tr);
+    int16_t mx = 4 - messageScroll;
+    u8g2.drawStr(mx, 55, tStr);
+    if (messageW > 128) {
+        uint16_t vw = messageW + 64;
+        u8g2.drawStr(mx + (int16_t)vw, 55, tStr);
+    }
+
+    rotateBuffer180();
+    u8g2.sendBuffer();
+}
+
 // ==========================================================================
-//  Handle text-only poke
+//  Text-only poke: title fixed; sender and message scroll separately with wrap (like bitmap)
 // ==========================================================================
+#define POKE_ROW_SENDER_Y  28
+#define POKE_ROW_MESSAGE_Y 55   // one blank line below sender (6x13 + gap)
+
+static void showPokeText(int16_t senderScroll, int16_t messageScroll) {
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x13_tr);
+    u8g2.drawStr(4, 13, ">> Poke! <<");
+
+    // Sender row (6x13)
+    int16_t sx = 4 - senderScroll;
+    u8g2.drawStr(sx, POKE_ROW_SENDER_Y, _pokeTextSender);
+    if (_pokeTextSenderWidth > 128) {
+        uint16_t vw = _pokeTextSenderWidth + 64;
+        u8g2.drawStr(sx + (int16_t)vw, POKE_ROW_SENDER_Y, _pokeTextSender);
+    }
+
+    // Message row: one size larger font (7x14), one blank line below sender
+    u8g2.setFont(u8g2_font_7x14_tr);
+    int16_t mx = 4 - messageScroll;
+    u8g2.drawStr(mx, POKE_ROW_MESSAGE_Y, _pokeTextMessage);
+    if (_pokeTextMessageWidth > 128) {
+        uint16_t vw = _pokeTextMessageWidth + 64;
+        u8g2.drawStr(mx + (int16_t)vw, POKE_ROW_MESSAGE_Y, _pokeTextMessage);
+    }
+
+    rotateBuffer180();
+    u8g2.sendBuffer();
+}
+
+// ==========================================================================
+//  Handle text-only poke (unified layout: header, sender, message)
+// ==========================================================================
+
+static bool isEmptyOrNaN(const char *s) {
+    if (!s || s[0] == '\0') return true;
+    return strcmp(s, "NaN") == 0;
+}
 
 void handlePoke(const char *sender, const char *text) {
     freePokeBitmaps();
     _pokeActive  = true;
     _pokeStartMs = millis();
     _pokeScrollOffset = 0;
+    _pokeTextSenderScrollOffset  = 0;
+    _pokeTextMessageScrollOffset = 0;
     _pokeLastScrollMs = millis();
 
-    showText(">> Poke! <<", "", sender, text);
+    const char *s = isEmptyOrNaN(sender) ? "-" : sender;
+    const char *t = (text && text[0]) ? text : "Poke!";
 
-    // Add to history
+    strncpy(_pokeTextSender, s, POKE_TEXT_SENDER_LEN - 1);
+    _pokeTextSender[POKE_TEXT_SENDER_LEN - 1] = '\0';
+    strncpy(_pokeTextMessage, t, POKE_TEXT_MESSAGE_LEN - 1);
+    _pokeTextMessage[POKE_TEXT_MESSAGE_LEN - 1] = '\0';
+
+    u8g2.setFont(u8g2_font_6x13_tr);
+    uint16_t w1 = u8g2.getStrWidth(">> Poke! <<");
+    _pokeTextSenderWidth  = u8g2.getStrWidth(_pokeTextSender);
+    u8g2.setFont(u8g2_font_7x14_tr);
+    _pokeTextMessageWidth = u8g2.getStrWidth(_pokeTextMessage);
+    _pokeTextMaxWidth     = max(max(w1, _pokeTextSenderWidth), _pokeTextMessageWidth);
+
+    showPokeText(0, 0);
+
     pokeAddToHistory(sender, text, timeManagerNow());
 
     Serial.printf("Poke from %s: %s\n", sender, text);

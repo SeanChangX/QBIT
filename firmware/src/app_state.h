@@ -128,4 +128,11 @@ extern U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2;
 
 extern const char *kQbitVersion;
 
+// ==========================================================================
+//  Update check (set by network task when latest.json version differs)
+// ==========================================================================
+#define UPDATE_AVAILABLE_VERSION_LEN 16
+extern volatile bool    updateAvailable;
+extern char             updateAvailableVersion[UPDATE_AVAILABLE_VERSION_LEN];
+
 #endif // APP_STATE_H
