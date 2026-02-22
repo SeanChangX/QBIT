@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QBIT Firmware Flasher</title>
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
+    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</head>
+<body>
+    <div class="header">
+        <div class="header-brand">
+            <span class="brand-accent">Q</span><span class="brand-text">BIT</span>
+            <span class="brand-sep"></span>
+            <span class="brand-sub">Flasher</span>
+        </div>
+        <button class="theme-toggle" id="themeBtn" aria-label="Toggle theme">&#9790;</button>
+    </div>
+
+    <!-- Firmware info -->
+    <div class="card">
+        <div class="card-title"><span class="material-icons icon-inline">info</span> Firmware Info</div>
+        <div class="info-item">
+            <span class="info-label"><span class="material-icons icon-small">tag</span> Version</span>
+            <span class="info-value" id="version">Loading...</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label"><span class="material-icons icon-small">storage</span> Size</span>
+            <span class="info-value" id="firmware-size">Loading...</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label"><span class="material-icons icon-small">schedule</span> Timestamp</span>
+            <span class="info-value" id="timestamp">Loading...</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label"><span class="material-icons icon-small">verified_user</span> MD5</span>
+            <span class="info-value mono small" id="firmware-md5">Loading...</span>
+        </div>
+        <button class="btn btn-secondary" id="refresh-btn"><span class="material-icons icon-inline">refresh</span> Refresh</button>
+    </div>
+
+    <!-- Flash -->
+    <div class="card">
+        <div class="card-title"><span class="material-icons icon-inline">flash_on</span> Flash</div>
+        <div class="flash-button-row">
+            <esp-web-install-button id="install-btn" manifest="manifest.json">
+                <button class="btn btn-primary" slot="activate"><span class="material-icons icon-inline">usb</span> Connect & Flash</button>
+                <span slot="unsupported">Your browser does not support Web Serial. Use Chrome or Edge 89+.</span>
+                <span slot="not-allowed">Serial access is blocked. Allow serial access and reload.</span>
+            </esp-web-install-button>
+        </div>
+        <div class="hint small">Requires Chrome/Edge 89+. Hold BOOT on the board if prompted.</div>
+    </div>
+
+    <div class="footer">
+        <div class="footer-brand">QBIT Firmware Flasher</div>
+        <div class="footer-copy">Copyright &copy; 2026 <a href="https://github.com/SeanChangX" target="_blank" rel="noopener noreferrer">SCX</a>. All rights reserved.</div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

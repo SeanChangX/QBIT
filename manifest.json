@@ -1,0 +1,28 @@
+{
+  "name": "QBIT",
+  "version": "v1.3.6",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-C3",
+      "parts": [
+        {
+          "path": "bootloader.bin",
+          "offset": 0
+        },
+        {
+          "path": "partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "firmware.bin",
+          "offset": 65536
+        },
+        {
+          "path": "littlefs.bin",
+          "offset": 2162688
+        }
+      ]
+    }
+  ]
+}
