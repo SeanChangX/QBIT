@@ -33,6 +33,9 @@
 #define MUTE_FEEDBACK_MS     2000
 #define OFFLINE_OVERLAY_MS   2000
 #define UPDATE_PROMPT_MS     8000
+// Must match network_task WIFI_RECONNECT_TIMEOUT_MS (AP portal starts after this)
+#define WIFI_AP_TIMEOUT_MS   15000
+#define WIFI_AP_PROGRESS_LEN 18
 
 // ==========================================================================
 //  Internal state
@@ -61,8 +64,12 @@ static unsigned long _offlineStartMs = 0;
 static const char*   _offlineMsg = nullptr;
 static bool          _serverOfflineNotified = false;
 
-// WiFi setup: QR vs text toggle
+// WiFi setup: QR vs text toggle; only show QR when AP portal is active
 static bool _wifiSetupShowQR = true;
+static bool _wifiSetupPortalDrawn = false;
+// Throttle redraw for connecting progress (only when bar or seconds change)
+static uint8_t _lastWifiConnBar = 0xFF;
+static uint8_t _lastWifiConnSec = 0xFF;
 
 // Melody tracking
 static bool _melodyWasPlaying = false;
@@ -75,6 +82,36 @@ static void enterState(DisplayState newState) {
     _prevState = _state;
     _state = newState;
     _stateEntryMs = millis();
+}
+
+// Terminal-style countdown: title, blank line, "AP in Xs", progress bar. Countdown starts when network declares connection lost.
+// Bar style: [#] filled, [.] empty (e.g. [##########........])
+static void showWifiConnectingProgress(unsigned long nowMs) {
+    unsigned long wifiLostMs = networkGetWifiLostMs();
+    char line3[20];
+    char bar[WIFI_AP_PROGRESS_LEN + 4];
+
+    if (wifiLostMs == 0) {
+        snprintf(line3, sizeof(line3), " Connecting");
+        bar[0] = '[';
+        for (unsigned int i = 0; i < WIFI_AP_PROGRESS_LEN; i++) bar[i + 1] = '.';
+        bar[WIFI_AP_PROGRESS_LEN + 1] = ']';
+        bar[WIFI_AP_PROGRESS_LEN + 2] = '\0';
+    } else {
+        unsigned long elapsed = nowMs - wifiLostMs;
+        unsigned long remainingMs = (elapsed >= WIFI_AP_TIMEOUT_MS) ? 0 : (WIFI_AP_TIMEOUT_MS - elapsed);
+        unsigned int remainingSec = (unsigned int)((remainingMs + 500) / 1000);
+        unsigned int filled = (unsigned int)((elapsed * (WIFI_AP_PROGRESS_LEN + 1)) / WIFI_AP_TIMEOUT_MS);
+        if (filled > WIFI_AP_PROGRESS_LEN) filled = WIFI_AP_PROGRESS_LEN;
+
+        snprintf(line3, sizeof(line3), " AP in %us", (unsigned)remainingSec);
+        bar[0] = '[';
+        for (unsigned int i = 0; i < WIFI_AP_PROGRESS_LEN; i++)
+            bar[i + 1] = (i < filled) ? '#' : '.';
+        bar[WIFI_AP_PROGRESS_LEN + 1] = ']';
+        bar[WIFI_AP_PROGRESS_LEN + 2] = '\0';
+    }
+    showText("[ Wi-Fi Setup ]", "", line3, bar);
 }
 
 // ==========================================================================
@@ -190,8 +227,16 @@ void displayTask(void *param) {
     } else {
         enterState(WIFI_SETUP);
         _wifiSetupShowQR = true;
-        String apPwd = getApPassword();
-        showWifiQR("QBIT", apPwd.c_str());
+        _wifiSetupPortalDrawn = false;
+        if (bits & PORTAL_ACTIVE_BIT) {
+            _wifiSetupPortalDrawn = true;
+            String apPwd = getApPassword();
+            showWifiQR("QBIT", apPwd.c_str());
+        } else {
+            _lastWifiConnBar = 0xFF;
+            _lastWifiConnSec = 0xFF;
+            showWifiConnectingProgress(millis());
+        }
     }
 
     // Main state machine loop
@@ -323,7 +368,7 @@ void displayTask(void *param) {
 
             switch (_state) {
                 case WIFI_SETUP:
-                    if (gesture.type == SINGLE_TAP) {
+                    if (gesture.type == SINGLE_TAP && (xEventGroupGetBits(connectivityBits) & PORTAL_ACTIVE_BIT)) {
                         _wifiSetupShowQR = !_wifiSetupShowQR;
                         if (_wifiSetupShowQR) {
                             String apPwd = getApPassword();
@@ -436,9 +481,32 @@ void displayTask(void *param) {
         elapsed = now - _stateEntryMs;
 
         switch (_state) {
-            case WIFI_SETUP:
-                // Check if WiFi connected
-                if (xEventGroupGetBits(connectivityBits) & WIFI_CONNECTED_BIT) {
+            case WIFI_SETUP: {
+                EventBits_t wb = xEventGroupGetBits(connectivityBits);
+                if (!(wb & PORTAL_ACTIVE_BIT)) {
+                    _wifiSetupPortalDrawn = false;
+                    unsigned long wifiLostMs = networkGetWifiLostMs();
+                    uint8_t sec = 0xFF;
+                    uint8_t barFilled = 0xFF;
+                    if (wifiLostMs > 0) {
+                        unsigned long elapsedFromLost = now - wifiLostMs;
+                        unsigned long remainingMs = (elapsedFromLost >= WIFI_AP_TIMEOUT_MS) ? 0 : (WIFI_AP_TIMEOUT_MS - elapsedFromLost);
+                        sec = (uint8_t)((remainingMs + 500) / 1000);
+                        barFilled = (uint8_t)((elapsedFromLost * (WIFI_AP_PROGRESS_LEN + 1)) / WIFI_AP_TIMEOUT_MS);
+                        if (barFilled > WIFI_AP_PROGRESS_LEN) barFilled = WIFI_AP_PROGRESS_LEN;
+                    }
+                    if (sec != _lastWifiConnSec || barFilled != _lastWifiConnBar) {
+                        _lastWifiConnSec = sec;
+                        _lastWifiConnBar = barFilled;
+                        showWifiConnectingProgress(now);
+                    }
+                } else if (!_wifiSetupPortalDrawn) {
+                    _wifiSetupPortalDrawn = true;
+                    _wifiSetupShowQR = true;
+                    String apPwd = getApPassword();
+                    showWifiQR("QBIT", apPwd.c_str());
+                }
+                if (wb & WIFI_CONNECTED_BIT) {
                     enterState(CONNECTED_INFO);
                     String ip = WiFi.localIP().toString();
                     showText("[ Wi-Fi Connected ]",
@@ -447,6 +515,7 @@ void displayTask(void *param) {
                              "http://qbit.local");
                 }
                 break;
+            }
 
             case CONNECTED_INFO:
                 if (elapsed >= CONNECTED_INFO_MS) {

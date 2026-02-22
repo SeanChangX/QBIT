@@ -66,7 +66,10 @@ void setup() {
     gifPlayerInit(&u8g2);
     gifPlayerSetIdleAnimation(&sys_idle_gif);
 
-    // 6. NetWizard (NON_BLOCKING) with MAC-derived AP password
+    // 6. Start display task early so boot animation runs while WiFi and server init in parallel
+    xTaskCreate(displayTask, "display", 8192, NULL, 2, NULL);
+
+    // 7. NetWizard (NON_BLOCKING) with MAC-derived AP password
     String apPwd = getApPassword();
 
     NW.onConnectionStatus([](NetWizardConnectionStatus status) {
@@ -81,19 +84,18 @@ void setup() {
     NW.setStrategy(NetWizardStrategy::NON_BLOCKING);
     NW.autoConnect("QBIT", apPwd.c_str());
 
-    // 7. mDNS
+    // 8. mDNS
     if (MDNS.begin("qbit")) {
         MDNS.addService("http", "tcp", 80);
     }
 
-    // 8. Web dashboard + server
+    // 9. Web dashboard + server
     webDashboardInit(server);
     server.begin();
 
     Serial.println("Web server started");
 
-    // 9. Launch RTOS tasks
-    xTaskCreate(displayTask, "display", 8192, NULL, 2, NULL);
+    // 10. Launch network and input tasks
     xTaskCreate(networkTask, "network", 8192, NULL, 1, NULL);
     xTaskCreate(inputTask,   "input",   2048, NULL, 3, NULL);
 }

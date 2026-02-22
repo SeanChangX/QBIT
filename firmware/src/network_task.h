@@ -15,4 +15,7 @@ void networkSendDeviceInfo();
 void networkSendClaimConfirm();
 void networkSendClaimReject();
 
+// Time when WiFi was declared lost (0 if connected or not yet lost). Used for AP countdown.
+unsigned long networkGetWifiLostMs();
+
 #endif // NETWORK_TASK_H
