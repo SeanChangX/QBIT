@@ -4,6 +4,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <ESPAsyncWebServer.h>
 #include <U8g2lib.h>
 #include <Wire.h>
@@ -80,6 +81,17 @@ void setup() {
             xEventGroupClearBits(connectivityBits, WIFI_CONNECTED_BIT);
         }
     });
+
+    // WiFi AP stability fix for ESP32-C3 PCB antenna (fixes #2):
+    // Force AP mode before NetWizard starts to ensure stable beacons.
+    // Reduce TX power to avoid signal distortion on small PCB antenna.
+    // Set HT20 (20 MHz) bandwidth for better client compatibility.
+    // NetWizard will switch to AP_STA/STA internally when connecting to saved WiFi.
+    WiFi.mode(WIFI_AP);
+    WiFi.setTxPower(WIFI_POWER_13dBm);
+    esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
+    WiFi.softAPConfig(IPAddress(192,168,4,1), IPAddress(192,168,4,1), IPAddress(255,255,255,0));
+    WiFi.softAP("QBIT", apPwd.c_str(), 1, 0, 4);
 
     NW.setStrategy(NetWizardStrategy::NON_BLOCKING);
     NW.autoConnect("QBIT", apPwd.c_str());
