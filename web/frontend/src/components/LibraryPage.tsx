@@ -547,6 +547,23 @@ export default function LibraryPage({ user, apiUrl }: Props) {
               <div className="library-card-preview">
                 <LazyLibraryPreview apiUrl={apiUrl} id={item.id} />
               </div>
+              {!selectMode && user && (
+                <div className="library-card-star">
+                  <button
+                    type="button"
+                    className={`btn-star-lib${item.starredByMe ? ' starred' : ''}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleToggleStar(item.id);
+                    }}
+                    title={item.starredByMe ? 'Unstar' : 'Star'}
+                    aria-label={item.starredByMe ? 'Unstar' : 'Star'}
+                  >
+                    &#9733;
+                  </button>
+                </div>
+              )}
               <div className="library-card-info">
                 <div className="library-card-name">{item.filename}</div>
                 <div className="library-card-meta">
@@ -561,21 +578,6 @@ export default function LibraryPage({ user, apiUrl }: Props) {
                 </div>
                 {!selectMode && (
                   <div className="library-card-actions">
-                    {user && (
-                      <button
-                        type="button"
-                        className={`btn-star-lib${item.starredByMe ? ' starred' : ''}`}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleToggleStar(item.id);
-                        }}
-                        title={item.starredByMe ? 'Unstar' : 'Star'}
-                        aria-label={item.starredByMe ? 'Unstar' : 'Star'}
-                      >
-                        &#9733;
-                      </button>
-                    )}
                     <a
                       className="btn-download"
                       href={`${apiUrl}/api/library/${item.id}/download`}
