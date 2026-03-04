@@ -919,6 +919,25 @@ body {
 /* -- Poke history panel content (list scrolls with content length) -- */
 .poke-history-list {
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) var(--bg-secondary);
+}
+
+.poke-history-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.poke-history-list::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+.poke-history-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.poke-history-list::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }
 
 .poke-history-list ul {

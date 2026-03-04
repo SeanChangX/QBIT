@@ -952,6 +952,33 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.admin-report-desc-click {
+  cursor: pointer;
+}
+.admin-report-desc-click:hover {
+  color: var(--text-secondary);
+}
+.admin-report-detail-dialog {
+  max-width: 480px;
+}
+.admin-report-detail-meta {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0 0 12px 0;
+}
+.admin-report-detail-desc {
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  padding: 12px 14px;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 20px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 60vh;
+  overflow-y: auto;
+}
 .admin-broadcast-desc {
   color: var(--text-muted);
   font-size: 0.9em;

@@ -119,6 +119,7 @@ export default function App() {
   const [broadcastText, setBroadcastText] = useState('');
   const [broadcastSending, setBroadcastSending] = useState(false);
   const [showBroadcastConfirm, setShowBroadcastConfirm] = useState(false);
+  const [reportDetail, setReportDetail] = useState<ReportRow | null>(null);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [bans, setBans] = useState<BannedList>({ userIds: [], ips: [], deviceIds: [] });
@@ -1213,7 +1214,16 @@ export default function App() {
                         <td>{r.id}</td>
                         <td>{r.reporterName ?? r.reporterUserId}</td>
                         <td>{r.reportedUserName ?? r.reportedUserId}</td>
-                        <td className="admin-report-desc">{r.description}</td>
+                        <td
+                          className="admin-report-desc admin-report-desc-click"
+                          onClick={() => setReportDetail(r)}
+                          title="Click to view full description"
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setReportDetail(r); } }}
+                        >
+                          {r.description}
+                        </td>
                         <td>{new Date(r.createdAt).toLocaleString()}</td>
                         <td>
                           <button className="btn btn-ghost" onClick={() => handleDeleteReport(r.id)}>Delete</button>
@@ -1241,6 +1251,24 @@ export default function App() {
                 </button>
                 <button type="button" className="btn btn-danger" onClick={handleBroadcast} disabled={broadcastSending}>
                   {broadcastSending ? 'Sending...' : 'Confirm send'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {reportDetail && (
+          <div className="admin-overlay" onClick={() => setReportDetail(null)} role="dialog" aria-modal="true" aria-labelledby="admin-report-detail-title">
+            <div className="admin-confirm-dialog admin-report-detail-dialog" onClick={(e) => e.stopPropagation()}>
+              <p id="admin-report-detail-title" className="admin-confirm-text">Report #{reportDetail.id}</p>
+              <p className="admin-report-detail-meta">
+                {reportDetail.reporterName ?? reportDetail.reporterUserId} → {reportDetail.reportedUserName ?? reportDetail.reportedUserId}
+                {' · '}{new Date(reportDetail.createdAt).toLocaleString()}
+              </p>
+              <div className="admin-report-detail-desc">{reportDetail.description}</div>
+              <div className="admin-confirm-actions">
+                <button type="button" className="btn btn-ghost" onClick={() => setReportDetail(null)}>
+                  Close
                 </button>
               </div>
             </div>
