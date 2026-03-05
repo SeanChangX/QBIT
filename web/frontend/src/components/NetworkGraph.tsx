@@ -349,9 +349,15 @@ export default function NetworkGraph({
         edges.remove(eid);
       }
     });
+    // Re-apply poke glow if active (sync above overwrites node options)
+    if (glowStateRef.current) {
+      const { nodeId, shadow } = glowStateRef.current;
+      if (nodes.get(nodeId)) nodes.update({ id: nodeId, shadow });
+    }
   }, [devices, onlineUsers, currentUserId, friendIds, friendPairs]);
 
   // Poke highlight: pulse on poke only – brighten then fade back over 1s; combo stacks brightness (max 5)
+  const glowStateRef = useRef<{ nodeId: string; shadow: { enabled: boolean; color: string; size: number; x: number; y: number } } | null>(null);
   const glowCleanupRef = useRef<{
     nodeId: string;
     combo: number;
@@ -371,6 +377,7 @@ export default function NetworkGraph({
         cancelAnimationFrame(frame);
         nodesRef.current.update({ id: nodeId, shadow: { enabled: false, size: 0, x: 0, y: 0 } });
         glowCleanupRef.current = null;
+        glowStateRef.current = null;
       }
       onPokeHighlightEnd?.();
       return;
@@ -414,12 +421,13 @@ export default function NetworkGraph({
       if (t >= cur.fadeEndTime) {
         nodes.update({ id: nodeId, shadow: { enabled: false, size: 0, x: 0, y: 0 } });
         glowCleanupRef.current = null;
+        glowStateRef.current = null;
         onPokeHighlightEnd?.();
         return;
       }
       const elapsed = t - cur.startTime;
-      const peakSize = 8 + cur.combo * 3;
-      const peakAlpha = 0.25 + cur.combo * 0.12;
+      const peakSize = 18 + cur.combo * 5;
+      const peakAlpha = 0.5 + cur.combo * 0.1;
       let size: number;
       let alpha: number;
       if (elapsed < GLOW_RAMP_MS) {
@@ -433,10 +441,9 @@ export default function NetworkGraph({
         alpha = peakAlpha * k;
       }
       const shadowColor = `rgba(${cur.r},${cur.g},${cur.b},${alpha})`;
-      nodes.update({
-        id: nodeId,
-        shadow: { enabled: true, color: shadowColor, size, x: 0, y: 0 },
-      });
+      const shadow = { enabled: true, color: shadowColor, size, x: 0, y: 0 };
+      nodes.update({ id: nodeId, shadow });
+      glowStateRef.current = { nodeId, shadow };
       rafIdRef.current = requestAnimationFrame(pulse);
     };
     rafIdRef.current = requestAnimationFrame(pulse);
@@ -445,6 +452,7 @@ export default function NetworkGraph({
       if (glowCleanupRef.current?.nodeId === nodeId) {
         nodes.update({ id: nodeId, shadow: { enabled: false, size: 0, x: 0, y: 0 } });
         glowCleanupRef.current = null;
+        glowStateRef.current = null;
       }
       onPokeHighlightEnd?.();
     }, GLOW_RAMP_MS + GLOW_FADE_MS + 50);
