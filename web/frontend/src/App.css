@@ -720,6 +720,18 @@ body {
   padding: 6px 0;
   font-size: 0.9em;
 }
+.poke-friends-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.poke-friends-avatar-placeholder {
+  display: inline-block;
+  background: var(--bg-accent);
+  border: 1px solid var(--border);
+}
 .poke-friends-name {
   display: inline-block;
   padding: 6px 14px;

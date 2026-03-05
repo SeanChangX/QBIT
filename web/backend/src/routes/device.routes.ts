@@ -9,6 +9,7 @@ import { pokeSchema, pokeUserSchema, claimSchema, friendRequestSchema, meSetting
 import * as deviceService from '../services/device.service';
 import * as claimService from '../services/claim.service';
 import * as friendService from '../services/friend.service';
+import * as userService from '../services/user.service';
 import * as socketService from '../services/socket.service';
 import { ensurePublicUserId, getUserIdFromPublicId } from '../services/publicUserId.service';
 import logger from '../logger';
@@ -186,14 +187,19 @@ router.delete('/claim/:deviceId', requireNotBanned, (req, res) => {
   res.json({ ok: true });
 });
 
-// GET /api/friends (returns publicUserIds)
+// GET /api/friends (returns publicUserIds and displayName per friend, from users table so names show when offline)
 router.get('/friends', (req, res) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ error: 'Login required' });
   }
   const user = req.user as AppUser;
-  const friendIds = friendService.getFriendIds(user.id).map(ensurePublicUserId);
-  res.json({ friendIds });
+  const internalIds = friendService.getFriendIds(user.id);
+  const friends = internalIds.map((userId) => {
+    const publicUserId = ensurePublicUserId(userId);
+    const u = userService.getUserById(userId);
+    return { publicUserId, displayName: u?.displayName ?? 'Friend', avatar: u?.avatar ?? '' };
+  });
+  res.json({ friendIds: friends.map((f) => f.publicUserId), friends });
 });
 
 // GET /api/friends/pairs -- friend pairs where both users have "public friends" on (publicUserIds)

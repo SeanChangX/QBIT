@@ -12,6 +12,10 @@ interface Props {
   isLoggedIn: boolean;
   apiUrl: string;
   friendIds?: string[];
+  /** displayName per publicUserId (from API, so names show when friend is offline) */
+  friendDisplayNames?: Record<string, string>;
+  /** avatar URL per publicUserId (from API) */
+  friendAvatars?: Record<string, string>;
   onlineUsers?: OnlineUser[];
   onlyFriendsCanPoke?: boolean;
   onOnlyFriendsCanPokeChange?: (value: boolean) => void;
@@ -112,6 +116,8 @@ export default function PokeDialog({
   isLoggedIn,
   apiUrl,
   friendIds = [],
+  friendDisplayNames = {},
+  friendAvatars = {},
   onlineUsers = [],
   onlyFriendsCanPoke = false,
   onOnlyFriendsCanPokeChange,
@@ -257,9 +263,15 @@ export default function PokeDialog({
                     <ul className="poke-friends-list">
                       {friendIds.map((publicUserId) => {
                         const online = onlineUsers.find((u) => u.publicUserId === publicUserId);
-                        const displayName = online?.displayName ?? 'Friend';
+                        const displayName = friendDisplayNames[publicUserId] ?? online?.displayName ?? 'Friend';
+                        const avatarUrl = friendAvatars[publicUserId] || online?.avatar;
                         return (
                           <li key={publicUserId} className="poke-friends-item">
+                            {avatarUrl ? (
+                              <img src={avatarUrl} alt="" className="poke-friends-avatar" referrerPolicy="no-referrer" />
+                            ) : (
+                              <span className="poke-friends-avatar poke-friends-avatar-placeholder" aria-hidden />
+                            )}
                             <span className="poke-friends-name" title={displayName}>{displayName}</span>
                             {onRemoveFriend && (
                               <button

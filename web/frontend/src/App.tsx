@@ -36,6 +36,8 @@ export default function App() {
   const [claimDevice, setClaimDevice] = useState<Device | null>(null);
   const [addFriendDevice, setAddFriendDevice] = useState<Device | null>(null);
   const [friendIds, setFriendIds] = useState<string[]>([]);
+  const [friendDisplayNames, setFriendDisplayNames] = useState<Record<string, string>>({});
+  const [friendAvatars, setFriendAvatars] = useState<Record<string, string>>({});
   const [friendPairs, setFriendPairs] = useState<Array<{ a: string; b: string }>>([]);
   const [onlyFriendsCanPoke, setOnlyFriendsCanPoke] = useState(false);
   const [publicFriends, setPublicFriends] = useState(true);
@@ -103,11 +105,29 @@ export default function App() {
   const fetchFriends = useCallback(() => {
     if (user) {
       fetch(`${API_URL}/api/friends`, { credentials: 'include' })
-        .then((r) => (r.ok ? r.json() : { friendIds: [] }))
-        .then((data) => setFriendIds(data.friendIds || []))
-        .catch(() => setFriendIds([]));
+        .then((r) => (r.ok ? r.json() : { friendIds: [], friends: [] }))
+        .then((data) => {
+          const ids = data.friendIds || [];
+          const friends = data.friends || [];
+          setFriendIds(ids);
+          const names: Record<string, string> = {};
+          const avatars: Record<string, string> = {};
+          friends.forEach((f: { publicUserId: string; displayName: string; avatar?: string }) => {
+            names[f.publicUserId] = f.displayName ?? 'Friend';
+            avatars[f.publicUserId] = f.avatar ?? '';
+          });
+          setFriendDisplayNames(names);
+          setFriendAvatars(avatars);
+        })
+        .catch(() => {
+          setFriendIds([]);
+          setFriendDisplayNames({});
+          setFriendAvatars({});
+        });
     } else {
       setFriendIds([]);
+      setFriendDisplayNames({});
+      setFriendAvatars({});
     }
     fetch(`${API_URL}/api/friends/pairs`, { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : { friendPairs: [] }))
@@ -425,6 +445,8 @@ export default function App() {
           isLoggedIn={!!user}
           apiUrl={API_URL}
           friendIds={friendIds}
+          friendDisplayNames={friendDisplayNames}
+          friendAvatars={friendAvatars}
           onlineUsers={onlineUsers}
           onlyFriendsCanPoke={onlyFriendsCanPoke}
           onOnlyFriendsCanPokeChange={async (value) => {
