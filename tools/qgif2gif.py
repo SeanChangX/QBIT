@@ -176,6 +176,8 @@ def main():
         for f in files
     )
     print(f"\nDone: {ok}/{len(files)} converted successfully.")
+    if ok != len(files):
+        sys.exit(1)
 
 
 if __name__ == "__main__":
