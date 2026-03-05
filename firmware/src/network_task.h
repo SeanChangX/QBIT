@@ -25,4 +25,7 @@ unsigned long networkGetWifiLostMs();
 // Reset WiFi to initial state and remove saved credentials (NetWizard reset). Device will disconnect.
 void networkWifiReset();
 
+// Apply AP RF settings for ESP32-C3 PCB antenna stability (TX power, HT20). Call after portal is up.
+void wifiApplyApRfStabilityForPcbAntenna();
+
 #endif // NETWORK_TASK_H

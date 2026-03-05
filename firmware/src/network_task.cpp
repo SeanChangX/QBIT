@@ -18,6 +18,7 @@
 #include <PubSubClient.h>
 #if defined(ESP32)
 #include <esp_system.h>
+#include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #endif
@@ -70,7 +71,7 @@ static bool             _wsConnected = false;
 static unsigned long    _wsLastReconnect = 0;
 
 static WiFiClient   _mqttWifi;
-static PubSubClient _mqttClient(_mqttWifi);
+static PubSubClient _mqttClient;   // setClient() called at runtime to avoid static init order issues (fixes #1)
 static unsigned long _mqttLastReconnect = 0;
 #define MQTT_RECONNECT_MS 5000
 
@@ -509,6 +510,7 @@ static void mqttReconnect() {
     if (now - _mqttLastReconnect < MQTT_RECONNECT_MS) return;
     _mqttLastReconnect = now;
 
+    _mqttClient.setClient(_mqttWifi);
     _mqttClient.setServer(getMqttHost().c_str(), getMqttPort());
     _mqttClient.setBufferSize(1024);
     _mqttClient.setCallback(mqttCallback);
@@ -600,6 +602,7 @@ void networkTask(void *param) {
                 _portalRestartedForReconnect = true;
                 _portalRetryAfterMs = millis() + PORTAL_RETRY_INTERVAL_MS;
                 NW.startPortal();
+                wifiApplyApRfStabilityForPcbAntenna();
                 xEventGroupSetBits(connectivityBits, PORTAL_ACTIVE_BIT);
                 Serial.println("[WiFi] Auto-reconnect timeout, restarting AP portal");
             }
@@ -731,4 +734,16 @@ void mqttPublishAnimationState(const String &filename) {
     if (!getMqttEnabled() || !_mqttClient.connected()) return;
     String topic = getMqttPrefix() + "/" + getDeviceId() + "/animation/state";
     _mqttClient.publish(topic.c_str(), filename.c_str(), true);
+}
+
+// Apply AP RF settings for ESP32-C3 PCB antenna boards (fixes #2): lower TX power and HT20.
+// Call after NetWizard has started the portal (AP or AP_STA). Does not change WiFi mode.
+void wifiApplyApRfStabilityForPcbAntenna() {
+#if defined(ESP32)
+    wifi_mode_t m = WiFi.getMode();
+    if (m == WIFI_AP || m == WIFI_AP_STA) {
+        WiFi.setTxPower(WIFI_POWER_13dBm);
+        esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
+    }
+#endif
 }

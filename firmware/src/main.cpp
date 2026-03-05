@@ -83,6 +83,8 @@ void setup() {
 
     NW.setStrategy(NetWizardStrategy::NON_BLOCKING);
     NW.autoConnect("QBIT", apPwd.c_str());
+    // Apply AP RF stability for ESP32-C3 PCB antenna after NetWizard (fixes #2). Does not change mode; AP_STA kept for portal.
+    wifiApplyApRfStabilityForPcbAntenna();
 
     // 8. mDNS
     if (MDNS.begin("qbit")) {
