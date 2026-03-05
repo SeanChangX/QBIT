@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Device } from '../types';
 
 interface Props {
@@ -6,12 +6,29 @@ interface Props {
   apiUrl: string;
   onClose: () => void;
   onClaimed: () => void;
+  socket: { on: (ev: string, fn: (data: { result: string }) => void) => void; off: (ev: string, fn: (data: { result: string }) => void) => void } | null;
 }
 
-export default function ClaimDialog({ device, apiUrl, onClose, onClaimed }: Props) {
+export default function ClaimDialog({ device, apiUrl, onClose, onClaimed, socket }: Props) {
   const [deviceIdFull, setDeviceIdFull] = useState('');
   const [status, setStatus] = useState<'idle' | 'pending' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
+  useEffect(() => {
+    if (!socket) return;
+    const handler = (data: { result: string }) => {
+      if (data.result === 'accepted') {
+        onClaimed();
+        onClose();
+      } else if (data.result === 'rejected') {
+        setStatus('error');
+        setErrorMsg('Claim was declined on device');
+      }
+    };
+    socket.on('claim:result', handler);
+    return () => {
+      socket.off('claim:result', handler);
+    };
+  }, [socket, onClaimed, onClose]);
 
   const handleSubmit = async () => {
     if (!deviceIdFull.trim()) return;
@@ -33,14 +50,7 @@ export default function ClaimDialog({ device, apiUrl, onClose, onClaimed }: Prop
       const data = await res.json();
 
       if (res.ok) {
-        // Request sent to device, waiting for physical confirmation
         setStatus('pending');
-        // Poll or wait -- the device list update will come via Socket.io
-        // Show waiting message for 30 seconds
-        setTimeout(() => {
-          onClaimed();
-          onClose();
-        }, 30_000);
       } else {
         setStatus('error');
         setErrorMsg(data.error || 'Claim failed');
@@ -64,16 +74,13 @@ export default function ClaimDialog({ device, apiUrl, onClose, onClaimed }: Prop
         {status === 'pending' ? (
           <div className="claim-pending">
             <div className="claim-pending-icon">&#8987;</div>
-            <p>Waiting for confirmation on the QBIT device...</p>
-            <p className="claim-pending-hint">
-              Long-press the touch button on your QBIT to confirm.
-            </p>
+            <p>Waiting for confirmation on device.</p>
+            <p className="claim-pending-hint">Long-press the QBIT button to confirm.</p>
           </div>
         ) : (
           <>
             <p className="claim-description">
-              Enter the full 12-character device ID to claim this QBIT.
-              The device will prompt for physical confirmation.
+              Enter the 12-character device ID. Confirm by long-press on the QBIT.
             </p>
 
             <input

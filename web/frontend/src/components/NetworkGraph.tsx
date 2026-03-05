@@ -30,8 +30,9 @@ const EDGE_OTHER_LENGTH = 180;
 
 const GLOW_COLOR_DEVICE = '#d32f2f';
 const GLOW_COLOR_USER = '#1976d2';
-const GLOW_BASE_MS = 1000;
-const GLOW_COMBO_MS = 200;
+const GLOW_RAMP_MS = 120;   // quick brighten
+const GLOW_FADE_MS = 1000;  // then fade back over 1s
+const GLOW_MAX_COMBO = 5;
 
 export default function NetworkGraph({
   devices,
@@ -350,14 +351,25 @@ export default function NetworkGraph({
     });
   }, [devices, onlineUsers, currentUserId, friendIds, friendPairs]);
 
-  // Poke highlight: glow on node for ~1s; combo = bigger/brighter
-  const glowCleanupRef = useRef<{ nodeId: string; origSize: number; timeout: ReturnType<typeof setTimeout> } | null>(null);
+  // Poke highlight: pulse on poke only – brighten then fade back over 1s; combo stacks brightness (max 5)
+  const glowCleanupRef = useRef<{
+    nodeId: string;
+    combo: number;
+    fadeEndTime: number;
+    startTime: number;
+    timeout: ReturnType<typeof setTimeout>;
+    frame: number;
+    r: number;
+    g: number;
+    b: number;
+  } | null>(null);
   useEffect(() => {
     if (!pokeHighlight || (!pokeHighlight.deviceId && !pokeHighlight.publicUserId)) {
       if (glowCleanupRef.current) {
-        const { nodeId, origSize, timeout } = glowCleanupRef.current;
+        const { nodeId, timeout, frame } = glowCleanupRef.current;
         clearTimeout(timeout);
-        nodesRef.current.update({ id: nodeId, shadow: { enabled: false, size: 0, x: 0, y: 0 }, size: origSize });
+        cancelAnimationFrame(frame);
+        nodesRef.current.update({ id: nodeId, shadow: { enabled: false, size: 0, x: 0, y: 0 } });
         glowCleanupRef.current = null;
       }
       onPokeHighlightEnd?.();
@@ -372,41 +384,85 @@ export default function NetworkGraph({
       onPokeHighlightEnd?.();
       return;
     }
-    if (glowCleanupRef.current && glowCleanupRef.current.nodeId !== nodeId) {
-      const prev = glowCleanupRef.current;
-      clearTimeout(prev.timeout);
-      nodes.update({ id: prev.nodeId, shadow: { enabled: false, size: 0, x: 0, y: 0 }, size: prev.origSize });
-      glowCleanupRef.current = null;
-    }
-    const seq = pokeHighlight.seq;
+    const combo = Math.min(pokeHighlight.seq, GLOW_MAX_COMBO);
     const isUser = pokeHighlight.publicUserId != null;
     const glowColor = isUser ? GLOW_COLOR_USER : GLOW_COLOR_DEVICE;
     const [r, g, b] = [parseInt(glowColor.slice(1, 3), 16), parseInt(glowColor.slice(3, 5), 16), parseInt(glowColor.slice(5, 7), 16)];
-    const shadowSize = 10 + seq * 4;
-    const shadowColor = `rgba(${r},${g},${b},${0.4 + Math.min(seq * 0.15, 0.4)})`;
-    const origSize = existing.size ?? 22;
-    const glowSize = origSize + 6 + seq * 2;
 
-    nodes.update({
-      id: nodeId,
-      shadow: { enabled: true, color: shadowColor, size: shadowSize, x: 0, y: 0 },
-      size: glowSize,
-    });
+    const now = Date.now();
+    if (glowCleanupRef.current && glowCleanupRef.current.nodeId === nodeId) {
+      glowCleanupRef.current.combo = combo;
+      glowCleanupRef.current.fadeEndTime = now + GLOW_FADE_MS;
+      return;
+    }
+    if (glowCleanupRef.current && glowCleanupRef.current.nodeId !== nodeId) {
+      const prev = glowCleanupRef.current;
+      clearTimeout(prev.timeout);
+      cancelAnimationFrame(prev.frame);
+      nodes.update({ id: prev.nodeId, shadow: { enabled: false, size: 0, x: 0, y: 0 } });
+      glowCleanupRef.current = null;
+    }
 
-    const duration = GLOW_BASE_MS + seq * GLOW_COMBO_MS;
-    const t = setTimeout(() => {
+    const startTime = now;
+    const fadeEndTime = now + GLOW_RAMP_MS + GLOW_FADE_MS;
+    const rafIdRef = { current: 0 };
+
+    const pulse = () => {
+      const cur = glowCleanupRef.current;
+      if (!cur || cur.nodeId !== nodeId) return;
+      const t = Date.now();
+      if (t >= cur.fadeEndTime) {
+        nodes.update({ id: nodeId, shadow: { enabled: false, size: 0, x: 0, y: 0 } });
+        glowCleanupRef.current = null;
+        onPokeHighlightEnd?.();
+        return;
+      }
+      const elapsed = t - cur.startTime;
+      const peakSize = 8 + cur.combo * 3;
+      const peakAlpha = 0.25 + cur.combo * 0.12;
+      let size: number;
+      let alpha: number;
+      if (elapsed < GLOW_RAMP_MS) {
+        const k = elapsed / GLOW_RAMP_MS;
+        size = peakSize * k;
+        alpha = peakAlpha * k;
+      } else {
+        const fadeRemain = cur.fadeEndTime - t;
+        const k = Math.max(0, fadeRemain / GLOW_FADE_MS);
+        size = peakSize * k;
+        alpha = peakAlpha * k;
+      }
+      const shadowColor = `rgba(${cur.r},${cur.g},${cur.b},${alpha})`;
       nodes.update({
         id: nodeId,
-        shadow: { enabled: false, size: 0, x: 0, y: 0 },
-        size: origSize,
+        shadow: { enabled: true, color: shadowColor, size, x: 0, y: 0 },
       });
-      glowCleanupRef.current = null;
+      rafIdRef.current = requestAnimationFrame(pulse);
+    };
+    rafIdRef.current = requestAnimationFrame(pulse);
+    const timeout = setTimeout(() => {
+      cancelAnimationFrame(rafIdRef.current);
+      if (glowCleanupRef.current?.nodeId === nodeId) {
+        nodes.update({ id: nodeId, shadow: { enabled: false, size: 0, x: 0, y: 0 } });
+        glowCleanupRef.current = null;
+      }
       onPokeHighlightEnd?.();
-    }, duration);
-    glowCleanupRef.current = { nodeId, origSize, timeout: t };
+    }, GLOW_RAMP_MS + GLOW_FADE_MS + 50);
+    glowCleanupRef.current = {
+      nodeId,
+      combo,
+      fadeEndTime,
+      startTime,
+      timeout,
+      frame: rafIdRef.current,
+      r,
+      g,
+      b,
+    };
 
     return () => {
-      clearTimeout(t);
+      clearTimeout(timeout);
+      cancelAnimationFrame(rafIdRef.current);
       if (glowCleanupRef.current?.nodeId === nodeId) glowCleanupRef.current = null;
     };
   }, [pokeHighlight, onPokeHighlightEnd]);

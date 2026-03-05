@@ -426,10 +426,13 @@ body {
   line-height: 1;
   letter-spacing: normal;
   text-transform: none;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   white-space: nowrap;
   word-wrap: normal;
   color: inherit;
+  vertical-align: middle;
 }
 @media (max-width: 640px) {
   .section-title {
@@ -978,6 +981,18 @@ body {
   word-break: break-word;
   max-height: 60vh;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.admin-report-detail-desc::-webkit-scrollbar {
+  width: 6px;
+}
+.admin-report-detail-desc::-webkit-scrollbar-track {
+  background: transparent;
+}
+.admin-report-detail-desc::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
 }
 .admin-broadcast-desc {
   color: var(--text-muted);

@@ -45,6 +45,7 @@ export default function App() {
   const [showReport, setShowReport] = useState(false);
   const notificationIdRef = useRef(0);
   const socketRef = useRef<Socket | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const fetchFriendsRef = useRef<() => void>(() => {});
   const addFriendDeviceRef = useRef<Device | null>(null);
   const networkBarTouchStartRef = useRef<number | null>(null);
@@ -162,11 +163,8 @@ export default function App() {
           (deviceId != null && prev.deviceId === deviceId) ||
           (publicUserId != null && prev.publicUserId === publicUserId)
         );
-        return {
-          deviceId,
-          publicUserId,
-          seq: same ? prev!.seq + 1 : 1,
-        };
+        const seq = same ? Math.min(prev!.seq + 1, 5) : 1;
+        return { deviceId, publicUserId, seq };
       });
     });
 
@@ -230,8 +228,10 @@ export default function App() {
     });
 
     socketRef.current = s;
+    setSocket(s);
     return () => {
       s.disconnect();
+      setSocket(null);
     };
   }, []);
 
@@ -529,6 +529,7 @@ export default function App() {
           apiUrl={API_URL}
           onClose={() => setClaimDevice(null)}
           onClaimed={() => setClaimDevice(null)}
+          socket={socket}
         />
       )}
       {addFriendDevice && (

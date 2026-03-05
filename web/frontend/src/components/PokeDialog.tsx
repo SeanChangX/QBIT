@@ -241,7 +241,7 @@ export default function PokeDialog({
                 )}
                 {onPublicFriendsChange != null && (
                   <label className="poke-setting-switch">
-                    <span className="poke-setting-switch-label">Show my friend list on the network graph</span>
+                    <span className="poke-setting-switch-label">Public friends on graph</span>
                     <input
                       type="checkbox"
                       className="poke-setting-switch-input"

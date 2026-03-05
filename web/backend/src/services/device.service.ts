@@ -364,6 +364,7 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
             };
             claimService.setClaim(deviceId, claim);
             broadcastDevices();
+            socketService.emitToUser(pending.userId, 'claim:result', { result: 'accepted' });
             logger.info({ deviceId, userName: pending.userName }, 'Device claimed');
           }
         }
@@ -373,6 +374,7 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
           if (pending) {
             clearTimeout(pending.timer);
             pendingClaims.delete(deviceId);
+            socketService.emitToUser(pending.userId, 'claim:result', { result: 'rejected' });
             logger.info({ deviceId, userName: pending.userName }, 'Device claim rejected');
           }
         }

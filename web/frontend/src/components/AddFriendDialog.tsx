@@ -56,10 +56,8 @@ export default function AddFriendDialog({ device, apiUrl, onClose }: Props) {
         {status === 'pending' ? (
           <div className="claim-pending">
             <div className="claim-pending-icon">&#8987;</div>
-            <p>Waiting for the QBIT owner to confirm on the device...</p>
-            <p className="claim-pending-hint">
-              Long-press the touch button on the QBIT to confirm.
-            </p>
+            <p>Waiting for owner to confirm on device.</p>
+            <p className="claim-pending-hint">Long-press the QBIT button to confirm.</p>
             <button type="button" className="btn btn-ghost" style={{ marginTop: 12 }} onClick={onClose}>
               Close
             </button>
@@ -67,8 +65,7 @@ export default function AddFriendDialog({ device, apiUrl, onClose }: Props) {
         ) : (
           <>
             <p className="claim-description">
-              Enter the full 12-character device ID to send a friend request.
-              The QBIT owner will see the request and can confirm by long-pressing the device.
+              Enter the 12-character device ID. Owner confirms by long-press on the QBIT.
             </p>
 
             <input
