@@ -1,0 +1,26 @@
+{
+  "version": "v1.5.2",
+  "timestamp": "2026-03-07T16:51:35Z",
+  "files": {
+    "firmware.bin": {
+      "url": "firmware.bin",
+      "size": 1774624,
+      "md5": "6ce10c0899addbaf3755133a85cb77fc"
+    },
+    "littlefs.bin": {
+      "url": "littlefs.bin",
+      "size": 2031616,
+      "md5": "8134d31668164ad74cc6fd34315b5727"
+    },
+    "bootloader.bin": {
+      "url": "bootloader.bin",
+      "size": 19440,
+      "md5": "b461869304208fd75b402bbde9c24019"
+    },
+    "partitions.bin": {
+      "url": "partitions.bin",
+      "size": 3072,
+      "md5": "49bd86864ceaf01df939a75c832f1382"
+    }
+  }
+}
