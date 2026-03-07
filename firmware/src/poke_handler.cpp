@@ -145,19 +145,11 @@ static void drawBitmapToBuffer(const uint8_t *bmpData, uint16_t bmpWidth,
                     int16_t pixelY = yOffset + bmpPage * 8 + bit;
                     if (pixelY < 0 || pixelY >= 64) continue;
 
-                    // With default U8G2_R0: flip mode ON uses 180° rotation, so write
-                    // pre-rotated coords; flip mode OFF uses no rotation, so write directly.
-                    if (getFlipMode()) {
-                        int16_t hx = 127 - screenX;
-                        int16_t hy = 63 - pixelY;
-                        uint8_t targetPage = (uint8_t)(hy / 8);
-                        uint8_t targetBit  = (uint8_t)(hy % 8);
-                        buf[targetPage * 128 + hx] |= (1 << targetBit);
-                    } else {
-                        uint8_t targetPage = (uint8_t)(pixelY / 8);
-                        uint8_t targetBit  = (uint8_t)(pixelY % 8);
-                        buf[targetPage * 128 + screenX] |= (1 << targetBit);
-                    }
+                    // Always write in R0 buffer coords (same as drawStr). When flip mode is ON,
+                    // rotateBuffer180() is called after this and rotates the whole buffer (title + bitmap).
+                    uint8_t targetPage = (uint8_t)(pixelY / 8);
+                    uint8_t targetBit  = (uint8_t)(pixelY % 8);
+                    buf[targetPage * 128 + screenX] |= (1 << targetBit);
                 }
             }
         }
