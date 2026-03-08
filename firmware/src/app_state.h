@@ -24,8 +24,13 @@ enum DisplayState {
     FRIEND_PROMPT,
     HISTORY_TIME,
     HISTORY_POKE,
+    MUTE_FEEDBACK,
     OFFLINE_STATUS,
-    SETTINGS_MENU
+    SETTINGS_MENU,
+    TIMER_SET,
+    TIMER_RUNNING,
+    GAME_RUNNING,
+    GAME_OVER
 };
 
 // ==========================================================================

@@ -75,4 +75,8 @@ void setNegativeGif(bool val);
 bool getTimeFormat24h();
 void setTimeFormat24h(bool val);
 
+// --- Game high score ---
+uint32_t getGameHighScore();
+void     setGameHighScore(uint32_t score);
+
 #endif // SETTINGS_H
