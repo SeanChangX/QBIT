@@ -49,9 +49,13 @@ void inputTask(void *param) {
                         while (digitalRead(getPinTouch()) == HIGH) {
                             vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_MS));
                         }
+                        GestureEvent upEvt = { TOUCH_UP, millis() };
+                        xQueueSend(gestureQueue, &upEvt, 0);
                         state = TOUCH_IDLE;
                     }
                 } else {
+                    GestureEvent upEvt = { TOUCH_UP, now };
+                    xQueueSend(gestureQueue, &upEvt, 0);
                     // Released — was it a short tap?
                     unsigned long held = now - touchDownMs;
                     if (held < DOUBLE_TAP_WINDOW) {
@@ -76,6 +80,8 @@ void inputTask(void *param) {
                     while (digitalRead(getPinTouch()) == HIGH) {
                         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_MS));
                     }
+                    GestureEvent upEvt = { TOUCH_UP, millis() };
+                    xQueueSend(gestureQueue, &upEvt, 0);
                     state = TOUCH_IDLE;
                 } else if (now - releaseMs >= DOUBLE_TAP_WINDOW) {
                     // Timeout — it was a single tap

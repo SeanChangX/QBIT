@@ -29,4 +29,8 @@ static const char MUTE_MELODY[] =
 static const char UNMUTE_MELODY[] =
     "unmute:d=16,o=5,b=200:c5,g5";
 
+// Timer done — alarm chime
+static const char TIMER_MELODY[] =
+    "timer:d=8,o=5,b=200:c6,c6,e6,c6,e6,g6";
+
 #endif // MELODIES_H

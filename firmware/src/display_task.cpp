@@ -12,6 +12,9 @@
 #include "mqtt_ha.h"
 #include "melodies.h"
 #include "gif_player.h"
+#include "timer_ui.h"
+#include "game_menu.h"
+#include "game_runner.h"
 
 #include "gif_types.h"
 #include "sys_scx.h"
@@ -73,6 +76,9 @@ static uint8_t _lastWifiConnSec = 0xFF;
 
 // Melody tracking
 static bool _melodyWasPlaying = false;
+// Timer alarm: play even when muted; restore mute when melody ends
+static bool _timerAlarmRestoreMute = false;
+static bool _timerAlarmStarted    = false;
 
 // Settings menu
 static uint8_t _settingsCursor    = 0;
@@ -92,31 +98,99 @@ static SettingsPending _settingsPending;
 // ==========================================================================
 
 static void enterState(DisplayState newState) {
+    if (_state == TIMER_RUNNING && newState != TIMER_RUNNING) {
+        _timerAlarmStarted = false;
+        if (_timerAlarmRestoreMute) {
+            setBuzzerVolume(0);
+            _timerAlarmRestoreMute = false;
+        }
+    }
     _prevState = _state;
     _state = newState;
     _stateEntryMs = millis();
 }
 
 // ==========================================================================
-//  Settings menu renderer
+//  Settings menu: 16x16 icons for top-level (Timer, Game playground, Setting)
+//  Icon bitmaps: XBM-style, 16x16, 32 bytes each (2 bytes/row).
 // ==========================================================================
+#define SETTINGS_ICON_W  16
+#define SETTINGS_ICON_H  16
+#define SETTINGS_ICON_GAP 6
+#define SETTINGS_TEXT_X  (6 + SETTINGS_ICON_W + SETTINGS_ICON_GAP)
+#define SETTINGS_ROW_H   20   /* row baseline spacing; box height = 18 for icon + padding */
+#define SETTINGS_BOX_X   2
+#define SETTINGS_BOX_W   124
+#define SETTINGS_BOX_R   4    /* radius for rounded cap; drawn on buffer left so it shows on display left (icon side) */
+
+static const uint8_t icon_timer_bits[] PROGMEM = {
+    0x9E, 0x3C, 0xCD, 0x59, 0xB7, 0x76, 0x0B, 0x68,
+    0x05, 0x50, 0x82, 0x20, 0x82, 0x20, 0x81, 0x40,
+    0x83, 0x60, 0x41, 0x40, 0x22, 0x20, 0x12, 0x20,
+    0x04, 0x10, 0x08, 0x08, 0xB4, 0x16, 0xC2, 0x21
+};
+static const uint8_t icon_game_bits[] PROGMEM = {
+    0x00, 0x00, 0xFF, 0xFF, 0x01, 0x80, 0xFD, 0xBF,
+    0x05, 0xA0, 0x05, 0xA0, 0x05, 0xA0, 0x05, 0xA0,
+    0x05, 0xA0, 0xFD, 0xBF, 0x01, 0x80, 0xFF, 0xFF,
+    0xC0, 0x03, 0xC0, 0x03, 0xF0, 0x0F, 0x00, 0x00
+};
+static const uint8_t icon_setting_bits[] PROGMEM = {
+    0xC0, 0x03, 0x48, 0x12, 0x34, 0x2C, 0x02, 0x40,
+    0xC4, 0x23, 0x24, 0x24, 0x13, 0xC8, 0x11, 0x88,
+    0x11, 0x88, 0x13, 0xC8, 0x24, 0x24, 0xC4, 0x23,
+    0x02, 0x40, 0x34, 0x2C, 0x48, 0x12, 0xC0, 0x03
+};
 
 static void drawSettingsMenu() {
-    // 6 items: 4 toggles + Save + Exit
-    // Show 4 rows at a time; scroll window follows cursor
-    static const char *labels[6] = {
+    if (_state == SETTINGS_MENU) {
+        static const char *labels[3] = { "TIMER", "GAME LIBRARY", "SETTING" };
+        static const uint8_t *icon_bits[3] = {
+            icon_timer_bits,
+            icon_game_bits,
+            icon_setting_bits
+        };
+        u8g2.clearBuffer();
+        u8g2.setFont(u8g2_font_7x14B_tr);
+        for (uint8_t row = 0; row < 3; row++) {
+            uint8_t y = (row + 1) * SETTINGS_ROW_H;
+            bool isSelected = (row == _settingsCursor);
+            if (isSelected) {
+                u8g2.setDrawColor(1);
+                // Rounded on display left (icon side): draw rounded cap on buffer left, main box to its right.
+                uint8_t capW = (uint8_t)(SETTINGS_BOX_R * 2);
+                u8g2.drawBox(SETTINGS_BOX_X + capW, y - 14, (uint8_t)(SETTINGS_BOX_W - capW), 18);
+                u8g2.drawRBox(SETTINGS_BOX_X, y - 14, capW, 18, SETTINGS_BOX_R);
+                u8g2.drawBox(SETTINGS_BOX_X + SETTINGS_BOX_R, y - 14, (uint8_t)SETTINGS_BOX_R, 18);
+                u8g2.setDrawColor(0);
+            } else {
+                u8g2.setDrawColor(1);
+            }
+            u8g2.setBitmapMode(1);
+            u8g2.drawXBM(6, y - 13, SETTINGS_ICON_W, SETTINGS_ICON_H, icon_bits[row]);
+            u8g2.setBitmapMode(0);
+            u8g2.setDrawColor(isSelected ? 0 : 1);
+            u8g2.drawStr(SETTINGS_TEXT_X, y, labels[row]);
+        }
+        u8g2.setDrawColor(1);
+        rotateBuffer180();
+        u8g2.sendBuffer();
+        return;
+    }
+
+    // SETTINGS_OPTIONS: 5 items (QBIT Sound, GIF Invert, Flip Mode, Clock Format, [ SAVE ]). DBL = back.
+    static const char *labels[5] = {
         "QBIT Sound", "GIF Invert", "Flip Mode", "Clock Format",
-        "[ SAVE ]", "[ EXIT ]"
+        "[ SAVE ]"
     };
-    bool vals[6] = {
+    bool vals[5] = {
         _settingsPending.gifSound,
         _settingsPending.negativeGif,
         _settingsPending.flipMode,
         _settingsPending.timeFormat24h,
-        false, false
+        false
     };
 
-    // Scroll window: keep cursor visible (4 rows visible, 6 total)
     uint8_t top = 0;
     if (_settingsCursor >= 4) top = _settingsCursor - 3;
 
@@ -125,12 +199,12 @@ static void drawSettingsMenu() {
 
     for (uint8_t row = 0; row < 4; row++) {
         uint8_t item = top + row;
-        if (item >= 6) break;
+        if (item >= 5) break;
 
-        uint8_t y = (row + 1) * 15;  // y baseline: 15, 30, 45, 60
+        uint8_t y = (row + 1) * 15;
         bool isSelected = (item == _settingsCursor);
+        bool isActionRow = (item >= 4);
 
-        // Cursor row: full row inverted
         if (isSelected) {
             u8g2.setDrawColor(1);
             u8g2.drawBox(0, y - 12, 128, 14);
@@ -139,7 +213,7 @@ static void drawSettingsMenu() {
             u8g2.setDrawColor(1);
         }
 
-        if (item >= 4) {
+        if (isActionRow) {
             uint8_t w = u8g2.getStrWidth(labels[item]);
             u8g2.drawStr((128 - (int16_t)w) / 2, y, labels[item]);
         } else {
@@ -190,6 +264,19 @@ static void enterSettingsMenu() {
                             getTimeFormat24h() };
     enterState(SETTINGS_MENU);
     drawSettingsMenu();
+}
+
+static void drawContributeScreen() {
+    u8g2.clearBuffer();
+    u8g2.setFont(u8g2_font_6x13_tr);
+    const char *title = "[ More games ]";
+    const char *line2 = "Contribute your";
+    const char *line3 = "game on GitHub!";
+    u8g2.drawStr((128 - (int16_t)u8g2.getStrWidth(title)) / 2, 13, title);
+    u8g2.drawStr((128 - (int16_t)u8g2.getStrWidth(line2)) / 2, 43, line2);
+    u8g2.drawStr((128 - (int16_t)u8g2.getStrWidth(line3)) / 2, 58, line3);
+    rotateBuffer180();
+    u8g2.sendBuffer();
 }
 
 // Terminal-style countdown: title, blank line, "AP in Xs", progress bar. Countdown starts when network declares connection lost.
@@ -454,10 +541,9 @@ void displayTask(void *param) {
         // --- Check for gesture events ---
         GestureEvent gesture;
         if (xQueueReceive(gestureQueue, &gesture, 0) == pdTRUE) {
-            // Only publish final gestures to MQTT (not TOUCH_DOWN)
-            if (gesture.type != TOUCH_DOWN) {
+            // Publish to MQTT only when not in game (game gestures stay local)
+            if (_state != GAME_RUNNING && _state != GAME_OVER)
                 mqttPublishTouchEvent(gesture.type);
-            }
 
             switch (_state) {
                 case WIFI_SETUP:
@@ -595,10 +681,33 @@ void displayTask(void *param) {
                     break;
 
                 case SETTINGS_MENU:
-                    _stateEntryMs = now;  // reset idle timer on any input (10s auto-exit)
+                    _stateEntryMs = now;
+                    if (gesture.type == SINGLE_TAP) {
+                        _settingsCursor = (_settingsCursor + 1) % 3;
+                        drawSettingsMenu();
+                    } else if (gesture.type == DOUBLE_TAP) {
+                        enterState(GIF_PLAYBACK);
+                    } else if (gesture.type == LONG_PRESS) {
+                        if (_settingsCursor == 0) {
+                            timerUiEnterSet();
+                            enterState(TIMER_SET);
+                            timerUiDrawSet();
+                        } else if (_settingsCursor == 1) {
+                            gameMenuEnter();
+                            enterState(GAME_MENU);
+                            gameMenuDraw();
+                        } else {
+                            _settingsCursor = 0;
+                            enterState(SETTINGS_OPTIONS);
+                            drawSettingsMenu();
+                        }
+                    }
+                    break;
+
+                case SETTINGS_OPTIONS:
+                    _stateEntryMs = now;
                     if (_settingsConfirming) {
                         if (gesture.type == SINGLE_TAP) {
-                            // Confirmed — apply pending values and save
                             if (_settingsPending.gifSound) {
                                 uint8_t saved = getSavedVolume();
                                 setBuzzerVolume(saved > 0 ? saved : 100);
@@ -614,46 +723,39 @@ void displayTask(void *param) {
                             showText("[ Saved! ]", "", "Settings saved.", "");
                             vTaskDelay(pdMS_TO_TICKS(1500));
                             enterState(GIF_PLAYBACK);
-                        } else if (gesture.type == LONG_PRESS) {
-                            // Cancel — back to menu
+                        } else if (gesture.type == LONG_PRESS || gesture.type == DOUBLE_TAP) {
                             _settingsConfirming = false;
                             drawSettingsMenu();
                         }
                     } else if (_settingsSelected) {
-                        // A toggle row is entered — TAP toggles, HOLD exits row
                         if (gesture.type == SINGLE_TAP) {
                             switch (_settingsCursor) {
-                                case 0: _settingsPending.gifSound = !_settingsPending.gifSound; break;  // Mute toggle
-                                case 1: _settingsPending.negativeGif = !_settingsPending.negativeGif; break;
-                                case 2: _settingsPending.flipMode    = !_settingsPending.flipMode;    break;
+                                case 0: _settingsPending.gifSound      = !_settingsPending.gifSound;      break;
+                                case 1: _settingsPending.negativeGif   = !_settingsPending.negativeGif;   break;
+                                case 2: _settingsPending.flipMode      = !_settingsPending.flipMode;      break;
                                 case 3: _settingsPending.timeFormat24h = !_settingsPending.timeFormat24h; break;
                             }
                             drawSettingsMenu();
-                        } else if (gesture.type == LONG_PRESS) {
-                            // De-select row
+                        } else if (gesture.type == LONG_PRESS || gesture.type == DOUBLE_TAP) {
                             _settingsSelected = false;
                             drawSettingsMenu();
                         }
                     } else {
-                        // Browsing mode
                         if (gesture.type == SINGLE_TAP) {
-                            // Scroll cursor
-                            _settingsCursor = (_settingsCursor + 1) % 6;
+                            _settingsCursor = (_settingsCursor + 1) % 5;
+                            drawSettingsMenu();
+                        } else if (gesture.type == DOUBLE_TAP) {
+                            _settingsCursor = 0;
+                            enterState(SETTINGS_MENU);
                             drawSettingsMenu();
                         } else if (gesture.type == LONG_PRESS) {
-                            // Enter/select highlighted row
                             if (_settingsCursor == 4) {
-                                // Save — ask confirmation
                                 _settingsConfirming = true;
                                 showText("[ Save Settings? ]",
                                          "",
                                          "TAP  = confirm",
                                          "HOLD = cancel");
-                            } else if (_settingsCursor == 5) {
-                                // Exit — discard changes
-                                enterState(GIF_PLAYBACK);
                             } else {
-                                // Enter toggle row
                                 _settingsSelected = true;
                                 drawSettingsMenu();
                             }
@@ -661,7 +763,111 @@ void displayTask(void *param) {
                     }
                     break;
 
+                case GAME_MENU:
+                    _stateEntryMs = now;
+                    {
+                        GameMenuGestureType mg = GameMenuGestureType::None;
+                        if (gesture.type == SINGLE_TAP) mg = GameMenuGestureType::SingleTap;
+                        else if (gesture.type == LONG_PRESS) mg = GameMenuGestureType::LongPress;
+                        else if (gesture.type == DOUBLE_TAP) mg = GameMenuGestureType::DoubleTap;
+                        GameMenuAction ma = gameMenuOnGesture(mg);
+                        if (ma == GameMenuAction::Scroll) gameMenuDraw();
+                        else if (ma == GameMenuAction::Launch0) {
+                            updateAvailable = false;
+                            gameRunnerEnter();
+                            enterState(GAME_RUNNING);
+                            gameRunnerDrawFrame();
+                        } else if (ma == GameMenuAction::OpenContribute) {
+                            enterState(GAME_CONTRIBUTE);
+                            drawContributeScreen();
+                        } else if (ma == GameMenuAction::Back) enterSettingsMenu();
+                    }
+                    break;
+
+                case GAME_CONTRIBUTE:
+                    _stateEntryMs = now;
+                    if (gesture.type == SINGLE_TAP || gesture.type == DOUBLE_TAP || gesture.type == LONG_PRESS) {
+                        enterState(GAME_MENU);
+                        gameMenuDraw();
+                    }
+                    break;
+
                 default:
+                    break;
+
+                case TIMER_SET: {
+                    TimerGestureType tg = TimerGestureType::None;
+                    if (gesture.type == SINGLE_TAP) tg = TimerGestureType::SingleTap;
+                    else if (gesture.type == LONG_PRESS) tg = TimerGestureType::LongPress;
+                    else if (gesture.type == DOUBLE_TAP) tg = TimerGestureType::DoubleTap;
+                    TimerAction ta = timerUiOnGestureSet(tg);
+                    if (ta == TimerAction::Redraw) timerUiDrawSet();
+                    else if (ta == TimerAction::Back) enterSettingsMenu();
+                    else if (ta == TimerAction::Start) {
+                        updateAvailable = false;
+                        enterState(TIMER_RUNNING);
+                        timerUiDrawRunning(timerUiGetRemainSec(), false);
+                    }
+                    break;
+                }
+
+                case TIMER_RUNNING: {
+                    TimerGestureType tg = TimerGestureType::None;
+                    if (gesture.type == SINGLE_TAP) tg = TimerGestureType::SingleTap;
+                    else if (gesture.type == LONG_PRESS) tg = TimerGestureType::LongPress;
+                    else if (gesture.type == DOUBLE_TAP) tg = TimerGestureType::DoubleTap;
+                    TimerAction ta = timerUiOnGestureRunning(tg,
+                            timerUiGetDone(), timerUiGetStarted());
+                    if (ta == TimerAction::Dismiss) {
+                        rtttl::stop();
+                        noTone(getPinBuzzer());
+                        enterState(GIF_PLAYBACK);
+                    } else if (ta == TimerAction::GoToSet) {
+                        timerUiEnterSet();
+                        enterState(TIMER_SET);
+                        timerUiDrawSet();
+                    } else if (ta == TimerAction::Redraw) {
+                        timerUiSetStarted(true);
+                        timerUiSetLastTickMs(now);
+                        timerUiDrawRunning(timerUiGetRemainSec(), true);
+                    }
+                    break;
+                }
+
+                case GAME_RUNNING: {
+                    GameRunnerGestureType rg = GameRunnerGestureType::None;
+                    if (gesture.type == TOUCH_DOWN) rg = GameRunnerGestureType::TouchDown;
+                    else if (gesture.type == TOUCH_UP) rg = GameRunnerGestureType::TouchUp;
+                    else if (gesture.type == SINGLE_TAP) rg = GameRunnerGestureType::SingleTap;
+                    else if (gesture.type == DOUBLE_TAP) rg = GameRunnerGestureType::DoubleTap;
+                    else if (gesture.type == LONG_PRESS) rg = GameRunnerGestureType::LongPress;
+                    GameRunnerAction ra = gameRunnerOnGesture(rg);
+                    if (ra == GameRunnerAction::Jump) {
+                        gameRunnerApplyRelease();
+                        gameRunnerApplyJump();
+                        if (getBuzzerVolume() > 0) {
+                            noTone(getPinBuzzer());
+                            rtttl::begin(getPinBuzzer(), TOUCH_MELODY);
+                        }
+                    } else if (ra == GameRunnerAction::Duck) {
+                        gameRunnerApplyDuck();
+                    } else if (ra == GameRunnerAction::Exit) {
+                        enterState(GIF_PLAYBACK);
+                    } else if (rg == GameRunnerGestureType::TouchUp) {
+                        gameRunnerApplyRelease();
+                    }
+                    break;
+                }
+
+                case GAME_OVER:
+                    if (now - _stateEntryMs < 1500) break;
+                    if (gesture.type == SINGLE_TAP) {
+                        gameRunnerEnter();
+                        enterState(GAME_RUNNING);
+                        gameRunnerDrawFrame();
+                    } else if (gesture.type == LONG_PRESS) {
+                        enterState(GIF_PLAYBACK);
+                    }
                     break;
             }
         }
@@ -854,9 +1060,76 @@ void displayTask(void *param) {
                 break;
 
             case SETTINGS_MENU:
+            case SETTINGS_OPTIONS:
                 if (elapsed >= SETTINGS_MENU_IDLE_MS) {
                     enterState(GIF_PLAYBACK);
                 }
+                break;
+
+            case GAME_MENU:
+                if (elapsed >= SETTINGS_MENU_IDLE_MS) {
+                    enterState(GIF_PLAYBACK);
+                }
+                break;
+
+            case GAME_CONTRIBUTE:
+                if (elapsed >= SETTINGS_MENU_IDLE_MS) {
+                    enterState(GAME_MENU);
+                    gameMenuDraw();
+                }
+                break;
+
+            case TIMER_SET:
+                // Idle — redrawn only on gesture
+                break;
+
+            case TIMER_RUNNING:
+                if (timerUiGetDone()) {
+                    if (!rtttl::isPlaying()) {
+                        if (!_timerAlarmStarted) {
+                            if (getBuzzerVolume() == 0) {
+                                _timerAlarmRestoreMute = true;
+                                setBuzzerVolume(getSavedVolume() > 0 ? getSavedVolume() : 100);
+                            }
+                            noTone(getPinBuzzer());
+                            rtttl::begin(getPinBuzzer(), TIMER_MELODY);
+                            _timerAlarmStarted = true;
+                        } else {
+                            noTone(getPinBuzzer());
+                            rtttl::begin(getPinBuzzer(), TIMER_MELODY);
+                        }
+                    }
+                } else if (timerUiTick(now)) {
+                    if (timerUiGetDone()) {
+                        if (getBuzzerVolume() == 0) {
+                            _timerAlarmRestoreMute = true;
+                            setBuzzerVolume(getSavedVolume() > 0 ? getSavedVolume() : 100);
+                        }
+                        noTone(getPinBuzzer());
+                        rtttl::begin(getPinBuzzer(), TIMER_MELODY);
+                        _timerAlarmStarted = true;
+                        showText("[ Timer Done! ]", "", "Time's up!", "TAP to dismiss");
+                    } else {
+                        timerUiDrawRunning(timerUiGetRemainSec(), true);
+                    }
+                }
+                break;
+
+            case GAME_RUNNING:
+                gameRunnerDrawFrame(now);
+                if (gameRunnerTick(now)) {
+                    setGameHighScore(gameRunnerGetScore());
+                    if (getBuzzerVolume() > 0) {
+                        noTone(getPinBuzzer());
+                        rtttl::begin(getPinBuzzer(), MUTE_MELODY);
+                    }
+                    enterState(GAME_OVER);
+                    gameRunnerDrawGameOver();
+                }
+                break;
+
+            case GAME_OVER:
+                // Idle — waiting for gesture
                 break;
 
             default:

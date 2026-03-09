@@ -718,6 +718,8 @@ void mqttPublishTouchEvent(GestureType type) {
     String topic = getMqttPrefix() + "/" + getDeviceId() + "/touch";
     const char *typeStr = "none";
     switch (type) {
+        case TOUCH_DOWN:  typeStr = "touch_down";  break;
+        case TOUCH_UP:    typeStr = "touch_up";    break;
         case SINGLE_TAP:  typeStr = "single_tap";  break;
         case DOUBLE_TAP:  typeStr = "double_tap";  break;
         case LONG_PRESS:  typeStr = "long_press";  break;

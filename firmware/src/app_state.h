@@ -24,8 +24,16 @@ enum DisplayState {
     FRIEND_PROMPT,
     HISTORY_TIME,
     HISTORY_POKE,
+    MUTE_FEEDBACK,
     OFFLINE_STATUS,
-    SETTINGS_MENU
+    SETTINGS_MENU,
+    SETTINGS_OPTIONS,
+    GAME_MENU,
+    GAME_CONTRIBUTE,
+    TIMER_SET,
+    TIMER_RUNNING,
+    GAME_RUNNING,
+    GAME_OVER
 };
 
 // ==========================================================================
@@ -34,6 +42,7 @@ enum DisplayState {
 enum GestureType {
     GESTURE_NONE,
     TOUCH_DOWN,
+    TOUCH_UP,
     SINGLE_TAP,
     DOUBLE_TAP,
     LONG_PRESS
