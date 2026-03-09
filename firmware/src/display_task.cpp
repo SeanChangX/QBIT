@@ -541,8 +541,9 @@ void displayTask(void *param) {
         // --- Check for gesture events ---
         GestureEvent gesture;
         if (xQueueReceive(gestureQueue, &gesture, 0) == pdTRUE) {
-            // Publish to MQTT only when not in game (game gestures stay local)
-            if (_state != GAME_RUNNING && _state != GAME_OVER)
+            // Publish to MQTT only when not in game; never publish touch_down/touch_up (low-level press/release)
+            if (_state != GAME_RUNNING && _state != GAME_OVER &&
+                gesture.type != TOUCH_DOWN && gesture.type != TOUCH_UP)
                 mqttPublishTouchEvent(gesture.type);
 
             switch (_state) {
