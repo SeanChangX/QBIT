@@ -201,24 +201,40 @@ function fmt(b) {
 
 // Settings controls -- fetch current values and send changes on input
 (function () {
-  var rSpeed  = document.getElementById('rSpeed');
-  var rBright = document.getElementById('rBright');
-  var btnMute = document.getElementById('btnMute');
-  var vSpeed  = document.getElementById('vSpeed');
-  var vBright = document.getElementById('vBright');
-  var _muted  = false;
+  var rSpeed    = document.getElementById('rSpeed');
+  var rBright   = document.getElementById('rBright');
+  var btnMute   = document.getElementById('btnMute');
+  var btnFlip   = document.getElementById('btnFlip');
+  var btnNeg    = document.getElementById('btnNegative');
+  var vSpeed    = document.getElementById('vSpeed');
+  var vBright   = document.getElementById('vBright');
+  var _muted    = false;
+  var _flip     = false;
+  var _negative = false;
 
   function updateMuteBtn() {
     btnMute.textContent = _muted ? 'OFF' : 'ON';
     btnMute.classList.toggle('muted', _muted);
+  }
+  function updateFlipBtn() {
+    btnFlip.textContent = _flip ? 'ON' : 'OFF';
+    btnFlip.classList.toggle('muted', !_flip);
+  }
+  function updateNegBtn() {
+    btnNeg.textContent = _negative ? 'ON' : 'OFF';
+    btnNeg.classList.toggle('muted', !_negative);
   }
 
   // Fetch current settings from device
   fetch('/api/settings').then(function (r) { return r.json(); }).then(function (s) {
     rSpeed.value  = s.speed;       vSpeed.textContent  = s.speed;
     rBright.value = s.brightness;  vBright.textContent = s.brightness;
-    _muted = s.volume === 0;
+    _muted    = s.volume === 0;
+    _flip     = !!s.flip;
+    _negative = !!s.negative;
     updateMuteBtn();
+    updateFlipBtn();
+    updateNegBtn();
   }).catch(function () {});
 
   // Debounce helper -- sends POST after user stops dragging for 150ms
@@ -242,6 +258,16 @@ function fmt(b) {
     _muted = !_muted;
     updateMuteBtn();
     send('volume', _muted ? 0 : 100);
+  });
+  btnFlip.addEventListener('click', function () {
+    _flip = !_flip;
+    updateFlipBtn();
+    send('flip', _flip ? 1 : 0);
+  });
+  btnNeg.addEventListener('click', function () {
+    _negative = !_negative;
+    updateNegBtn();
+    send('negative', _negative ? 1 : 0);
   });
 
   // Save button -- persist current settings to NVS
@@ -667,3 +693,170 @@ setInterval(pollCurrent, 3000);
 ls();
 lf();
 pollCurrent();
+
+// Live drawing to OLED (Draw card)
+(function () {
+  var SCALE = 4;
+  var W = 128, H = 64;
+  // U8G2 page-addressed buffer: buf[page*128 + col], bit=(row%8); bit=1 → white pixel
+  var buf = new Uint8Array(1024);
+  var tool = 'pen';
+  var isDown = false;
+  var _liveMode = false;
+  var _liveTimer = null;
+
+  var canvas = document.getElementById('drawCanvas');
+  var ctx = canvas.getContext('2d');
+
+  // Render buffer to canvas
+  function render() {
+    var imgData = ctx.createImageData(W * SCALE, H * SCALE);
+    var d = imgData.data;
+    for (var y = 0; y < H; y++) {
+      var page = y >> 3;
+      var bit  = y & 7;
+      for (var x = 0; x < W; x++) {
+        var on = (buf[page * W + x] >> bit) & 1;
+        var c = on ? 255 : 0;
+        for (var sy = 0; sy < SCALE; sy++) {
+          for (var sx = 0; sx < SCALE; sx++) {
+            var px = ((y * SCALE + sy) * W * SCALE + (x * SCALE + sx)) * 4;
+            d[px] = c; d[px+1] = c; d[px+2] = c; d[px+3] = 255;
+          }
+        }
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  }
+
+  // Set or clear pixel at OLED coords
+  function setPixel(ox, oy, on) {
+    if (ox < 0 || ox >= W || oy < 0 || oy >= H) return;
+    var mask = 1 << (oy & 7);
+    if (on) buf[(oy >> 3) * W + ox] |= mask;
+    else    buf[(oy >> 3) * W + ox] &= ~mask;
+  }
+
+  // Bresenham line
+  function drawLine(x0, y0, x1, y1, on) {
+    var dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    var dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    var err = dx + dy;
+    for (;;) {
+      setPixel(x0, y0, on);
+      if (x0 === x1 && y0 === y1) break;
+      var e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+  }
+
+  // Convert pointer position to OLED coords
+  function toOled(e) {
+    var r = canvas.getBoundingClientRect();
+    var s = e.touches ? e.touches[0] : e;
+    return {
+      x: Math.min(W - 1, Math.max(0, Math.floor((s.clientX - r.left) * W / r.width))),
+      y: Math.min(H - 1, Math.max(0, Math.floor((s.clientY - r.top)  * H / r.height)))
+    };
+  }
+
+  // POST buffer to /api/draw
+  function sendBuf() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/draw', true);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.onload = function () {
+      if (xhr.status !== 200) showDrawMsg('Send failed', 'error');
+    };
+    xhr.onerror = function () { showDrawMsg('Connection lost', 'error'); };
+    xhr.send(buf.buffer.slice(0));
+  }
+
+  function showDrawMsg(text, type) {
+    var msg = document.getElementById('drawMsg');
+    msg.className = 'msg ' + (type || 'ok');
+    msg.textContent = text;
+    msg.style.display = 'block';
+    clearTimeout(msg._t);
+    msg._t = setTimeout(function () { msg.style.display = 'none'; }, 2000);
+  }
+
+  function scheduleLive() {
+    if (!_liveMode) return;
+    clearTimeout(_liveTimer);
+    _liveTimer = setTimeout(sendBuf, 80);
+  }
+
+  var _lastX = -1, _lastY = -1;
+
+  function onDown(e) {
+    e.preventDefault();
+    isDown = true;
+    var p = toOled(e);
+    _lastX = p.x; _lastY = p.y;
+    setPixel(p.x, p.y, tool !== 'eraser');
+    render();
+    scheduleLive();
+  }
+
+  function onMove(e) {
+    if (!isDown) return;
+    e.preventDefault();
+    var p = toOled(e);
+    if (_lastX < 0) { _lastX = p.x; _lastY = p.y; }
+    drawLine(_lastX, _lastY, p.x, p.y, tool !== 'eraser');
+    _lastX = p.x; _lastY = p.y;
+    render();
+    scheduleLive();
+  }
+
+  function onUp() {
+    isDown = false;
+    _lastX = -1; _lastY = -1;
+  }
+
+  canvas.addEventListener('mousedown',  onDown);
+  canvas.addEventListener('mousemove',  onMove);
+  canvas.addEventListener('mouseup',    onUp);
+  canvas.addEventListener('mouseleave', onUp);
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove',  onMove, { passive: false });
+  canvas.addEventListener('touchend',   onUp);
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  var btnPen    = document.getElementById('btnPen');
+  var btnEraser = document.getElementById('btnEraser');
+  var btnLive   = document.getElementById('btnLive');
+  var btnSend   = document.getElementById('btnDrawSend');
+  var btnClear  = document.getElementById('btnDrawClear');
+
+  function setTool(t) {
+    tool = t;
+    btnPen.classList.toggle('active', t === 'pen');
+    btnEraser.classList.toggle('active', t === 'eraser');
+  }
+  setTool('pen');
+
+  btnPen.addEventListener('click', function () { setTool('pen'); });
+  btnEraser.addEventListener('click', function () { setTool('eraser'); });
+
+  btnLive.addEventListener('click', function () {
+    _liveMode = !_liveMode;
+    btnLive.classList.toggle('active', _liveMode);
+    btnLive.textContent = _liveMode ? 'Live ON' : 'Live';
+  });
+
+  btnSend.addEventListener('click', function () {
+    sendBuf();
+    showDrawMsg('Sent!', 'ok');
+  });
+
+  btnClear.addEventListener('click', function () {
+    buf.fill(0);
+    render();
+    fetch('/api/draw?clear=1', { method: 'POST' });
+  });
+
+  render(); // initial blank frame
+})();

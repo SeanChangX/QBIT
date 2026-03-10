@@ -21,3 +21,7 @@ const char *kQbitVersion = (QBIT_VERSION[0] != '\0')
 
 volatile bool updateAvailable = false;
 char         updateAvailableVersion[UPDATE_AVAILABLE_VERSION_LEN] = "";
+
+uint8_t       drawBuffer[DRAW_BUFFER_SIZE] = {};
+volatile bool drawBufferDirty = false;
+volatile bool drawModeActive  = false;

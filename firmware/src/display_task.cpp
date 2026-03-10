@@ -420,6 +420,22 @@ void displayTask(void *param) {
         unsigned long now = millis();
         unsigned long elapsed = now - _stateEntryMs;
 
+        // --- Handle live draw buffer update (web UI → OLED) ---
+        if (drawModeActive && drawBufferDirty) {
+            drawBufferDirty = false;
+            if (_state != DRAW_MODE) {
+                enterState(DRAW_MODE);
+            }
+            if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                memcpy(u8g2.getBufferPtr(), drawBuffer, DRAW_BUFFER_SIZE);
+                xSemaphoreGive(displayMutex);
+            } else {
+                memcpy(u8g2.getBufferPtr(), drawBuffer, DRAW_BUFFER_SIZE);
+            }
+            rotateBuffer180();
+            u8g2.sendBuffer();
+        }
+
         // --- Advance melody ---
         if (rtttl::isPlaying()) {
             rtttl::play();
@@ -911,6 +927,13 @@ void displayTask(void *param) {
                         enterState(GIF_PLAYBACK);
                     }
                     break;
+
+                case DRAW_MODE:
+                    if (gesture.type == SINGLE_TAP || gesture.type == LONG_PRESS) {
+                        drawModeActive = false;
+                        enterState(GIF_PLAYBACK);
+                    }
+                    break;
             }
         }
 
@@ -1189,6 +1212,10 @@ void displayTask(void *param) {
 
             case FLAPPY_OVER:
                 // Idle — waiting for gesture
+                break;
+
+            case DRAW_MODE:
+                // Idle — display is updated directly when drawBufferDirty is set
                 break;
 
             default:

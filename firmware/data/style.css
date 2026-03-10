@@ -672,6 +672,57 @@ body {
 }
 .footer a:hover { color: var(--red-light); }
 
+/* Live draw canvas */
+.draw-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  align-items: center;
+}
+.btn-tool {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-accent);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: .78em;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  transition: background .15s, border-color .15s, color .15s;
+  font-family: inherit;
+}
+.btn-tool:hover {
+  background: var(--bg-hover);
+  border-color: var(--red);
+  color: var(--text-primary);
+}
+.btn-tool.active {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+.draw-canvas-wrap {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  background: #000;
+  line-height: 0;
+  touch-action: none;
+}
+.draw-canvas-wrap canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  cursor: crosshair;
+}
+
 /* Responsive: narrow viewports (e.g. small phones) */
 @media (max-width: 380px) {
   body {
