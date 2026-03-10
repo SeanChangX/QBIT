@@ -35,7 +35,9 @@ enum DisplayState {
     TREX_RUNNING,
     TREX_OVER,
     FLAPPY_RUNNING,
-    FLAPPY_OVER
+    FLAPPY_OVER,
+    CAR_RUNNING,
+    CAR_OVER
 };
 
 // ==========================================================================

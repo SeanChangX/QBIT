@@ -50,8 +50,9 @@ static String  _tzIANA;
 static bool _flipMode        = true;
 
 // T-Rex Runner high score (stored under key "trexHi")
-static uint32_t _trexHighScore  = 0;
+static uint32_t _trexHighScore   = 0;
 static uint32_t _flappyHighScore = 0;
+static uint32_t _carHighScore    = 0;
 static bool _negativeGif     = false;
 
 // Time format: true = 24h, false = 12h
@@ -155,6 +156,7 @@ void loadSettings() {
     _timeFormat24h   = _prefs.getBool("time24h",   true);
     _trexHighScore   = _prefs.getUInt("trexHi",    0);
     _flappyHighScore = _prefs.getUInt("flappyHi",  0);
+    _carHighScore    = _prefs.getUInt("carHi",      0);
     xSemaphoreGive(_prefsMutex);
 
     // Apply speed
@@ -194,6 +196,7 @@ void saveSettings() {
     _prefs.putBool("time24h",    _timeFormat24h);
     _prefs.putUInt("trexHi",     _trexHighScore);
     _prefs.putUInt("flappyHi",   _flappyHighScore);
+    _prefs.putUInt("carHi",      _carHighScore);
     xSemaphoreGive(_prefsMutex);
     Serial.println("Settings saved to NVS");
 }
@@ -321,6 +324,18 @@ void     setFlappyHighScore(uint32_t s) {
         // Persist immediately so it survives power-off
         if (_prefsReady && xSemaphoreTake(_prefsMutex, portMAX_DELAY) == pdTRUE) {
             _prefs.putUInt("flappyHi", _flappyHighScore);
+            xSemaphoreGive(_prefsMutex);
+        }
+    }
+}
+
+// Car Avoidance
+uint32_t getCarHighScore()           { return _carHighScore; }
+void     setCarHighScore(uint32_t s) {
+    if (s > _carHighScore) {
+        _carHighScore = s;
+        if (_prefsReady && xSemaphoreTake(_prefsMutex, portMAX_DELAY) == pdTRUE) {
+            _prefs.putUInt("carHi", _carHighScore);
             xSemaphoreGive(_prefsMutex);
         }
     }

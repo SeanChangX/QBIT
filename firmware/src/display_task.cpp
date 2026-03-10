@@ -16,6 +16,7 @@
 #include "games/game_menu.h"
 #include "games/trex_runner/trex_runner.h"
 #include "games/flappy_bird/flappy_bird.h"
+#include "games/car_avoidance/car_avoidance.h"
 
 #include "gif_types.h"
 #include "sys_scx.h"
@@ -97,7 +98,8 @@ static SettingsPending _settingsPending;
 // Helper: whether current display state is any in-game view
 static bool isGameDisplayState(DisplayState s) {
     return s == TREX_RUNNING || s == TREX_OVER ||
-           s == FLAPPY_RUNNING || s == FLAPPY_OVER;
+           s == FLAPPY_RUNNING || s == FLAPPY_OVER ||
+           s == CAR_RUNNING || s == CAR_OVER;
 }
 
 // ==========================================================================
@@ -790,6 +792,15 @@ void displayTask(void *param) {
                             flappyEnter();
                             enterState(FLAPPY_RUNNING);
                             flappyDrawFrame();
+                        } else if (ma == GameMenuAction::Launch2) {
+                            updateAvailable = false;
+                            carAvoidanceEnter();
+                            if (getBuzzerVolume() > 0) {
+                                noTone(getPinBuzzer());
+                                rtttl::begin(getPinBuzzer(), CAR_START_MELODY);
+                            }
+                            enterState(CAR_RUNNING);
+                            carAvoidanceDrawFrame();
                         } else if (ma == GameMenuAction::OpenContribute) {
                             enterState(GAME_CONTRIBUTE);
                             drawContributeScreen();
@@ -907,6 +918,41 @@ void displayTask(void *param) {
                         flappyEnter();
                         enterState(FLAPPY_RUNNING);
                         flappyDrawFrame();
+                    } else if (gesture.type == LONG_PRESS) {
+                        enterState(GIF_PLAYBACK);
+                    }
+                    break;
+
+                case CAR_RUNNING: {
+                    CarGestureType cg = CarGestureType::None;
+                    if (gesture.type == TOUCH_UP)         cg = CarGestureType::TouchUp;
+                    else if (gesture.type == TOUCH_DOWN)  cg = CarGestureType::TouchDown;
+                    else if (gesture.type == SINGLE_TAP)  cg = CarGestureType::SingleTap;
+                    else if (gesture.type == DOUBLE_TAP)  cg = CarGestureType::DoubleTap;
+                    else if (gesture.type == LONG_PRESS)  cg = CarGestureType::LongPress;
+                    CarAction cra = carAvoidanceOnGesture(cg);
+                    if (cra == CarAction::ChangeLane) {
+                        carAvoidanceApplyChangeLane();
+                        if (getBuzzerVolume() > 0) {
+                            noTone(getPinBuzzer());
+                            rtttl::begin(getPinBuzzer(), TOUCH_MELODY);
+                        }
+                    } else if (cra == CarAction::Exit) {
+                        enterState(GIF_PLAYBACK);
+                    }
+                    break;
+                }
+
+                case CAR_OVER:
+                    if (now - _stateEntryMs < 1500) break;
+                    if (gesture.type == SINGLE_TAP) {
+                        carAvoidanceEnter();
+                        if (getBuzzerVolume() > 0) {
+                            noTone(getPinBuzzer());
+                            rtttl::begin(getPinBuzzer(), CAR_START_MELODY);
+                        }
+                        enterState(CAR_RUNNING);
+                        carAvoidanceDrawFrame();
                     } else if (gesture.type == LONG_PRESS) {
                         enterState(GIF_PLAYBACK);
                     }
@@ -1188,6 +1234,26 @@ void displayTask(void *param) {
                 break;
 
             case FLAPPY_OVER:
+                // Idle — waiting for gesture
+                break;
+
+            case CAR_RUNNING:
+                carAvoidanceDrawFrame(now);
+                if (carAvoidanceTick(now)) {
+                    setCarHighScore(carAvoidanceGetScore());
+                    if (getBuzzerVolume() > 0) {
+                        noTone(getPinBuzzer());
+                        rtttl::begin(getPinBuzzer(), CAR_CRASH_MELODY);
+                    }
+                    enterState(CAR_OVER);
+                    carAvoidanceDrawGameOver();
+                } else if (carAvoidanceNearMiss() && getBuzzerVolume() > 0) {
+                    noTone(getPinBuzzer());
+                    rtttl::begin(getPinBuzzer(), CAR_NEAR_MELODY);
+                }
+                break;
+
+            case CAR_OVER:
                 // Idle — waiting for gesture
                 break;
 

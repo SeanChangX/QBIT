@@ -33,4 +33,16 @@ static const char UNMUTE_MELODY[] =
 static const char TIMER_MELODY[] =
     "timer:d=8,o=5,b=200:c6,c6,e6,c6,e6,g6";
 
+// Car Avoidance: game start jingle (short ascending arpeggio)
+static const char CAR_START_MELODY[] =
+    "carstart:d=16,o=5,b=240:c,e,g,c6";
+
+// Car Avoidance: near-miss warning (two sharp beeps)
+static const char CAR_NEAR_MELODY[] =
+    "nearmiss:d=32,o=6,b=400:c,4p,c";
+
+// Car Avoidance: crash sound (descending tones)
+static const char CAR_CRASH_MELODY[] =
+    "carcrash:d=8,o=5,b=120:a,f,c";
+
 #endif // MELODIES_H

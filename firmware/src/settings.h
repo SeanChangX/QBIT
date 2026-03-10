@@ -83,4 +83,8 @@ void     setTrexHighScore(uint32_t score);
 uint32_t getFlappyHighScore();
 void     setFlappyHighScore(uint32_t score);
 
+// --- Car Avoidance high score ---
+uint32_t getCarHighScore();
+void     setCarHighScore(uint32_t score);
+
 #endif // SETTINGS_H
