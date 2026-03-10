@@ -50,7 +50,8 @@ static String  _tzIANA;
 static bool _flipMode        = true;
 
 // Game high score
-static uint32_t _gameHighScore = 0;
+static uint32_t _gameHighScore  = 0;
+static uint32_t _flappyHighScore = 0;
 static bool _negativeGif     = false;
 
 // Time format: true = 24h, false = 12h
@@ -152,7 +153,8 @@ void loadSettings() {
     _flipMode      = _prefs.getBool("flipMode",  true);
     _negativeGif   = _prefs.getBool("negGif",    false);
     _timeFormat24h = _prefs.getBool("time24h",   true);
-    _gameHighScore = _prefs.getUInt("gameHi",    0);
+    _gameHighScore   = _prefs.getUInt("gameHi",    0);
+    _flappyHighScore  = _prefs.getUInt("flappyHi",  0);
     xSemaphoreGive(_prefsMutex);
 
     // Apply speed
@@ -191,6 +193,7 @@ void saveSettings() {
     _prefs.putBool("negGif",     _negativeGif);
     _prefs.putBool("time24h",    _timeFormat24h);
     _prefs.putUInt("gameHi",     _gameHighScore);
+    _prefs.putUInt("flappyHi",   _flappyHighScore);
     xSemaphoreGive(_prefsMutex);
     Serial.println("Settings saved to NVS");
 }
@@ -302,9 +305,20 @@ uint32_t getGameHighScore()          { return _gameHighScore; }
 void     setGameHighScore(uint32_t s) {
     if (s > _gameHighScore) {
         _gameHighScore = s;
-        // Persist immediately so it survives power-off
         if (_prefsReady && xSemaphoreTake(_prefsMutex, portMAX_DELAY) == pdTRUE) {
             _prefs.putUInt("gameHi", _gameHighScore);
+            xSemaphoreGive(_prefsMutex);
+        }
+    }
+}
+// Flappy Bird high score
+uint32_t getFlappyHighScore()           { return _flappyHighScore; }
+void     setFlappyHighScore(uint32_t s) {
+    if (s > _flappyHighScore) {
+        _flappyHighScore = s;
+        // Persist immediately so it survives power-off
+        if (_prefsReady && xSemaphoreTake(_prefsMutex, portMAX_DELAY) == pdTRUE) {
+            _prefs.putUInt("flappyHi", _flappyHighScore);
             xSemaphoreGive(_prefsMutex);
         }
     }

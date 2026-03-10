@@ -11,11 +11,12 @@ enum class GameMenuGestureType {
 };
 
 enum class GameMenuAction {
-    None,          // no action or redraw already done
-    Scroll,        // cursor moved (caller redraws)
-    Launch0,       // launch game index 0 (T-Rex Runner)
+    None,           // no action or redraw already done
+    Scroll,         // cursor moved (caller redraws)
+    Launch0,        // launch game index 0 (T-Rex Runner)
+    Launch1,        // launch game index 1 (Flappy Bird)
     OpenContribute, // open "contribute" hint (fake "More games" item)
-    Back           // return to settings
+    Back            // return to settings
 };
 
 // Reset cursor to 0. Call when entering GAME_MENU.

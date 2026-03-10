@@ -8,9 +8,10 @@
 
 static const char *GAME_MENU_LABELS[] = {
     "T-Rex Runner",
+    "Flappy Bird",
     "More games",
 };
-static const uint8_t GAME_MENU_COUNT_VAL = 2;
+static const uint8_t GAME_MENU_COUNT_VAL = 3;
 
 static uint8_t _cursor = 0;
 
@@ -63,7 +64,8 @@ GameMenuAction gameMenuOnGesture(GameMenuGestureType g) {
     }
     if (g == GameMenuGestureType::LongPress) {
         if (_cursor == 0) return GameMenuAction::Launch0;
-        if (_cursor == 1) return GameMenuAction::OpenContribute;
+        if (_cursor == 1) return GameMenuAction::Launch1;
+        if (_cursor == 2) return GameMenuAction::OpenContribute;
         return GameMenuAction::None;
     }
     if (g == GameMenuGestureType::DoubleTap)

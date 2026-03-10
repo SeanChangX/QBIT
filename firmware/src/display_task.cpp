@@ -15,6 +15,7 @@
 #include "timer_ui.h"
 #include "game_menu.h"
 #include "game_runner.h"
+#include "flappy_bird.h"
 
 #include "gif_types.h"
 #include "sys_scx.h"
@@ -543,6 +544,7 @@ void displayTask(void *param) {
         if (xQueueReceive(gestureQueue, &gesture, 0) == pdTRUE) {
             // Publish to MQTT only when not in game; never publish touch_down/touch_up (low-level press/release)
             if (_state != GAME_RUNNING && _state != GAME_OVER &&
+                _state != FLAPPY_RUNNING && _state != FLAPPY_OVER &&
                 gesture.type != TOUCH_DOWN && gesture.type != TOUCH_UP)
                 mqttPublishTouchEvent(gesture.type);
 
@@ -778,6 +780,11 @@ void displayTask(void *param) {
                             gameRunnerEnter();
                             enterState(GAME_RUNNING);
                             gameRunnerDrawFrame();
+                        } else if (ma == GameMenuAction::Launch1) {
+                            updateAvailable = false;
+                            flappyEnter();
+                            enterState(FLAPPY_RUNNING);
+                            flappyDrawFrame();
                         } else if (ma == GameMenuAction::OpenContribute) {
                             enterState(GAME_CONTRIBUTE);
                             drawContributeScreen();
@@ -866,6 +873,35 @@ void displayTask(void *param) {
                         gameRunnerEnter();
                         enterState(GAME_RUNNING);
                         gameRunnerDrawFrame();
+                    } else if (gesture.type == LONG_PRESS) {
+                        enterState(GIF_PLAYBACK);
+                    }
+                    break;
+
+                case FLAPPY_RUNNING: {
+                    FlappyGestureType fg = FlappyGestureType::None;
+                    if (gesture.type == TOUCH_UP)    fg = FlappyGestureType::TouchUp;
+                    else if (gesture.type == TOUCH_DOWN)  fg = FlappyGestureType::TouchDown;
+                    else if (gesture.type == SINGLE_TAP)  fg = FlappyGestureType::SingleTap;
+                    else if (gesture.type == DOUBLE_TAP)  fg = FlappyGestureType::DoubleTap;
+                    else if (gesture.type == LONG_PRESS)  fg = FlappyGestureType::LongPress;
+                    FlappyAction fa = flappyOnGesture(fg);
+                    if (fa == FlappyAction::Flap) {
+                        flappyApplyFlap();
+                        if (getBuzzerVolume() > 0) {
+                            noTone(getPinBuzzer());
+                            rtttl::begin(getPinBuzzer(), TOUCH_MELODY);
+                        }
+                    }
+                    break;
+                }
+
+                case FLAPPY_OVER:
+                    if (now - _stateEntryMs < 1500) break;
+                    if (gesture.type == SINGLE_TAP) {
+                        flappyEnter();
+                        enterState(FLAPPY_RUNNING);
+                        flappyDrawFrame();
                     } else if (gesture.type == LONG_PRESS) {
                         enterState(GIF_PLAYBACK);
                     }
@@ -1130,6 +1166,23 @@ void displayTask(void *param) {
                 break;
 
             case GAME_OVER:
+                // Idle — waiting for gesture
+                break;
+
+            case FLAPPY_RUNNING:
+                flappyDrawFrame(now);
+                if (flappyTick(now)) {
+                    setFlappyHighScore(flappyGetScore());
+                    if (getBuzzerVolume() > 0) {
+                        noTone(getPinBuzzer());
+                        rtttl::begin(getPinBuzzer(), MUTE_MELODY);
+                    }
+                    enterState(FLAPPY_OVER);
+                    flappyDrawGameOver();
+                }
+                break;
+
+            case FLAPPY_OVER:
                 // Idle — waiting for gesture
                 break;
 
