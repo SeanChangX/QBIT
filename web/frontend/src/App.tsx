@@ -50,6 +50,7 @@ export default function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const fetchFriendsRef = useRef<() => void>(() => {});
   const addFriendDeviceRef = useRef<Device | null>(null);
+  const devicesRef = useRef<Device[]>([]);
   const networkBarTouchStartRef = useRef<number | null>(null);
   const networkBarMouseStartRef = useRef<number | null>(null);
   const pillOpenedByMouseDragRef = useRef(false);
@@ -160,6 +161,10 @@ export default function App() {
     addFriendDeviceRef.current = addFriendDevice;
   }, [addFriendDevice]);
 
+  useEffect(() => {
+    devicesRef.current = devices;
+  }, [devices]);
+
   fetchFriendsRef.current = fetchFriends;
 
   // Socket.io connection for real-time device and user updates
@@ -169,6 +174,7 @@ export default function App() {
     });
 
     s.on('devices:update', (data: Device[]) => {
+      devicesRef.current = data;
       setDevices(data);
     });
 
@@ -176,15 +182,19 @@ export default function App() {
       setOnlineUsers(data);
     });
 
-    s.on('poke:highlight', (data: { deviceId?: string; publicUserId?: string }) => {
-      const { deviceId, publicUserId } = data;
+    s.on('poke:highlight', (data: { deviceToken?: string; publicUserId?: string }) => {
+      const { deviceToken, publicUserId } = data;
+      const list = devicesRef.current;
+      const resolvedDeviceId = deviceToken != null
+        ? list.find((d) => d.pokeToken === deviceToken)?.id
+        : undefined;
       setPokeHighlight((prev) => {
         const same = prev && (
-          (deviceId != null && prev.deviceId === deviceId) ||
+          (resolvedDeviceId != null && prev.deviceId === resolvedDeviceId) ||
           (publicUserId != null && prev.publicUserId === publicUserId)
         );
         const seq = same ? Math.min(prev!.seq + 1, 5) : 1;
-        return { deviceId, publicUserId, seq };
+        return { deviceId: resolvedDeviceId, publicUserId, seq };
       });
     });
 
@@ -225,7 +235,7 @@ export default function App() {
     };
   }, []);
 
-  // Send poke to a device (with optional bitmap data)
+  // Send poke to a device (with optional bitmap data). targetId is an opaque poke token from backend.
   const handlePoke = useCallback(
     async (targetId: string, text: string, bitmapData?: BitmapPayload) => {
       try {
@@ -262,7 +272,7 @@ export default function App() {
     async (device: Device) => {
       if (!confirm(`Unclaim ${device.name}?`)) return;
       try {
-        const res = await fetch(`${API_URL}/api/claim/${device.id}`, {
+        const res = await fetch(`${API_URL}/api/claim/${device.pokeToken}`, {
           method: 'DELETE',
           credentials: 'include',
         });

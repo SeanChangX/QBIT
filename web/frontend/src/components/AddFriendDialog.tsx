@@ -24,7 +24,7 @@ export default function AddFriendDialog({ device, apiUrl, onClose }: Props) {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          targetId: device.id,
+          targetId: device.pokeToken,
           deviceIdFull: deviceIdFull.trim().toUpperCase(),
         }),
       });

@@ -5,6 +5,7 @@ export interface Device {
   publicIp?: string;
   version: string;
   connectedAt: string;
+  pokeToken: string;
   claimedBy?: {
     publicUserId: string;
     userName: string;

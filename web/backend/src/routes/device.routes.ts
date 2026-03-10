@@ -5,7 +5,7 @@
 import { Router } from 'express';
 import { validate, validateParams } from '../middleware/validate';
 import { requireNotBanned } from '../middleware/requireNotBanned';
-import { pokeSchema, pokeUserSchema, claimSchema, friendRequestSchema, meSettingsSchema, friendUserIdParamSchema } from '../schemas';
+import { pokeSchema, pokeUserSchema, claimSchema, friendRequestSchema, meSettingsSchema, friendUserIdParamSchema, claimTokenParamSchema } from '../schemas';
 import * as deviceService from '../services/device.service';
 import * as claimService from '../services/claim.service';
 import * as friendService from '../services/friend.service';
@@ -34,12 +34,12 @@ router.post('/poke', requireNotBanned, validate(pokeSchema), (req, res) => {
 
   const { targetId, text, senderBitmap, senderBitmapWidth, textBitmap, textBitmapWidth } = req.body;
 
-  const device = deviceService.getDevice(targetId);
+  const device = deviceService.getDeviceByPokeToken(targetId);
   if (!device) {
     return res.status(404).json({ error: 'Device not found or offline' });
   }
 
-  const claim = claimService.getClaimByDevice(targetId);
+  const claim = claimService.getClaimByDevice(device.id);
   if (claim && friendService.getOnlyFriendsCanPoke(claim.userId)) {
     if (!friendService.areFriends(claim.userId, user.id)) {
       return res.status(403).json({ error: 'Only friends can poke this QBIT' });
@@ -63,7 +63,7 @@ router.post('/poke', requireNotBanned, validate(pokeSchema), (req, res) => {
 
   device.ws.send(JSON.stringify(pokePayload));
   const io = socketService.getIo();
-  if (io) io.emit('poke:highlight', { deviceId: targetId });
+  if (io) io.emit('poke:highlight', { deviceToken: targetId });
   logger.info({ sender: user.displayName, target: device.name }, 'Poke sent');
   res.json({ ok: true });
 });
@@ -108,7 +108,7 @@ router.post('/poke/user', requireNotBanned, validate(pokeUserSchema), (req, res)
   res.json({ ok: true });
 });
 
-// POST /api/claim
+// POST /api/claim (targetId is opaque poke token)
 router.post('/claim', requireNotBanned, validate(claimSchema), (req, res) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ error: 'Login required' });
@@ -116,7 +116,7 @@ router.post('/claim', requireNotBanned, validate(claimSchema), (req, res) => {
 
   const { targetId, deviceIdFull } = req.body;
 
-  const device = deviceService.getDevice(targetId);
+  const device = deviceService.getDeviceByPokeToken(targetId);
   if (!device) {
     return res.status(404).json({ error: 'Device not found or offline' });
   }
@@ -125,11 +125,11 @@ router.post('/claim', requireNotBanned, validate(claimSchema), (req, res) => {
     return res.status(400).json({ error: 'Device ID does not match' });
   }
 
-  if (claimService.getClaimByDevice(targetId)) {
+  if (claimService.getClaimByDevice(device.id)) {
     return res.status(409).json({ error: 'Device already claimed' });
   }
 
-  if (deviceService.hasPendingClaim(targetId)) {
+  if (deviceService.hasPendingClaim(device.id)) {
     return res.status(409).json({ error: 'A claim request is already pending for this device' });
   }
 
@@ -144,13 +144,13 @@ router.post('/claim', requireNotBanned, validate(claimSchema), (req, res) => {
   );
 
   const timer = setTimeout(() => {
-    const pending = deviceService.getPendingClaim(targetId);
-    deviceService.clearPendingClaim(targetId);
+    const pending = deviceService.getPendingClaim(device.id);
+    deviceService.clearPendingClaim(device.id);
     if (pending) socketService.emitToUser(pending.userId, 'claim:result', { result: 'timeout' });
-    logger.info({ deviceId: targetId }, 'Claim request timed out');
+    logger.info({ deviceId: device.id }, 'Claim request timed out');
   }, 30_000);
 
-  deviceService.setPendingClaim(targetId, {
+  deviceService.setPendingClaim(device.id, {
     userId: user.id,
     userName: user.displayName || 'Unknown',
     userAvatar: user.avatar || '',
@@ -161,14 +161,18 @@ router.post('/claim', requireNotBanned, validate(claimSchema), (req, res) => {
   res.json({ ok: true, status: 'pending' });
 });
 
-// DELETE /api/claim/:deviceId
-router.delete('/claim/:deviceId', requireNotBanned, (req, res) => {
+// DELETE /api/claim/:token (opaque poke token; device must be online to unclaim)
+router.delete('/claim/:token', requireNotBanned, validateParams(claimTokenParamSchema), (req, res) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ error: 'Login required' });
   }
   const user = req.user as AppUser;
-  const deviceId = Array.isArray(req.params.deviceId) ? req.params.deviceId[0] : req.params.deviceId;
-  const claim = claimService.getClaimByDevice(deviceId);
+  const token = req.params.token as string;
+  const device = deviceService.getDeviceByPokeToken(token);
+  if (!device) {
+    return res.status(404).json({ error: 'Device not found or offline' });
+  }
+  const claim = claimService.getClaimByDevice(device.id);
 
   if (!claim) {
     return res.status(404).json({ error: 'No claim found for this device' });
@@ -178,8 +182,8 @@ router.delete('/claim/:deviceId', requireNotBanned, (req, res) => {
     return res.status(403).json({ error: 'You can only unclaim your own devices' });
   }
 
-  claimService.removeClaim(deviceId);
-  const pendingFriend = deviceService.clearPendingFriendRequest(deviceId);
+  claimService.removeClaim(device.id);
+  const pendingFriend = deviceService.clearPendingFriendRequest(device.id);
   if (pendingFriend) {
     socketService.emitToUser(pendingFriend.requesterUserId, 'friend_request:result', { result: 'cancelled' });
   }
@@ -212,7 +216,7 @@ router.get('/friends/pairs', (_req, res) => {
   res.json({ friendPairs });
 });
 
-// POST /api/friends/request
+// POST /api/friends/request (targetId is opaque poke token)
 router.post('/friends/request', requireNotBanned, validate(friendRequestSchema), (req, res) => {
   if (!req.isAuthenticated()) {
     return res.status(401).json({ error: 'Login required' });
@@ -220,7 +224,7 @@ router.post('/friends/request', requireNotBanned, validate(friendRequestSchema),
   const user = req.user as AppUser;
   const { targetId, deviceIdFull } = req.body;
 
-  const device = deviceService.getDevice(targetId);
+  const device = deviceService.getDeviceByPokeToken(targetId);
   if (!device) {
     return res.status(404).json({ error: 'Device not found or offline' });
   }
@@ -228,7 +232,7 @@ router.post('/friends/request', requireNotBanned, validate(friendRequestSchema),
     return res.status(400).json({ error: 'Device ID does not match' });
   }
 
-  const claim = claimService.getClaimByDevice(targetId);
+  const claim = claimService.getClaimByDevice(device.id);
   if (!claim) {
     return res.status(400).json({ error: 'This QBIT is not claimed; only the owner can add friends' });
   }
@@ -238,7 +242,7 @@ router.post('/friends/request', requireNotBanned, validate(friendRequestSchema),
   if (friendService.areFriends(claim.userId, user.id)) {
     return res.status(409).json({ error: 'Already friends' });
   }
-  if (deviceService.hasPendingFriendRequest(targetId)) {
+  if (deviceService.hasPendingFriendRequest(device.id)) {
     return res.status(409).json({ error: 'A friend request is already pending for this device' });
   }
 
@@ -251,14 +255,14 @@ router.post('/friends/request', requireNotBanned, validate(friendRequestSchema),
   );
 
   const timer = setTimeout(() => {
-    const pending = deviceService.clearPendingFriendRequest(targetId);
+    const pending = deviceService.clearPendingFriendRequest(device.id);
     if (pending) {
       socketService.emitToUser(pending.requesterUserId, 'friend_request:result', { result: 'timeout' });
-      logger.info({ deviceId: targetId }, 'Friend request timed out');
+      logger.info({ deviceId: device.id }, 'Friend request timed out');
     }
   }, 30_000);
 
-  deviceService.setPendingFriendRequest(targetId, {
+  deviceService.setPendingFriendRequest(device.id, {
     ownerUserId: claim.userId,
     requesterUserId: user.id,
     requesterName: user.displayName || 'Unknown',

@@ -4,9 +4,12 @@
 
 import { z } from 'zod';
 
+// Shared: opaque poke token (24 hex); used for poke/claim/friend target and DELETE /claim/:token
+const pokeTokenSchema = z.string().length(24).regex(/^[a-f0-9]+$/);
+
 // POST /api/poke
 export const pokeSchema = z.object({
-  targetId: z.string().min(1).max(128).regex(/^[a-zA-Z0-9-]+$/),
+  targetId: pokeTokenSchema,
   text: z.string().min(1).max(25),
   senderBitmap: z.string().optional(),
   senderBitmapWidth: z.number().int().positive().optional(),
@@ -22,13 +25,13 @@ export const pokeUserSchema = z.object({
 
 // POST /api/claim
 export const claimSchema = z.object({
-  targetId: z.string().min(1).max(128).regex(/^[a-zA-Z0-9-]+$/),
+  targetId: pokeTokenSchema,
   deviceIdFull: z.string().min(1).max(256).regex(/^[a-zA-Z0-9:]+$/),
 });
 
-// POST /api/friends/request (same body as claim: target device id + deviceIdFull to confirm)
+// POST /api/friends/request (same body as claim: target poke token + deviceIdFull to confirm)
 export const friendRequestSchema = z.object({
-  targetId: z.string().min(1).max(128).regex(/^[a-zA-Z0-9-]+$/),
+  targetId: pokeTokenSchema,
   deviceIdFull: z.string().min(1).max(256).regex(/^[a-zA-Z0-9:]+$/),
 });
 
@@ -96,4 +99,9 @@ export const adminDeviceIdParamSchema = z.object({
 });
 export const adminReportIdParamSchema = z.object({
   id: z.string().regex(/^\d+$/),
+});
+
+// DELETE /api/claim/:token (opaque poke token, not raw device id)
+export const claimTokenParamSchema = z.object({
+  token: pokeTokenSchema,
 });

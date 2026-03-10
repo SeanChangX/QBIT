@@ -21,6 +21,7 @@ export interface DeviceState {
   version: string;
   ws: WebSocket;
   connectedAt: Date;
+  pokeToken: string;
 }
 
 // ---- Claims ----

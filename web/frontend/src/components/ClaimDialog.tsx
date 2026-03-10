@@ -44,7 +44,7 @@ export default function ClaimDialog({ device, apiUrl, onClose, onClaimed, socket
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          targetId: device.id,
+          targetId: device.pokeToken,
           deviceIdFull: deviceIdFull.trim().toUpperCase(),
         }),
       });
