@@ -5,7 +5,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import { Server as HttpServer } from 'http';
-import { DEVICE_API_KEY, MAX_DEVICE_CONNECTIONS } from '../config';
+import { DEVICE_API_KEY, MAX_DEVICE_CONNECTIONS, MAX_DEVICE_CONNECTIONS_PER_IP } from '../config';
 import { isBannedDevice, isBanned } from './ban.service';
 import * as claimService from './claim.service';
 import * as friendService from './friend.service';
@@ -36,6 +36,9 @@ const pendingFriendRequests = new Map<string, PendingFriendRequest>();
 // Throttle ban-rejection log to avoid log flood
 const bannedDeviceLogLast = new Map<string, number>();
 const BANNED_LOG_INTERVAL_MS = 5 * 60 * 1000;
+
+// Throttle per-IP limit rejection log (same interval)
+const perIpLimitLogLast = new Map<string, number>();
 
 // Broadcast callback -- set by index.ts after Socket.io is ready
 let broadcastCallback: (() => void) | null = null;
@@ -321,6 +324,23 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
             }
             ws.close();
             return;
+          }
+
+          // Per-IP device limit (QBIT devices only; does not affect web users)
+          if (MAX_DEVICE_CONNECTIONS_PER_IP > 0) {
+            const sameIpCount = [...devices.values()].filter(
+              (d) => d.publicIp === publicIp && d.id !== msg.id
+            ).length;
+            if (sameIpCount >= MAX_DEVICE_CONNECTIONS_PER_IP) {
+              const now = Date.now();
+              const last = perIpLimitLogLast.get(publicIp) ?? 0;
+              if (now - last >= BANNED_LOG_INTERVAL_MS) {
+                perIpLimitLogLast.set(publicIp, now);
+                logger.warn({ publicIp, limit: MAX_DEVICE_CONNECTIONS_PER_IP }, 'Device WS rejected: max devices per IP reached');
+              }
+              ws.close();
+              return;
+            }
           }
 
           // If device reconnects, close the stale socket

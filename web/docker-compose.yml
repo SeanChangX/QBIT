@@ -26,6 +26,7 @@ services:
       # Device WebSocket auth; must match firmware WS_API_KEY.
       - DEVICE_API_KEY=${DEVICE_API_KEY:-}
       - MAX_DEVICE_CONNECTIONS=${MAX_DEVICE_CONNECTIONS:-100}
+      - MAX_DEVICE_CONNECTIONS_PER_IP=${MAX_DEVICE_CONNECTIONS_PER_IP:-10}
     volumes:
       - qbit-data:/data
     healthcheck:

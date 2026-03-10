@@ -167,6 +167,8 @@ export const ADMIN_PASSWORD = adminPassword;
 // ---- Device WebSocket ----
 export const DEVICE_API_KEY = process.env.DEVICE_API_KEY || '';
 export const MAX_DEVICE_CONNECTIONS = parseInt(process.env.MAX_DEVICE_CONNECTIONS || '100', 10);
+// Max QBIT devices per single IP (0 = unlimited). Applies to device WebSocket, not web users.
+export const MAX_DEVICE_CONNECTIONS_PER_IP = parseInt(process.env.MAX_DEVICE_CONNECTIONS_PER_IP || '0', 10);
 
 // ---- Limits ----
 export const MAX_QGIF_SIZE = 512 * 1024; // 512 KB per file

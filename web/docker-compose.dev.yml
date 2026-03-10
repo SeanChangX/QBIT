@@ -27,6 +27,7 @@ services:
       - FRONTEND_URL=http://localhost:5173
       - DEVICE_API_KEY=dev-test-key
       - MAX_DEVICE_CONNECTIONS=50
+      - MAX_DEVICE_CONNECTIONS_PER_IP=10
       # Google OAuth; callback must match the URL you use (e.g. http://localhost:5173).
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}

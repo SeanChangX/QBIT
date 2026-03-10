@@ -117,6 +117,7 @@ router.post('/batch-download', validate(libraryBatchSchema), (req, res) => {
     const filePath = libraryService.getFilePath(id);
     if (fs.existsSync(filePath)) {
       filesToZip.push({ filename: item.filename, filepath: filePath });
+      libraryService.incrementDownloadCount(id);
     }
   }
 
