@@ -1,4 +1,5 @@
 #include "web_dashboard.h"
+#include "app_state.h"
 #include "gif_player.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>
@@ -16,6 +17,13 @@
 static File   _uploadFile;
 static bool   _uploadOk    = false;
 static String _uploadError;
+
+// ==========================================================================
+//  Draw-to-OLED body accumulation
+// ==========================================================================
+
+static uint8_t _drawBodyBuf[DRAW_BUFFER_SIZE];
+static size_t  _drawBodyLen = 0;
 
 // ==========================================================================
 //  Path sanitization (prevent path traversal)
@@ -307,10 +315,12 @@ static void handleDelete(AsyncWebServerRequest *request) {
 // ==========================================================================
 
 static void handleGetSettings(AsyncWebServerRequest *request) {
-    StaticJsonDocument<128> doc;
+    StaticJsonDocument<192> doc;
     doc["speed"]      = getPlaybackSpeed();
     doc["brightness"] = getDisplayBrightness();
     doc["volume"]     = getBuzzerVolume();
+    doc["flip"]       = getFlipMode();
+    doc["negative"]   = getNegativeGif();
     String json;
     serializeJson(doc, json);
     request->send(200, "application/json", json);
@@ -328,6 +338,12 @@ static void handlePostSettings(AsyncWebServerRequest *request) {
     if (request->hasParam("volume")) {
         int v = request->getParam("volume")->value().toInt();
         if (v >= 0 && v <= 100) setBuzzerVolume((uint8_t)v);
+    }
+    if (request->hasParam("flip")) {
+        setFlipMode(request->getParam("flip")->value() == "1");
+    }
+    if (request->hasParam("negative")) {
+        setNegativeGif(request->getParam("negative")->value() == "1");
     }
     // If save=1 is passed, persist to NVS
     if (request->hasParam("save")) {
@@ -554,6 +570,61 @@ static void handlePostTimezone(AsyncWebServerRequest *request) {
 }
 
 // ==========================================================================
+//  Handlers -- Draw to OLED
+// ==========================================================================
+
+static void handleDrawBody(AsyncWebServerRequest *request,
+                           uint8_t *data, size_t len,
+                           size_t index, size_t total) {
+    // Reject up-front if the declared Content-Length is wrong.
+    // This prevents a >DRAW_BUFFER_SIZE body being silently truncated to
+    // exactly DRAW_BUFFER_SIZE bytes and then passing the length check in
+    // handleDrawDone as if it were a valid frame.
+    if (total != DRAW_BUFFER_SIZE) {
+        // Drain remaining chunks so AsyncWebServer doesn't stall, but do
+        // not accumulate anything — handleDrawDone will reject via _drawBodyLen.
+        if (index == 0) _drawBodyLen = 0;
+        return;
+    }
+    if (index == 0) _drawBodyLen = 0;
+    if (index + len > sizeof(_drawBodyBuf)) return; // should never happen given total check above
+    memcpy(_drawBodyBuf + index, data, len);
+    _drawBodyLen += len;
+}
+
+static void handleDrawDone(AsyncWebServerRequest *request) {
+    // ?clear=1 -- signal the display task to leave DRAW_MODE.
+    // Setting drawModeActive=false is picked up by the DRAW_MODE tick in
+    // display_task.cpp, which calls enterState(GIF_PLAYBACK) within one loop
+    // iteration (~5 ms). drawBufferDirty is also cleared so a stale dirty flag
+    // from the previous frame cannot re-enter draw mode before the transition.
+    if (request->hasParam("clear")) {
+        drawModeActive  = false;
+        drawBufferDirty = false;
+        request->send(200, "application/json", "{\"ok\":true,\"cleared\":true}");
+        return;
+    }
+    // Body must be exactly DRAW_BUFFER_SIZE bytes (128×64 / 8).
+    // _drawBodyLen will be 0 (not DRAW_BUFFER_SIZE) when handleDrawBody
+    // rejected the request due to a wrong Content-Length, so this check
+    // catches both an incorrect total and a genuinely short transfer.
+    if (_drawBodyLen != DRAW_BUFFER_SIZE) {
+        request->send(400, "application/json", "{\"error\":\"Expected exactly 1024 bytes\"}");
+        return;
+    }
+    if (xSemaphoreTake(drawBufferMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        memcpy(drawBuffer, _drawBodyBuf, DRAW_BUFFER_SIZE);
+        drawModeActive  = true;
+        drawBufferDirty = true;
+        xSemaphoreGive(drawBufferMutex);
+    } else {
+        request->send(503, "application/json", "{\"error\":\"busy\"}");
+        return;
+    }
+    request->send(200, "application/json", "{\"ok\":true}");
+}
+
+// ==========================================================================
 //  Init
 // ==========================================================================
 
@@ -589,6 +660,7 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/pins",          HTTP_POST, handlePostPins);
     server.on("/api/timezone",      HTTP_GET,  handleGetTimezone);
     server.on("/api/timezone",      HTTP_POST, handlePostTimezone);
+    server.on("/api/draw",          HTTP_POST, handleDrawDone, nullptr, handleDrawBody);
 
     // Catch-all: serve .qgif files from LittleFS for browser preview (path-normalized)
     server.onNotFound([](AsyncWebServerRequest *request) {

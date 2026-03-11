@@ -22,6 +22,8 @@
 //   POST /api/settings?save=1 -- also persist current settings to NVS
 //   GET  /api/timezone       -- JSON {timezone, offset}
 //   POST /api/timezone?tz=   -- set timezone IANA name
+//   POST /api/draw            -- push 1024-byte U8G2 buffer to OLED (enters draw mode)
+//   POST /api/draw?clear=1   -- clear draw mode, resume GIF playback
 void webDashboardInit(AsyncWebServer &server);
 
 // Settings callbacks -- implemented by settings.cpp / display_helpers.cpp.
@@ -32,6 +34,10 @@ extern uint8_t  getDisplayBrightness();
 extern void     setBuzzerVolume(uint8_t pct);
 extern uint8_t  getBuzzerVolume();
 extern void     saveSettings();
+extern bool     getFlipMode();
+extern void     setFlipMode(bool val);
+extern bool     getNegativeGif();
+extern void     setNegativeGif(bool val);
 
 // Device identity -- implemented by settings.cpp.
 extern String getDeviceId();

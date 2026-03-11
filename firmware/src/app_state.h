@@ -35,7 +35,8 @@ enum DisplayState {
     TREX_RUNNING,
     TREX_OVER,
     FLAPPY_RUNNING,
-    FLAPPY_OVER
+    FLAPPY_OVER,
+    DRAW_MODE
 };
 
 // ==========================================================================
@@ -149,5 +150,14 @@ extern const char *kQbitVersion;
 #define UPDATE_AVAILABLE_VERSION_LEN 16
 extern volatile bool    updateAvailable;
 extern char             updateAvailableVersion[UPDATE_AVAILABLE_VERSION_LEN];
+
+// ==========================================================================
+//  Live draw buffer (web UI → OLED, 128×64 @ 1bpp U8G2 page format)
+// ==========================================================================
+#define DRAW_BUFFER_SIZE 1024
+extern uint8_t           drawBuffer[DRAW_BUFFER_SIZE];
+extern volatile bool     drawBufferDirty;
+extern volatile bool     drawModeActive;
+extern SemaphoreHandle_t drawBufferMutex;  // guards drawBuffer + drawBufferDirty
 
 #endif // APP_STATE_H

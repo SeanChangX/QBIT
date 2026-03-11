@@ -121,6 +121,14 @@
       <label class="setting-label">Sound</label>
       <button class="btn btn-mute" id="btnMute">ON</button>
     </div>
+    <div class="setting">
+      <label class="setting-label">Flip</label>
+      <button class="btn btn-mute" id="btnFlip">OFF</button>
+    </div>
+    <div class="setting">
+      <label class="setting-label">GIF Invert</label>
+      <button class="btn btn-mute" id="btnNegative">OFF</button>
+    </div>
     <button class="btn btn-save" id="btnSave">Save</button>
   </div>
 
@@ -183,6 +191,21 @@
     <button class="btn btn-save" id="btnPinSave">Save Pins</button>
   </div>
 
+
+  <div class="card collapsible collapsed" id="drawCard">
+    <div class="card-title">Draw on OLED</div>
+    <div class="draw-tools">
+      <button class="btn btn-tool" id="btnPen" type="button">Pen</button>
+      <button class="btn btn-tool" id="btnEraser" type="button">Eraser</button>
+      <button class="btn btn-secondary" id="btnDrawClear" type="button">Clear</button>
+      <button class="btn btn-tool" id="btnLive" type="button">Live</button>
+      <button class="btn btn-save" id="btnDrawSend" type="button">Send</button>
+    </div>
+    <div class="draw-canvas-wrap">
+      <canvas id="drawCanvas" width="128" height="64"></canvas>
+    </div>
+    <div class="msg" id="drawMsg"></div>
+  </div>
 
   <script src="/jszip.min.js"></script>
   <script src="/script.js"></script>

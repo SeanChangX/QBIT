@@ -420,6 +420,24 @@ void displayTask(void *param) {
         unsigned long now = millis();
         unsigned long elapsed = now - _stateEntryMs;
 
+        // --- Handle live draw buffer update (web UI → OLED) ---
+        // Hold drawBufferMutex for the entire read so the web task cannot
+        // write a new frame mid-copy. Clear drawBufferDirty only after the
+        // copy succeeds; if the mutex is unavailable, leave dirty=true and
+        // retry on the next tick.
+        if (drawModeActive && drawBufferDirty) {
+            if (xSemaphoreTake(drawBufferMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+                memcpy(u8g2.getBufferPtr(), drawBuffer, DRAW_BUFFER_SIZE);
+                drawBufferDirty = false;
+                xSemaphoreGive(drawBufferMutex);
+                if (_state != DRAW_MODE) {
+                    enterState(DRAW_MODE);
+                }
+                rotateBuffer180();
+                u8g2.sendBuffer();
+            }
+        }
+
         // --- Advance melody ---
         if (rtttl::isPlaying()) {
             rtttl::play();
@@ -911,6 +929,13 @@ void displayTask(void *param) {
                         enterState(GIF_PLAYBACK);
                     }
                     break;
+
+                case DRAW_MODE:
+                    if (gesture.type == SINGLE_TAP || gesture.type == LONG_PRESS) {
+                        drawModeActive = false;
+                        enterState(GIF_PLAYBACK);
+                    }
+                    break;
             }
         }
 
@@ -1189,6 +1214,14 @@ void displayTask(void *param) {
 
             case FLAPPY_OVER:
                 // Idle — waiting for gesture
+                break;
+
+            case DRAW_MODE:
+                // Exit to GIF playback when the web API clears draw mode
+                // (e.g. POST /api/draw?clear=1 sets drawModeActive=false).
+                if (!drawModeActive) {
+                    enterState(GIF_PLAYBACK);
+                }
                 break;
 
             default:
