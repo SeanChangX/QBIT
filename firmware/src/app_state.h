@@ -158,5 +158,6 @@ extern char             updateAvailableVersion[UPDATE_AVAILABLE_VERSION_LEN];
 extern uint8_t           drawBuffer[DRAW_BUFFER_SIZE];
 extern volatile bool     drawBufferDirty;
 extern volatile bool     drawModeActive;
+extern SemaphoreHandle_t drawBufferMutex;  // guards drawBuffer + drawBufferDirty
 
 #endif // APP_STATE_H

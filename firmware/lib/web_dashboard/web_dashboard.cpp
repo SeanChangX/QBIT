@@ -1,4 +1,5 @@
 #include "web_dashboard.h"
+#include "app_state.h"
 #include "gif_player.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>
@@ -8,12 +9,6 @@
 #if defined(ESP32)
 #include <esp_system.h>
 #endif
-
-// Draw to OLED -- shared state defined in app_state.cpp
-extern uint8_t           drawBuffer[1024];
-extern volatile bool     drawBufferDirty;
-extern volatile bool     drawModeActive;
-extern SemaphoreHandle_t displayMutex;
 
 // ==========================================================================
 //  Upload state
@@ -27,7 +22,7 @@ static String _uploadError;
 //  Draw-to-OLED body accumulation
 // ==========================================================================
 
-static uint8_t _drawBodyBuf[1024];
+static uint8_t _drawBodyBuf[DRAW_BUFFER_SIZE];
 static size_t  _drawBodyLen = 0;
 
 // ==========================================================================
@@ -581,37 +576,51 @@ static void handlePostTimezone(AsyncWebServerRequest *request) {
 static void handleDrawBody(AsyncWebServerRequest *request,
                            uint8_t *data, size_t len,
                            size_t index, size_t total) {
-    (void)total;
-    if (index == 0) _drawBodyLen = 0;
-    if (index + len > sizeof(_drawBodyBuf)) {
-        if (index >= sizeof(_drawBodyBuf)) return;
-        len = sizeof(_drawBodyBuf) - index;
+    // Reject up-front if the declared Content-Length is wrong.
+    // This prevents a >DRAW_BUFFER_SIZE body being silently truncated to
+    // exactly DRAW_BUFFER_SIZE bytes and then passing the length check in
+    // handleDrawDone as if it were a valid frame.
+    if (total != DRAW_BUFFER_SIZE) {
+        // Drain remaining chunks so AsyncWebServer doesn't stall, but do
+        // not accumulate anything — handleDrawDone will reject via _drawBodyLen.
+        if (index == 0) _drawBodyLen = 0;
+        return;
     }
+    if (index == 0) _drawBodyLen = 0;
+    if (index + len > sizeof(_drawBodyBuf)) return; // should never happen given total check above
     memcpy(_drawBodyBuf + index, data, len);
     _drawBodyLen += len;
 }
 
 static void handleDrawDone(AsyncWebServerRequest *request) {
-    // ?clear=1 -- exit draw mode, resume GIF playback
+    // ?clear=1 -- signal the display task to leave DRAW_MODE.
+    // Setting drawModeActive=false is picked up by the DRAW_MODE tick in
+    // display_task.cpp, which calls enterState(GIF_PLAYBACK) within one loop
+    // iteration (~5 ms). drawBufferDirty is also cleared so a stale dirty flag
+    // from the previous frame cannot re-enter draw mode before the transition.
     if (request->hasParam("clear")) {
         drawModeActive  = false;
         drawBufferDirty = false;
         request->send(200, "application/json", "{\"ok\":true,\"cleared\":true}");
         return;
     }
-    // Body must be exactly 1024 bytes (128x64 / 8)
-    if (_drawBodyLen != 1024) {
-        request->send(400, "application/json", "{\"error\":\"Expected 1024 bytes\"}");
+    // Body must be exactly DRAW_BUFFER_SIZE bytes (128×64 / 8).
+    // _drawBodyLen will be 0 (not DRAW_BUFFER_SIZE) when handleDrawBody
+    // rejected the request due to a wrong Content-Length, so this check
+    // catches both an incorrect total and a genuinely short transfer.
+    if (_drawBodyLen != DRAW_BUFFER_SIZE) {
+        request->send(400, "application/json", "{\"error\":\"Expected exactly 1024 bytes\"}");
         return;
     }
-    if (xSemaphoreTake(displayMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        memcpy(drawBuffer, _drawBodyBuf, 1024);
-        xSemaphoreGive(displayMutex);
+    if (xSemaphoreTake(drawBufferMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        memcpy(drawBuffer, _drawBodyBuf, DRAW_BUFFER_SIZE);
+        drawModeActive  = true;
+        drawBufferDirty = true;
+        xSemaphoreGive(drawBufferMutex);
     } else {
-        memcpy(drawBuffer, _drawBodyBuf, 1024);
+        request->send(503, "application/json", "{\"error\":\"busy\"}");
+        return;
     }
-    drawModeActive  = true;
-    drawBufferDirty = true;
     request->send(200, "application/json", "{\"ok\":true}");
 }
 

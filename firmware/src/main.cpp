@@ -61,6 +61,7 @@ void setup() {
     connectivityBits  = xEventGroupCreate();
     displayMutex      = xSemaphoreCreateMutex();
     gifPlayerMutex    = xSemaphoreCreateMutex();
+    drawBufferMutex   = xSemaphoreCreateMutex();
 
     // 5. GIF player + idle animation
     gifPlayerInit(&u8g2);

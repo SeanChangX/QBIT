@@ -696,7 +696,6 @@ pollCurrent();
 
 // Live drawing to OLED (Draw card)
 (function () {
-  var SCALE = 4;
   var W = 128, H = 64;
   // U8G2 page-addressed buffer: buf[page*128 + col], bit=(row%8); bit=1 → white pixel
   var buf = new Uint8Array(1024);
@@ -708,25 +707,53 @@ pollCurrent();
   var canvas = document.getElementById('drawCanvas');
   var ctx = canvas.getContext('2d');
 
-  // Render buffer to canvas
+  // Pre-allocate one ImageData at OLED native resolution (128×64).
+  // CSS width:100% + image-rendering:pixelated handles the visual upscaling.
+  var imgData = ctx.createImageData(W, H);
+  // Uint32Array view for fast RGBA writes (little-endian: 0xFFFFFFFF = white, 0xFF000000 = black)
+  var u32 = new Uint32Array(imgData.data.buffer);
+  var WHITE = 0xFFFFFFFF;
+  var BLACK = 0xFF000000;
+
+  // Dirty-row tracking: only putImageData over the rows that actually changed.
+  var dirtyMin = H, dirtyMax = -1;
+  function markDirty(y) {
+    if (y < dirtyMin) dirtyMin = y;
+    if (y > dirtyMax) dirtyMax = y;
+  }
+  function resetDirty() { dirtyMin = H; dirtyMax = -1; }
+
+  // Render only dirty rows to canvas
   function render() {
-    var imgData = ctx.createImageData(W * SCALE, H * SCALE);
-    var d = imgData.data;
+    if (dirtyMin > dirtyMax) return; // nothing changed
+    for (var y = dirtyMin; y <= dirtyMax; y++) {
+      var page = y >> 3;
+      var bit  = y & 7;
+      for (var x = 0; x < W; x++) {
+        u32[y * W + x] = (buf[page * W + x] >> bit) & 1 ? WHITE : BLACK;
+      }
+    }
+    // putImageData(data, dx, dy, dirtyX, dirtyY, w, h):
+    // dx/dy shift the entire imageData in canvas space; dirtyX/Y select which
+    // rows of the imageData to paint. Using dy=dirtyMin would shift the data
+    // DOWN by dirtyMin pixels BEFORE painting, so imageData row Y would land
+    // at canvas row Y+dirtyMin — doubling the offset. Keep dx=dy=0 and let
+    // the dirtyY argument alone control which rows are copied.
+    ctx.putImageData(imgData, 0, 0, 0, dirtyMin, W, dirtyMax - dirtyMin + 1);
+    resetDirty();
+  }
+
+  // Full redraw (used after clear / receive)
+  function renderAll() {
     for (var y = 0; y < H; y++) {
       var page = y >> 3;
       var bit  = y & 7;
       for (var x = 0; x < W; x++) {
-        var on = (buf[page * W + x] >> bit) & 1;
-        var c = on ? 255 : 0;
-        for (var sy = 0; sy < SCALE; sy++) {
-          for (var sx = 0; sx < SCALE; sx++) {
-            var px = ((y * SCALE + sy) * W * SCALE + (x * SCALE + sx)) * 4;
-            d[px] = c; d[px+1] = c; d[px+2] = c; d[px+3] = 255;
-          }
-        }
+        u32[y * W + x] = (buf[page * W + x] >> bit) & 1 ? WHITE : BLACK;
       }
     }
     ctx.putImageData(imgData, 0, 0);
+    resetDirty();
   }
 
   // Set or clear pixel at OLED coords
@@ -735,6 +762,7 @@ pollCurrent();
     var mask = 1 << (oy & 7);
     if (on) buf[(oy >> 3) * W + ox] |= mask;
     else    buf[(oy >> 3) * W + ox] &= ~mask;
+    markDirty(oy);
   }
 
   // Bresenham line
@@ -854,9 +882,9 @@ pollCurrent();
 
   btnClear.addEventListener('click', function () {
     buf.fill(0);
-    render();
+    renderAll();
     fetch('/api/draw?clear=1', { method: 'POST' });
   });
 
-  render(); // initial blank frame
+  renderAll(); // initial blank frame
 })();
