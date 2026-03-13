@@ -7,6 +7,8 @@
 #endif
 #if defined(ESP32)
 #include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #endif
 
 // ==========================================================================
@@ -557,10 +559,80 @@ static void handlePostTimezone(AsyncWebServerRequest *request) {
 }
 
 // ==========================================================================
+//  Web Cam WebSocket (/ws_cam)
+// ==========================================================================
+
+static AsyncWebSocket      _camWs("/ws_cam");
+static uint8_t             _camBuf[QGIF_FRAME_SIZE];
+static volatile bool       _camFrameNew    = false;
+static SemaphoreHandle_t   _camMutex       = nullptr;
+static volatile int        _camClientCount = 0;
+static void              (*_onCamStart)()  = nullptr;
+static void              (*_onCamStop)()   = nullptr;
+
+void webCamSetCallbacks(void (*onStart)(), void (*onStop)()) {
+    _onCamStart = onStart;
+    _onCamStop  = onStop;
+}
+
+bool webCamHasNewFrame() {
+    return _camFrameNew;
+}
+
+void webCamConsumeFrame(uint8_t *dst) {
+    if (!_camMutex) return;
+    if (xSemaphoreTake(_camMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        memcpy(dst, _camBuf, QGIF_FRAME_SIZE);
+        _camFrameNew = false;
+        xSemaphoreGive(_camMutex);
+    }
+}
+
+void webCamDisconnectAll() {
+    _camWs.closeAll();
+}
+
+static void onCamWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
+                         AwsEventType type, void *arg, uint8_t *data, size_t len) {
+    _camWs.cleanupClients();
+    switch (type) {
+        case WS_EVT_CONNECT:
+            _camClientCount++;
+            if (_camClientCount == 1 && _onCamStart) _onCamStart();
+            break;
+        case WS_EVT_DISCONNECT:
+            if (_camClientCount > 0) _camClientCount--;
+            if (_camClientCount == 0 && _onCamStop) _onCamStop();
+            break;
+        case WS_EVT_DATA: {
+            AwsFrameInfo *info = (AwsFrameInfo *)arg;
+            // Accept only a complete, unfragmented binary message of exactly 1024 bytes
+            if (info->final && info->index == 0 &&
+                info->len == QGIF_FRAME_SIZE && info->opcode == WS_BINARY &&
+                len == QGIF_FRAME_SIZE) {
+                if (_camMutex && xSemaphoreTake(_camMutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+                    memcpy(_camBuf, data, QGIF_FRAME_SIZE);
+                    _camFrameNew = true;
+                    xSemaphoreGive(_camMutex);
+                }
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+// ==========================================================================
 //  Init
 // ==========================================================================
 
 void webDashboardInit(AsyncWebServer &server) {
+    // Cam WebSocket: create mutex, register event handler, and add to server
+    _camMutex = xSemaphoreCreateMutex();
+    _camWs.onEvent(onCamWsEvent);
+    server.addHandler(&_camWs);
+
     // Dashboard at "/" only when STA is connected; when in AP mode (e.g. after WiFi lost
     // and portal restarted), "/" is left for NetWizard so opening 192.168.4.1/ shows WiFi setup.
     server.on("/", HTTP_GET, handleRoot).setFilter(ON_STA_FILTER);
