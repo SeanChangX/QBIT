@@ -667,3 +667,194 @@ setInterval(pollCurrent, 3000);
 ls();
 lf();
 pollCurrent();
+
+// ==========================================================================
+//  Web Cam streaming -- captures camera, converts to 128x64 monochrome,
+//  and streams packed 1024-byte frames to /ws_cam via binary WebSocket.
+//  The OLED preview (256x128 canvas) mirrors exactly what the device shows.
+// ==========================================================================
+(function () {
+  var btnToggle  = document.getElementById('btnCamToggle');
+  var btnDither  = document.getElementById('btnCamDither');
+  var preview    = document.getElementById('camPreviewCanvas');
+  var camMsg     = document.getElementById('camMsg');
+
+  var W = 128, H = 64;
+  var FRAME_INTERVAL_MS = 100;  // cap at ~10 FPS to suit ESP32 I2C throughput
+
+  var _ws      = null;
+  var _stream  = null;
+  var _video   = null;
+  var _offCvs  = null;
+  var _offCtx  = null;
+  var _preCtx  = preview.getContext('2d');
+  var _running = false;
+  var _dither  = true;   // Floyd-Steinberg by default; false = simple threshold
+  var _timerId = null;
+
+  function showMsg(text, isErr) {
+    camMsg.textContent    = text;
+    camMsg.className      = 'msg ' + (isErr ? 'error' : 'ok');
+    camMsg.style.display  = text ? 'block' : 'none';
+  }
+
+  // Floyd-Steinberg dithering → QGIF-format packed Uint8Array (bit 0 = lit, bit 1 = dark)
+  function packDither(pixels) {
+    var err = new Float32Array(W * H);
+    for (var i = 0, p = 0; i < W * H; i++, p += 4) {
+      err[i] = 0.299 * pixels[p] + 0.587 * pixels[p + 1] + 0.114 * pixels[p + 2];
+    }
+    var out = new Uint8Array(W * H >> 3);
+    for (var y = 0; y < H; y++) {
+      for (var x = 0; x < W; x++) {
+        var idx = y * W + x;
+        var v   = err[idx];
+        var pix = v < 128 ? 0 : 255;
+        var qe  = v - pix;
+        // QGIF: 0 = lit (white on OLED), 1 = dark — set bit for dark pixel
+        if (pix === 0) out[idx >> 3] |= (1 << (7 - (idx & 7)));
+        // diffuse quantisation error to neighbours
+        if (x + 1 < W)         err[idx + 1]     += qe * 7 / 16;
+        if (y + 1 < H) {
+          if (x > 0)            err[idx + W - 1] += qe * 3 / 16;
+                                err[idx + W]     += qe * 5 / 16;
+          if (x + 1 < W)       err[idx + W + 1] += qe * 1 / 16;
+        }
+      }
+    }
+    return out;
+  }
+
+  // Simple luminance threshold (faster, coarser)
+  function packThreshold(pixels) {
+    var out = new Uint8Array(W * H >> 3);
+    for (var i = 0, p = 0; i < W * H; i++, p += 4) {
+      var luma = 0.299 * pixels[p] + 0.587 * pixels[p + 1] + 0.114 * pixels[p + 2];
+      if (luma < 128) out[i >> 3] |= (1 << (7 - (i & 7)));
+    }
+    return out;
+  }
+
+  // Render the packed frame back onto the preview canvas (2× scale)
+  function renderPreview(frame) {
+    var imgData = _preCtx.createImageData(W * 2, H * 2);
+    var d = imgData.data;
+    for (var y = 0; y < H; y++) {
+      for (var x = 0; x < W; x++) {
+        var idx = y * W + x;
+        var bit = (frame[idx >> 3] >> (7 - (idx & 7))) & 1;
+        var col = bit ? 0 : 255;   // bit 1 = dark, bit 0 = lit
+        for (var sy = 0; sy < 2; sy++) {
+          for (var sx = 0; sx < 2; sx++) {
+            var p = ((y * 2 + sy) * W * 2 + (x * 2 + sx)) * 4;
+            d[p] = d[p + 1] = d[p + 2] = col; d[p + 3] = 255;
+          }
+        }
+      }
+    }
+    _preCtx.putImageData(imgData, 0, 0);
+  }
+
+  function sendFrame() {
+    _timerId = null;
+    if (!_running || !_ws || _ws.readyState !== WebSocket.OPEN) return;
+    // Draw the video frame mirrored (natural selfie orientation) into the 128x64 canvas
+    _offCtx.drawImage(_video, 0, 0, W, H);
+    var pixels = _offCtx.getImageData(0, 0, W, H).data;
+    var frame  = _dither ? packDither(pixels) : packThreshold(pixels);
+    renderPreview(frame);
+    _ws.send(frame.buffer);
+    _timerId = setTimeout(sendFrame, FRAME_INTERVAL_MS);
+  }
+
+  function stop() {
+    _running = false;
+    if (_timerId)  { clearTimeout(_timerId); _timerId = null; }
+    if (_ws)       { _ws.close(); _ws = null; }
+    if (_stream)   { _stream.getTracks().forEach(function (t) { t.stop(); }); _stream = null; }
+    _video = null;
+    btnToggle.textContent = 'Start';
+    btnToggle.classList.remove('muted');
+    btnToggle.disabled = false;
+    showMsg('');
+  }
+
+  function openWs() {
+    var proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    _ws = new WebSocket(proto + '//' + window.location.host + '/ws_cam');
+    _ws.binaryType = 'arraybuffer';
+
+    _ws.onopen = function () {
+      _running = true;
+      btnToggle.textContent = 'Stop';
+      btnToggle.classList.add('muted');
+      btnToggle.disabled = false;
+      showMsg('Streaming \u2014 tap device to exit.', false);
+      sendFrame();
+    };
+
+    _ws.onclose = function () { stop(); };
+    _ws.onerror = function () { showMsg('WebSocket error.', true); stop(); };
+  }
+
+  function start() {
+    // getUserMedia requires a secure context (HTTPS or localhost).
+    // http://qbit.local is blocked by all modern browsers.
+    if (!window.isSecureContext) {
+      var isChrome = /Chrome\//.test(navigator.userAgent) && !/Edg\//.test(navigator.userAgent);
+      var msg = 'Camera blocked: browser requires HTTPS for camera access. ';
+      if (isChrome) {
+        msg += 'To fix in Chrome: open chrome://flags/#unsafely-treat-insecure-origin-as-secure, '
+             + 'add http://' + window.location.host + ', click Relaunch.';
+      } else {
+        msg += 'Open this page in Chrome and enable the "Insecure origins treated as secure" flag '
+             + 'for http://' + window.location.host + '.';
+      }
+      showMsg(msg, true);
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showMsg('Camera API not available in this browser.', true);
+      return;
+    }
+    btnToggle.disabled = true;
+    showMsg('Requesting camera access...');
+
+    navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 128 }, height: { ideal: 64 }, facingMode: 'user' }
+    }).then(function (stream) {
+      _stream = stream;
+      _video  = document.createElement('video');
+      _video.srcObject  = stream;
+      _video.muted      = true;
+      _video.playsInline = true;
+
+      // Off-screen 128x64 canvas; mirror horizontally for natural selfie view
+      _offCvs = document.createElement('canvas');
+      _offCvs.width  = W;
+      _offCvs.height = H;
+      _offCtx = _offCvs.getContext('2d', { willReadFrequently: true });
+      _offCtx.translate(W, 0);
+      _offCtx.scale(-1, 1);
+
+      _video.addEventListener('canplay', function onCanPlay() {
+        _video.removeEventListener('canplay', onCanPlay);
+        _video.play().catch(function () {});
+        openWs();
+      });
+    }).catch(function (err) {
+      showMsg('Camera denied: ' + (err.message || err), true);
+      btnToggle.disabled = false;
+    });
+  }
+
+  btnToggle.addEventListener('click', function () {
+    if (_running) stop(); else start();
+  });
+
+  btnDither.addEventListener('click', function () {
+    _dither = !_dither;
+    btnDither.textContent = _dither ? 'Dither' : 'Threshold';
+    btnDither.classList.toggle('muted', !_dither);
+  });
+})();

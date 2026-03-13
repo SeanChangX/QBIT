@@ -95,6 +95,19 @@ void setup() {
 
     // 9. Web dashboard + server
     webDashboardInit(server);
+    // Wire cam WebSocket connect/disconnect → display task state machine
+    webCamSetCallbacks(
+        []() {
+            NetworkEvent evt = {};
+            evt.kind = NetworkEvent::CAM_START;
+            xQueueSend(networkEventQueue, &evt, 0);
+        },
+        []() {
+            NetworkEvent evt = {};
+            evt.kind = NetworkEvent::CAM_STOP;
+            xQueueSend(networkEventQueue, &evt, 0);
+        }
+    );
     server.begin();
 
     Serial.println("Web server started");
