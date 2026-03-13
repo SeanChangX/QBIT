@@ -183,6 +183,20 @@
     <button class="btn btn-save" id="btnPinSave">Save Pins</button>
   </div>
 
+  <div class="card collapsible collapsed">
+    <div class="card-title">Web Cam</div>
+    <div class="setting">
+      <label class="setting-label">Stream</label>
+      <button class="btn btn-mute" id="btnCamToggle">Start</button>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Mode</label>
+      <button class="btn btn-mute" id="btnCamDither">Dither</button>
+    </div>
+    <canvas id="camPreviewCanvas" width="256" height="128" class="cam-preview"></canvas>
+    <div class="msg" id="camMsg"></div>
+  </div>
+
 
   <script src="/jszip.min.js"></script>
   <script src="/script.js"></script>

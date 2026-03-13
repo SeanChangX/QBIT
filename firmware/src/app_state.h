@@ -35,7 +35,8 @@ enum DisplayState {
     TREX_RUNNING,
     TREX_OVER,
     FLAPPY_RUNNING,
-    FLAPPY_OVER
+    FLAPPY_OVER,
+    CAM_VIEW
 };
 
 // ==========================================================================
@@ -66,7 +67,9 @@ struct GestureEvent {
         FRIEND_REQUEST,
         WIFI_STATUS,
         WS_STATUS,
-        MQTT_COMMAND
+        MQTT_COMMAND,
+        CAM_START,
+        CAM_STOP
     } kind;
 
     // Event-specific data

@@ -655,6 +655,21 @@ body {
   letter-spacing: .04em;
 }
 
+/* Web Cam live preview */
+.cam-preview {
+  display: block;
+  width: 100%;
+  max-width: 256px;
+  height: auto;
+  aspect-ratio: 2 / 1;
+  margin: 8px auto 4px;
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #000;
+}
+
 /* Footer */
 .footer {
   text-align: center;

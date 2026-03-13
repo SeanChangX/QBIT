@@ -12,6 +12,7 @@
 #include "mqtt_ha.h"
 #include "melodies.h"
 #include "gif_player.h"
+#include "web_dashboard.h"
 #include "timer_ui.h"
 #include "games/game_menu.h"
 #include "games/trex_runner/trex_runner.h"
@@ -80,6 +81,9 @@ static bool _melodyWasPlaying = false;
 // Timer alarm: play even when muted; restore mute when melody ends
 static bool _timerAlarmRestoreMute = false;
 static bool _timerAlarmStarted    = false;
+
+// Cam frame render buffer (owned by display task; gifRenderFrame inverts in-place)
+static uint8_t _camRenderBuf[QGIF_FRAME_SIZE];
 
 // Settings menu
 static uint8_t _settingsCursor    = 0;
@@ -542,6 +546,20 @@ void displayTask(void *param) {
                         }
                     }
                     break;
+
+                case NetworkEvent::CAM_START:
+                    // Only interrupt idle GIF playback; leave games/timer/menus alone
+                    if (_state == GIF_PLAYBACK) {
+                        enterState(CAM_VIEW);
+                        showText("[ Web Cam ]", "", "Waiting for feed...", "Tap to exit");
+                    }
+                    break;
+
+                case NetworkEvent::CAM_STOP:
+                    if (_state == CAM_VIEW) {
+                        enterState(GIF_PLAYBACK);
+                    }
+                    break;
             }
         }
 
@@ -911,6 +929,14 @@ void displayTask(void *param) {
                         enterState(GIF_PLAYBACK);
                     }
                     break;
+
+                case CAM_VIEW:
+                    // Single tap or long press exits cam view; notify browser by closing WS
+                    if (gesture.type == SINGLE_TAP || gesture.type == LONG_PRESS) {
+                        webCamDisconnectAll();
+                        enterState(GIF_PLAYBACK);
+                    }
+                    break;
             }
         }
 
@@ -1189,6 +1215,15 @@ void displayTask(void *param) {
 
             case FLAPPY_OVER:
                 // Idle — waiting for gesture
+                break;
+
+            case CAM_VIEW:
+                // Render each incoming frame; gifRenderFrame handles polarity inversion
+                // and flip-mode rotation, exactly like normal GIF playback.
+                if (webCamHasNewFrame()) {
+                    webCamConsumeFrame(_camRenderBuf);
+                    gifRenderFrame(&u8g2, _camRenderBuf, QGIF_FRAME_WIDTH, QGIF_FRAME_HEIGHT);
+                }
                 break;
 
             default:
