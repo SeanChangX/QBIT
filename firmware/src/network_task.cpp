@@ -73,6 +73,7 @@ static unsigned long    _wsLastReconnect = 0;
 static WiFiClient   _mqttWifi;
 static PubSubClient _mqttClient;   // setClient() called at runtime to avoid static init order issues (fixes #1)
 static unsigned long _mqttLastReconnect = 0;
+static char _mqttHostStable[MQTT_HOST_MAX_LEN + 1] = {0};
 #define MQTT_RECONNECT_MS 5000
 
 static bool          _wifiConnected = false;
@@ -505,7 +506,9 @@ static void mqttCallback(char *topic, byte *payload, unsigned int length) {
 static void mqttReconnect() {
     // Only attempt MQTT connect when WiFi is actually connected.
     // This avoids PubSubClient errors like rc = -2 when there is no network.
-    if (!getMqttEnabled() || getMqttHost().length() == 0) return;
+    String mqttHost = getMqttHost();
+    mqttHost.trim();
+    if (!getMqttEnabled() || mqttHost.length() == 0) return;
     if (!_wifiConnected || WiFi.status() != WL_CONNECTED) return;
     if (_mqttClient.connected()) return;
 
@@ -513,17 +516,36 @@ static void mqttReconnect() {
     if (now - _mqttLastReconnect < MQTT_RECONNECT_MS) return;
     _mqttLastReconnect = now;
 
+    const uint16_t mqttPort = getMqttPort();
+    String mqttUser = getMqttUser();
+    String mqttPass = getMqttPass();
+    String prefix   = getMqttPrefix();
+    String id       = getDeviceId();
+
+    // Keep host in static storage; PubSubClient::setServer(const char*) stores
+    // the pointer and may outlive temporary Strings. Length already capped by settings.
+    if (mqttHost.length() >= sizeof(_mqttHostStable))
+        Serial.printf("[MQTT] Host truncated to %u chars\n", (unsigned)(sizeof(_mqttHostStable) - 1));
+    strncpy(_mqttHostStable, mqttHost.c_str(), sizeof(_mqttHostStable) - 1);
+    _mqttHostStable[sizeof(_mqttHostStable) - 1] = '\0';
+
     _mqttClient.setClient(_mqttWifi);
-    _mqttClient.setServer(getMqttHost().c_str(), getMqttPort());
+    IPAddress brokerIp;
+    if (brokerIp.fromString(_mqttHostStable)) {
+        _mqttClient.setServer(brokerIp, mqttPort);
+    } else {
+        _mqttClient.setServer(_mqttHostStable, mqttPort);
+    }
     _mqttClient.setBufferSize(1024);
     _mqttClient.setCallback(mqttCallback);
+    Serial.printf("[MQTT] Connecting to %s:%u\n", _mqttHostStable, mqttPort);
 
-    String clientId = "qbit-" + getDeviceId();
-    String statusTopic = getMqttPrefix() + "/" + getDeviceId() + "/status";
+    String clientId = "qbit-" + id;
+    String statusTopic = prefix + "/" + id + "/status";
     bool ok;
-    if (getMqttUser().length() > 0) {
+    if (mqttUser.length() > 0) {
         ok = _mqttClient.connect(clientId.c_str(),
-                                 getMqttUser().c_str(), getMqttPass().c_str(),
+                                 mqttUser.c_str(), mqttPass.c_str(),
                                  statusTopic.c_str(), 0, true, "offline");
     } else {
         ok = _mqttClient.connect(clientId.c_str(),
@@ -531,15 +553,15 @@ static void mqttReconnect() {
     }
 
     if (ok) {
-        Serial.printf("[MQTT] Connected to %s:%u\n", getMqttHost().c_str(), getMqttPort());
+        Serial.printf("[MQTT] Connected to %s:%u\n", _mqttHostStable, mqttPort);
         xEventGroupSetBits(connectivityBits, MQTT_CONNECTED_BIT);
 
         // Publish online + info
         _mqttClient.publish(statusTopic.c_str(), "online", true);
 
-        String infoTopic = getMqttPrefix() + "/" + getDeviceId() + "/info";
+        String infoTopic = prefix + "/" + id + "/info";
         StaticJsonDocument<256> info;
-        info["id"]   = getDeviceId();
+        info["id"]   = id;
         info["name"] = getDeviceName();
         info["ip"]   = WiFi.localIP().toString();
         String infoStr;
@@ -547,8 +569,6 @@ static void mqttReconnect() {
         _mqttClient.publish(infoTopic.c_str(), infoStr.c_str(), true);
 
         // Subscribe to command topics
-        String id = getDeviceId();
-        String prefix = getMqttPrefix();
         _mqttClient.subscribe((prefix + "/" + id + "/command").c_str());
         _mqttClient.subscribe((prefix + "/" + id + "/poke_text/set").c_str());
         _mqttClient.subscribe((prefix + "/" + id + "/mute/set").c_str());

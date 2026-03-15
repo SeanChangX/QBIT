@@ -134,13 +134,19 @@ void loadSettings() {
     String defaultName = "QBIT-" + getDeviceId().substring(0, 4);
     _deviceName = _prefs.getString("devname", defaultName);
 
-    // MQTT
+    // MQTT (truncate to limits in case stored value was from older code or direct NVS write)
     _mqttHost    = _prefs.getString("mqttHost", "");
-    _mqttPort    = _prefs.getUShort("mqttPort", 1883);
+    _mqttPort    = _prefs.getUShort("mqttPort", MQTT_PORT_DEFAULT);
     _mqttUser    = _prefs.getString("mqttUser", "");
     _mqttPass    = _prefs.getString("mqttPass", "");
     _mqttPrefix  = _prefs.getString("mqttPfx",  "qbit");
     _mqttEnabled = _prefs.getBool("mqttOn", false);
+    if (_mqttHost.length() > MQTT_HOST_MAX_LEN)   _mqttHost = _mqttHost.substring(0, MQTT_HOST_MAX_LEN);
+    if (_mqttUser.length() > MQTT_USER_MAX_LEN)   _mqttUser = _mqttUser.substring(0, MQTT_USER_MAX_LEN);
+    if (_mqttPass.length() > MQTT_PASS_MAX_LEN)   _mqttPass = _mqttPass.substring(0, MQTT_PASS_MAX_LEN);
+    if (_mqttPrefix.length() > MQTT_PREFIX_MAX_LEN) _mqttPrefix = _mqttPrefix.substring(0, MQTT_PREFIX_MAX_LEN);
+    if (_mqttPrefix.length() == 0) _mqttPrefix = "qbit";
+    if (_mqttPort < MQTT_PORT_MIN || _mqttPort > MQTT_PORT_MAX) _mqttPort = MQTT_PORT_DEFAULT;
 
     // Timezone (truncate if stored value exceeds limit)
     _tzIANA = _prefs.getString("tzName", "");
@@ -275,13 +281,14 @@ String   getMqttPrefix()  { return _mqttPrefix; }
 bool     getMqttEnabled() { return _mqttEnabled; }
 
 void setMqttConfig(const String &host, uint16_t port,
-                   const String &user, const String &pass,
-                   const String &prefix, bool enabled) {
-    _mqttHost    = host;
-    _mqttPort    = port;
-    _mqttUser    = user;
-    _mqttPass    = pass;
-    _mqttPrefix  = prefix;
+                  const String &user, const String &pass,
+                  const String &prefix, bool enabled) {
+    _mqttHost = host.length() > MQTT_HOST_MAX_LEN ? host.substring(0, MQTT_HOST_MAX_LEN) : host;
+    _mqttPort = (port >= MQTT_PORT_MIN && port <= MQTT_PORT_MAX) ? port : MQTT_PORT_DEFAULT;
+    _mqttUser = user.length() > MQTT_USER_MAX_LEN ? user.substring(0, MQTT_USER_MAX_LEN) : user;
+    _mqttPass = pass.length() > MQTT_PASS_MAX_LEN ? pass.substring(0, MQTT_PASS_MAX_LEN) : pass;
+    _mqttPrefix = prefix.length() > MQTT_PREFIX_MAX_LEN ? prefix.substring(0, MQTT_PREFIX_MAX_LEN) : prefix;
+    if (_mqttPrefix.length() == 0) _mqttPrefix = "qbit";
     _mqttEnabled = enabled;
 }
 

@@ -44,6 +44,15 @@ void     setPlaybackSpeed(uint16_t val);
 uint16_t getPlaybackSpeed();
 
 // --- MQTT configuration ---
+// Limits aligned with firmware buffer and common practice (host = setServer buffer).
+#define MQTT_HOST_MAX_LEN   127
+#define MQTT_USER_MAX_LEN   128
+#define MQTT_PASS_MAX_LEN   128
+#define MQTT_PREFIX_MAX_LEN 64
+#define MQTT_PORT_MIN       1
+#define MQTT_PORT_MAX       65535
+#define MQTT_PORT_DEFAULT   1883
+
 String   getMqttHost();
 uint16_t getMqttPort();
 String   getMqttUser();
