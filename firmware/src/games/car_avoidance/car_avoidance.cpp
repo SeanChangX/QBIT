@@ -1,7 +1,7 @@
 // ==========================================================================
 //  QBIT -- Car Avoidance game implementation
 //  Display: 128x64 OLED.
-//  Tap/TouchUp = change to next lane (0→1→2→0).
+//  Tap to change to the next lane (0→1→2→0).
 //  Avoid enemy cars scrolling from the top; survive as long as possible.
 // ==========================================================================
 #include "car_avoidance.h"
@@ -40,16 +40,17 @@
 #define CA_MAX_ENEMIES      4
 
 // Timing
-#define CA_TICK_MS          35      // ms per tick (~28 fps)
+#define CA_TICK_MS          40      // ms per tick (~25 fps)
 
-// Difficulty scaling
-#define CA_SPEED_INIT       2       // starting scroll speed (px/tick)
+// Difficulty scaling (classic-feel curve)
+#define CA_SPEED_INIT       1       // starting scroll speed (px/tick)
 #define CA_SPEED_MAX        6       // maximum scroll speed
-#define CA_SPEEDUP_SCORE    80      // gain one speed level per 80 score points
+#define CA_SPEEDUP_SCORE    200     // gain one speed level per 200 score points (very gradual)
 
 // Spawn interval limits (in ticks)
-#define CA_SPAWN_MIN_TICKS  8
-#define CA_SPAWN_MAX_TICKS  22
+// Larger values = sparser traffic; game starts with wide gaps.
+#define CA_SPAWN_MIN_TICKS  10
+#define CA_SPAWN_MAX_TICKS  30
 
 // Near-miss: adjacent-lane enemy within this many pixels vertically of player box
 #define CA_NEAR_MISS_PX     5
@@ -125,17 +126,18 @@ struct EnemyCar {
 // --------------------------------------------------------------------------
 //  State
 // --------------------------------------------------------------------------
-static uint8_t       _playerLane    = 1;
-static bool          _dead          = false;
-static uint32_t      _score         = 0;
-static uint8_t       _speed         = CA_SPEED_INIT;
-static unsigned long _lastTickMs    = 0;
+static uint8_t       _playerLane       = 1;
+static bool          _dead             = false;
+static uint32_t      _score            = 0;
+static uint32_t      _ticksSinceStart  = 0;    // total successful ticks since game start
+static uint8_t       _speed            = CA_SPEED_INIT;
+static unsigned long _lastTickMs       = 0;
 static EnemyCar      _enemies[CA_MAX_ENEMIES];
-static uint16_t      _randState     = 1;
-static int16_t       _dashOffset    = 0;
-static uint8_t       _spawnTimer    = 0;       // ticks until next spawn attempt
-static uint8_t       _spawnInterval = CA_SPAWN_MAX_TICKS;
-static bool          _nearMiss      = false;
+static uint16_t      _randState        = 1;
+static int16_t       _dashOffset       = 0;
+static uint8_t       _spawnTimer       = 0;       // ticks until next spawn attempt
+static uint8_t       _spawnInterval    = CA_SPAWN_MAX_TICKS;
+static bool          _nearMiss         = false;
 
 // --------------------------------------------------------------------------
 //  XOR-shift RNG (same pattern as flappy_bird.cpp)
@@ -205,20 +207,29 @@ static void spawnEnemy() {
     }
     if (slot < 0) return;
 
-    // Pick a random lane; retry up to 3 times to avoid crowding the spawn row
-    uint8_t lane = 0;
-    for (uint8_t attempt = 0; attempt < 3; attempt++) {
-        lane = (uint8_t)(caRand() % CA_NUM_LANES);
+    // Collect all lanes that are not crowded near the spawn row
+    uint8_t candidates[CA_NUM_LANES];
+    uint8_t candidateCount = 0;
+    for (uint8_t lane = 0; lane < CA_NUM_LANES; lane++) {
         bool blocked = false;
         for (uint8_t i = 0; i < CA_MAX_ENEMIES; i++) {
             if (_enemies[i].active && _enemies[i].lane == lane &&
-                _enemies[i].y < CA_ROAD_TOP_Y + CA_ENEMY_H + 4) {
+                _enemies[i].y < CA_ROAD_TOP_Y + CA_ENEMY_H + 10) {
                 blocked = true;
                 break;
             }
         }
-        if (!blocked) break;
+        if (!blocked) {
+            candidates[candidateCount++] = lane;
+        }
     }
+    if (candidateCount == 0) {
+        // All lanes are too crowded near the spawn row; skip this tick.
+        return;
+    }
+
+    uint8_t laneIndex = (uint8_t)(caRand() % candidateCount);
+    uint8_t lane = candidates[laneIndex];
 
     _enemies[slot] = { (int16_t)CA_SPAWN_Y, lane, true, false };
 }
@@ -228,16 +239,17 @@ static void spawnEnemy() {
 // --------------------------------------------------------------------------
 
 void carAvoidanceEnter() {
-    _randState     = (uint16_t)(millis() & 0xFFFF) | 1;
-    _playerLane    = 1;
-    _dead          = false;
-    _score         = 0;
-    _speed         = CA_SPEED_INIT;
-    _lastTickMs    = millis();
-    _dashOffset    = 0;
-    _spawnTimer    = 10;                    // short delay before first enemy
-    _spawnInterval = CA_SPAWN_MAX_TICKS;
-    _nearMiss      = false;
+    _randState       = (uint16_t)(millis() & 0xFFFF) | 1;
+    _playerLane      = 1;
+    _dead            = false;
+    _score           = 0;
+    _ticksSinceStart = 0;
+    _speed           = CA_SPEED_INIT;
+    _lastTickMs      = millis();
+    _dashOffset      = 0;
+    _spawnTimer      = 20;                    // longer delay before first enemy
+    _spawnInterval   = CA_SPAWN_MAX_TICKS;
+    _nearMiss        = false;
     for (uint8_t i = 0; i < CA_MAX_ENEMIES; i++)
         _enemies[i].active = false;
 }
@@ -292,10 +304,9 @@ void carAvoidanceDrawGameOver() {
 }
 
 CarAction carAvoidanceOnGesture(CarGestureType g) {
-    if (g == CarGestureType::TouchUp || g == CarGestureType::SingleTap)
+    // In-game: single, immediate action per press — no double-tap or long-press semantics.
+    if (g == CarGestureType::TouchDown)
         return CarAction::ChangeLane;
-    if (g == CarGestureType::LongPress)
-        return CarAction::Exit;
     return CarAction::None;
 }
 
@@ -310,15 +321,20 @@ bool carAvoidanceTick(unsigned long nowMs) {
 
     if (_dead) return false;
 
-    _score++;
+    _ticksSinceStart++;
+
+    // Score grows more slowly: +1 every 2 ticks
+    if ((_ticksSinceStart & 1u) == 0) {
+        _score++;
+    }
 
     // Speed: one level per CA_SPEEDUP_SCORE points, capped at CA_SPEED_MAX
     uint8_t newSpeed = (uint8_t)(CA_SPEED_INIT + _score / CA_SPEEDUP_SCORE);
     if (newSpeed > CA_SPEED_MAX) newSpeed = CA_SPEED_MAX;
     _speed = newSpeed;
 
-    // Tighten spawn interval as speed grows
-    int8_t spawnAdj = (int8_t)(CA_SPAWN_MAX_TICKS - (_speed - CA_SPEED_INIT) * 3);
+    // Tighten spawn interval as speed grows (gentler ramp)
+    int8_t spawnAdj = (int8_t)(CA_SPAWN_MAX_TICKS - (_speed - CA_SPEED_INIT) * 2);
     _spawnInterval = (spawnAdj < (int8_t)CA_SPAWN_MIN_TICKS)
                      ? CA_SPAWN_MIN_TICKS : (uint8_t)spawnAdj;
 
@@ -334,7 +350,6 @@ bool carAvoidanceTick(unsigned long nowMs) {
     }
 
     // Player hitbox
-    int16_t pLeft = (int16_t)CA_LANE_X[_playerLane];
     int16_t pTop  = (int16_t)CA_PLAYER_TOP_Y;
     int16_t pBtm  = pTop + (int16_t)CA_CAR_H - 1;
 
@@ -380,7 +395,9 @@ bool carAvoidanceTick(unsigned long nowMs) {
 }
 
 bool carAvoidanceNearMiss() {
-    return _nearMiss;
+    bool wasNear = _nearMiss;
+    _nearMiss = false;
+    return wasNear;
 }
 
 uint32_t carAvoidanceGetScore() {

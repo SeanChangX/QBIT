@@ -937,8 +937,6 @@ void displayTask(void *param) {
                             noTone(getPinBuzzer());
                             rtttl::begin(getPinBuzzer(), TOUCH_MELODY);
                         }
-                    } else if (cra == CarAction::Exit) {
-                        enterState(GIF_PLAYBACK);
                     }
                     break;
                 }

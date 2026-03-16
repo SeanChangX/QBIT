@@ -11,7 +11,7 @@ enum class CarGestureType {
 };
 
 enum class CarAction {
-    None, ChangeLane, Exit
+    None, ChangeLane
 };
 
 // Reset state. Call before entering CAR_RUNNING.
@@ -32,7 +32,7 @@ bool carAvoidanceNearMiss();
 // Current score (read after carAvoidanceTick() returns true before saving high score).
 uint32_t carAvoidanceGetScore();
 
-// Handle gesture during play. Returns ChangeLane or Exit.
+// Handle gesture during play. In-game this maps touch-down to ChangeLane and never returns Exit.
 CarAction carAvoidanceOnGesture(CarGestureType g);
 
 // Apply lane change (cycle right: lane 0→1→2→0).
