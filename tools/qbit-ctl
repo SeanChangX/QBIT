@@ -1,0 +1,1059 @@
+#!/usr/bin/env bash
+# ---------------------------------------------------------------------------
+#  qbit-ctl -- QBIT data and database control (TUI)
+#  Backup/restore/list/edit volume; view SQLite DB (predefined queries).
+#  Uses whiptail. Run from repo root or set QBIT_REPO_ROOT.
+# ---------------------------------------------------------------------------
+set -euo pipefail
+
+readonly QBIT_CTL_VERSION="2026-03-16"
+readonly BACKTITLE="QBIT Control v${QBIT_CTL_VERSION}"
+readonly DB_PATH_IN_CONTAINER="/data/qbit.db"
+readonly DATA_MOUNT_PATH="/data"
+readonly BACKUP_FILE_GLOB='qbit-data-backup-*.tar.gz'
+
+if ! command -v docker &>/dev/null; then
+  echo "ERROR: docker command not found." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+#  TUI: whiptail
+# ---------------------------------------------------------------------------
+if ! command -v whiptail &>/dev/null; then
+  echo "ERROR: Install 'whiptail' (e.g. apt install whiptail)." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+#  UI helpers (whiptail)
+# ---------------------------------------------------------------------------
+_ui_msg() {
+  local title="$1" msg="$2" h="${3:-8}" w="${4:-60}"
+  whiptail --backtitle "$BACKTITLE" --title "$title" --msgbox "$msg" "$h" "$w"
+}
+
+_ui_scroll_msg() {
+  local title="$1" msg="$2" h="${3:-22}" w="${4:-78}"
+  whiptail --backtitle "$BACKTITLE" --title "$title" --scrolltext --msgbox "$msg" "$h" "$w"
+}
+
+_ui_infobox() {
+  local title="$1" msg="$2" h="${3:-5}" w="${4:-55}"
+  whiptail --backtitle "$BACKTITLE" --title "$title" --infobox "$msg" "$h" "$w"
+}
+
+_ui_loading() {
+  local title="$1" msg="$2" seconds="${3:-1}"
+  {
+    echo 10
+    sleep 0.1
+    echo 50
+    sleep "$seconds"
+    echo 100
+  } | whiptail --backtitle "$BACKTITLE" --title "$title" --gauge "$msg" 7 56 0
+}
+
+_ui_yesno() {
+  local title="$1" msg="$2" h="${3:-10}" w="${4:-60}"
+  local yes_label="${5:-Yes}" no_label="${6:-No}"
+  whiptail --backtitle "$BACKTITLE" --title "$title" --yes-button "$yes_label" --no-button "$no_label" --yesno "$msg" "$h" "$w"
+}
+
+_ui_menu() {
+  local title="$1" prompt="$2" h="$3" w="$4" menu_h="$5"
+  local out status
+  shift 5
+  if out=$(whiptail --backtitle "$BACKTITLE" --title "$title" --menu "$prompt" "$h" "$w" "$menu_h" "$@" 3>&1 1>&2 2>&3); then
+    status=0
+  else
+    status=$?
+  fi
+  printf '%s' "${out//$'\r'/}"
+  return $status
+}
+
+_ui_checklist() {
+  local title="$1" prompt="$2" h="$3" w="$4" list_h="$5"
+  local out status
+  shift 5
+  if out=$(whiptail --backtitle "$BACKTITLE" --title "$title" --checklist "$prompt" "$h" "$w" "$list_h" "$@" 3>&1 1>&2 2>&3); then
+    status=0
+  else
+    status=$?
+  fi
+  printf '%s' "${out//$'\r'/}"
+  return $status
+}
+
+_ui_input() {
+  local title="$1" prompt="$2" h="$3" w="$4" default_val="${5:-}"
+  local out status
+  if out=$(whiptail --backtitle "$BACKTITLE" --title "$title" --inputbox "$prompt" "$h" "$w" "$default_val" 3>&1 1>&2 2>&3); then
+    status=0
+  else
+    status=$?
+  fi
+  printf '%s' "${out//$'\r'/}"
+  return $status
+}
+
+# ---------------------------------------------------------------------------
+#  Path / repo helpers
+# ---------------------------------------------------------------------------
+_repo_root() {
+  local root="${QBIT_REPO_ROOT:-}"
+  if [[ -n "$root" && -d "$root" ]]; then
+    echo "$root"
+    return
+  fi
+
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -f "${script_dir}/../web/docker-compose.yml" ]]; then
+    echo "$(cd "$script_dir/.." && pwd)"
+    return
+  fi
+
+  echo "$(pwd)"
+}
+
+_backup_dir() {
+  echo "$(_path_start)/qbit_backups"
+}
+
+_ensure_dir() {
+  local dir="$1" title="${2:-Directory Error}"
+  if mkdir -p "$dir" 2>/dev/null; then
+    return 0
+  fi
+  _ui_msg "$title" "Could not create directory:\n$dir" 7 66
+  return 1
+}
+
+_path_start() {
+  if [[ -n "${HOME:-}" ]]; then
+    echo "$HOME"
+  elif id -un &>/dev/null; then
+    echo "/home/$(id -un)"
+  else
+    echo "/tmp"
+  fi
+}
+
+_pick_directory() {
+  local start_path="${1:-$(_path_start)}"
+  _ui_input "Choose Directory" "Enter directory path (e.g. /home/user):" 8 70 "$start_path"
+}
+
+_pick_path() {
+  local start_path="${1:-$(_path_start)}"
+  _ui_input "Choose File or Directory" "Enter a .tar.gz file path or a directory path:" 8 70 "$start_path"
+}
+
+_collect_backup_archives() {
+  local dir="$1"
+  local row file
+
+  BACKUP_ARCHIVES=()
+  while IFS= read -r -d '' row; do
+    file="${row#* }"
+    [[ -f "$file" ]] && BACKUP_ARCHIVES+=("$file" "$(basename "$file")")
+  done < <(
+    find "$dir" -maxdepth 1 -type f -name "$BACKUP_FILE_GLOB" -printf '%T@ %p\0' 2>/dev/null | sort -zrn
+  )
+}
+
+_format_bytes() {
+  local bytes="$1"
+  local -a units=("B" "KB" "MB" "GB" "TB")
+  local unit_idx=0
+
+  [[ "$bytes" =~ ^[0-9]+$ ]] || {
+    echo "?"
+    return
+  }
+
+  while (( bytes >= 1024 && unit_idx < ${#units[@]} - 1 )); do
+    bytes=$((bytes / 1024))
+    unit_idx=$((unit_idx + 1))
+  done
+
+  echo "${bytes}${units[$unit_idx]}"
+}
+
+_short_backup_name() {
+  local name="$1"
+  local max_len="${2:-34}"
+  local keep_head=22
+  local keep_tail=9
+  if (( ${#name} <= max_len )); then
+    echo "$name"
+    return
+  fi
+  echo "${name:0:$keep_head}...${name: -$keep_tail}"
+}
+
+_pick_backup_archive() {
+  local backup_dir="$1" title="$2" prompt="$3"
+  local idx i list_h box_h choice
+  local path base short_base size_bytes size_human modified_at
+  local -a menu_items=() path_map=()
+
+  _ui_loading "$title" "Loading backup files..." 1
+  _collect_backup_archives "$backup_dir"
+  if [[ ${#BACKUP_ARCHIVES[@]} -eq 0 ]]; then
+    _ui_msg "$title" "No backup files found in:\n$backup_dir\n\nExpected pattern: $BACKUP_FILE_GLOB" 9 72
+    return 1
+  fi
+
+  idx=0
+  for (( i = 0; i < ${#BACKUP_ARCHIVES[@]}; i += 2 )); do
+    path="${BACKUP_ARCHIVES[$i]}"
+    base="$(basename "$path")"
+    short_base="$(_short_backup_name "$base" 34)"
+    size_bytes="$(stat -c '%s' "$path" 2>/dev/null || echo "")"
+    size_human="$(_format_bytes "$size_bytes")"
+    modified_at="$(stat -c '%y' "$path" 2>/dev/null | cut -d'.' -f1)"
+    [[ -z "$modified_at" ]] && modified_at="-"
+
+    idx=$((idx + 1))
+    path_map+=("$path")
+    menu_items+=("$idx" "$(printf '%-34s %7s %-19s' "$short_base" "$size_human" "${modified_at:0:19}")")
+  done
+
+  list_h=$((idx + 1))
+  [[ $list_h -gt 14 ]] && list_h=14
+  box_h=$((list_h + 8))
+
+  while true; do
+    if ! choice=$(_ui_menu "$title" "$prompt\n\nDirectory: $backup_dir\nColumns: #  Filename  Size  Modified" "$box_h" 92 "$list_h" \
+      "${menu_items[@]}" \
+      "back" "Back"); then
+      return 1
+    fi
+
+    [[ -z "$choice" || "$choice" == "back" ]] && return 1
+    [[ "$choice" =~ ^[0-9]+$ ]] || continue
+    (( choice >= 1 && choice <= ${#path_map[@]} )) || continue
+
+    PICKED_BACKUP_ROW="$choice"
+    PICKED_BACKUP_PATH="${path_map[$((choice - 1))]}"
+    return 0
+  done
+}
+
+# ---------------------------------------------------------------------------
+#  Docker: resolve backend container and data volume
+# ---------------------------------------------------------------------------
+_backend_container() {
+  local c
+  for c in qbit-backend qbit-backend-dev; do
+    if docker inspect "$c" &>/dev/null; then
+      echo "$c"
+      return
+    fi
+  done
+  echo ""
+}
+
+_volume_name() {
+  local container="$1"
+  docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' "$container" 2>/dev/null || true
+}
+
+# Resolve volume when backend is stopped (e.g. for backup/restore)
+_volume_name_fallback() {
+  docker volume ls -q 2>/dev/null | awk '/^(.+_)?qbit-data$/{print; exit}'
+}
+
+# _ensure_backend [silent]
+# - success: sets BACKEND_CONTAINER (empty if stopped) and VOLUME_NAME
+# - failure: return 1
+_ensure_backend() {
+  local mode="${1:-}"
+  local c
+
+  c="$(_backend_container)"
+  if [[ -z "$c" ]]; then
+    BACKEND_CONTAINER=""
+    VOLUME_NAME="$(_volume_name_fallback)"
+    if [[ -z "$VOLUME_NAME" ]]; then
+      [[ "$mode" == "silent" ]] || _ui_msg "Environment Error" "No running backend container and no qbit-data volume found.\n\nExpected backend names:\n- qbit-backend\n- qbit-backend-dev" 11 64
+      return 1
+    fi
+    return 0
+  fi
+
+  BACKEND_CONTAINER="$c"
+  VOLUME_NAME="$(_volume_name "$BACKEND_CONTAINER")"
+  [[ -z "$VOLUME_NAME" ]] && VOLUME_NAME="$(_volume_name_fallback)"
+
+  if [[ -z "$VOLUME_NAME" ]]; then
+    [[ "$mode" == "silent" ]] || _ui_msg "Environment Error" "Could not resolve data volume for backend: $BACKEND_CONTAINER" 7 60
+    return 1
+  fi
+
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+#  Volume: backup
+# ---------------------------------------------------------------------------
+_volume_backup() {
+  local volume_name backup_dir archive_path choice chosen_dir host_uid host_gid
+
+  if ! _ensure_backend; then
+    return
+  fi
+
+  volume_name="$VOLUME_NAME"
+  backup_dir="$(_backup_dir)"
+
+  if ! choice=$(_ui_menu "Backup Destination" "Where should the backup be saved?" 11 66 4 \
+    "default" "Use default directory: $backup_dir" \
+    "choose" "Choose another directory"); then
+    return
+  fi
+
+  if [[ "$choice" == "choose" ]]; then
+    if ! chosen_dir=$(_pick_directory "$(_path_start)"); then
+      return
+    fi
+    [[ -z "$chosen_dir" ]] && return
+    backup_dir="$chosen_dir"
+  fi
+
+  if ! _ensure_dir "$backup_dir" "Backup Failed"; then
+    return
+  fi
+  if [[ ! -w "$backup_dir" ]]; then
+    _ui_msg "Backup Failed" "Directory is not writable by current user:\n$backup_dir\n\nChoose another directory to avoid permission issues when deleting backups." 10 72
+    return
+  fi
+
+  archive_path="${backup_dir}/qbit-data-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+  host_uid="$(id -u)"
+  host_gid="$(id -g)"
+
+  _ui_loading "Backup" "Creating backup archive..." 1
+  if docker run --rm -v "${volume_name}:${DATA_MOUNT_PATH}" -v "${backup_dir}:/backup" alpine \
+    sh -ec "tar czf '/backup/$(basename "$archive_path")' -C '$DATA_MOUNT_PATH' . && { chown '$host_uid:$host_gid' '/backup/$(basename "$archive_path")' || true; }"; then
+    _ui_scroll_msg "Backup Complete" "Success: backup created.\n\nVolume: $volume_name\nSaved to:\n$archive_path" 12 72
+  else
+    _ui_msg "Backup Failed" "Backup failed. Please verify Docker is running and the volume is accessible." 8 68
+  fi
+}
+
+# ---------------------------------------------------------------------------
+#  Volume: restore (pick file then overwrite volume)
+# ---------------------------------------------------------------------------
+_volume_restore() {
+  local backup_dir choice selected_path archive_choice
+
+  if ! _ensure_backend; then
+    return
+  fi
+
+  backup_dir="$(_backup_dir)"
+  if ! _ensure_dir "$backup_dir" "Restore"; then
+    return
+  fi
+
+  if ! choice=$(_ui_menu "Restore Source" "Where is the backup archive?" 11 68 4 \
+    "default" "Browse default directory: $backup_dir" \
+    "choose" "Choose file or directory manually"); then
+    return
+  fi
+
+  if [[ "$choice" == "choose" ]]; then
+    if ! selected_path=$(_pick_path "$(_path_start)"); then
+      return
+    fi
+    [[ -z "$selected_path" ]] && return
+
+    if [[ -d "$selected_path" ]]; then
+      backup_dir="$selected_path"
+      if [[ ! -r "$backup_dir" || ! -x "$backup_dir" ]]; then
+        _ui_msg "Restore" "Directory is not readable or not searchable (cannot enter):\n$backup_dir" 7 66
+        return
+      fi
+    elif [[ -f "$selected_path" ]]; then
+      _volume_restore_do "$selected_path"
+      return
+    else
+      _ui_msg "Restore" "Path does not exist:\n$selected_path" 6 66
+      return
+    fi
+  fi
+
+  if ! _pick_backup_archive "$backup_dir" "Choose Backup" "Select archive to restore.\nWarning: restore overwrites current volume data."; then
+    return
+  fi
+  archive_choice="${PICKED_BACKUP_PATH:-}"
+  archive_choice="${archive_choice//$'\r'/}"
+  [[ -z "$archive_choice" ]] && return
+
+  _volume_restore_do "$archive_choice"
+}
+
+# Shared restore steps after path_archive is set (backend prompt, confirm, extract)
+_volume_restore_do() {
+  local path_archive="$1"
+  local running_container volume_name did_stop stop_choice
+
+  [[ -z "$path_archive" || ! -f "$path_archive" ]] && return
+  if ! _ensure_backend; then
+    return
+  fi
+
+  volume_name="$VOLUME_NAME"
+  did_stop=""
+  running_container="$(_backend_container)"
+
+  if [[ -n "$running_container" ]]; then
+    if ! stop_choice=$(_ui_menu "Backend Running" "Backend ($running_container) is running. Restoring while running may corrupt DB files.\n\nChoose an action:" 15 74 5 \
+      "stop" "Stop backend first (recommended)" \
+      "continue" "Continue anyway (risky)" \
+      "cancel" "Cancel restore"); then
+      return
+    fi
+
+    case "$stop_choice" in
+      cancel|"") return ;;
+      stop)
+        _ui_infobox "Restore" "Stopping $running_container ..." 5 50
+        docker stop "$running_container" &>/dev/null || true
+        did_stop=1
+        ;;
+      continue) ;;
+    esac
+  fi
+
+  if ! _ui_yesno "Confirm Restore" "Restore from:\n$path_archive\n\nThis will OVERWRITE all current data in $VOLUME_NAME. Continue?" 11 72 "Restore" "Cancel"; then
+    if [[ -n "$did_stop" && -n "$running_container" ]]; then
+      _ui_loading "Restore Cancelled" "Starting backend: $running_container" 1
+      if docker start "$running_container" &>/dev/null; then
+        _ui_msg "Restore Cancelled" "Restore cancelled. Backend restarted.\n\nContainer: $running_container" 8 68
+      else
+        _ui_msg "Restore Cancelled" "Restore cancelled.\n\nFailed to restart backend.\nContainer: $running_container\nRun manually:\ndocker start $running_container" 11 72
+      fi
+    fi
+    return
+  fi
+
+  _ui_loading "Restore" "Restoring backup archive..." 1
+  local restore_dir backup_basename
+  restore_dir="$(dirname "$path_archive")"
+  backup_basename="$(basename "$path_archive")"
+  if docker run --rm -i -v "${volume_name}:${DATA_MOUNT_PATH}" -v "${restore_dir}:/backup:ro" alpine \
+    sh -ec 'read -r b; tar xzf "/backup/$b" -C "'"$DATA_MOUNT_PATH"'"' <<< "$backup_basename"; then
+    if [[ -n "$did_stop" && -n "$running_container" ]]; then
+      if _ui_yesno "Restore Complete" "Restore completed successfully.\n\nStart backend now?" 7 54 "Start" "Later"; then
+        _ui_loading "Restore Complete" "Starting backend: $running_container" 1
+        if docker start "$running_container" &>/dev/null; then
+          _ui_msg "Restore Complete" "Backend started successfully.\n\nContainer: $running_container" 7 62
+        else
+          _ui_msg "Restore Complete" "Restore completed, but failed to start backend.\n\nContainer: $running_container\nRun manually:\ndocker start $running_container" 10 72
+        fi
+      fi
+    else
+      _ui_msg "Restore Complete" "Restore completed successfully." 5 44
+    fi
+  else
+    if [[ -n "$did_stop" && -n "$running_container" ]]; then
+      _ui_msg "Restore Failed" "Restore failed.\n\nYou can start backend manually:\ndocker start $running_container" 8 70
+    else
+      _ui_msg "Restore Failed" "Restore failed." 5 40
+    fi
+  fi
+}
+
+# ---------------------------------------------------------------------------
+#  Volume: list contents
+# ---------------------------------------------------------------------------
+_volume_list() {
+  local volume_name choice data_out files_out
+
+  if ! _ensure_backend; then
+    return
+  fi
+
+  volume_name="$VOLUME_NAME"
+  _ui_loading "Volume Contents" "Reading volume directories..." 1
+  if ! data_out=$(docker run --rm -v "${volume_name}:${DATA_MOUNT_PATH}" alpine sh -ec "ls -la '$DATA_MOUNT_PATH'" 2>&1); then
+    _ui_scroll_msg "Volume Contents" "$data_out" 16 88
+    return
+  fi
+  files_out=$(docker run --rm -v "${volume_name}:${DATA_MOUNT_PATH}" alpine sh -ec "ls -la '$DATA_MOUNT_PATH/files' 2>/dev/null || echo '(none or missing files directory)'" 2>&1)
+
+  while true; do
+    if ! choice=$(_ui_menu "Volume Contents" "Volume: $volume_name\nSelect a section to view." 12 72 5 \
+      "data" "/data" \
+      "files" "/data/files (.qgif)" \
+      "back" "Back"); then
+      return
+    fi
+    [[ -z "$choice" || "$choice" == "back" ]] && return
+    case "$choice" in
+      data) _ui_scroll_msg "Volume Contents: /data" "$data_out" 22 90 ;;
+      files) _ui_scroll_msg "Volume Contents: /data/files" "$files_out" 22 90 ;;
+    esac
+  done
+}
+
+# ---------------------------------------------------------------------------
+#  Volume: open shell in temporary container with volume mounted
+# ---------------------------------------------------------------------------
+_volume_shell() {
+  local volume_name
+
+  if ! _ensure_backend; then
+    return
+  fi
+
+  volume_name="$VOLUME_NAME"
+  _ui_msg "Volume Shell" "Opening interactive shell.\n\nVolume is mounted at $DATA_MOUNT_PATH\nType 'exit' to return to qbit-ctl." 8 70
+
+  clear
+  local docker_tty
+  [[ -t 0 && -t 1 ]] && docker_tty="-it" || docker_tty="-i"
+  if ! docker run --rm $docker_tty -v "${volume_name}:${DATA_MOUNT_PATH}" alpine sh; then
+    _ui_msg "Volume Shell" "Shell exited with an error." 5 44
+  fi
+}
+
+# ---------------------------------------------------------------------------
+#  Volume: delete a backup file (local file only)
+# ---------------------------------------------------------------------------
+_volume_delete_backup() {
+  local backup_dir selected_archive
+  local selected_dir err_file rm_err dir_perm owner_info
+  local selected_size selected_mtime selected_base
+  local host_rc msg
+
+  backup_dir="$(_backup_dir)"
+  if ! _ensure_dir "$backup_dir" "Delete Backup"; then
+    return
+  fi
+  if ! _pick_backup_archive "$backup_dir" "Delete Backup File" "Select archive to permanently delete from disk."; then
+    return
+  fi
+  selected_archive="${PICKED_BACKUP_PATH:-}"
+  selected_archive="${selected_archive//$'\r'/}"
+  [[ -z "$selected_archive" ]] && return
+
+  if [[ ! -f "$selected_archive" ]]; then
+    _ui_msg "Delete Backup" "File not found:\n$selected_archive" 6 64
+    return
+  fi
+  selected_base="$(basename "$selected_archive")"
+  selected_size="$(_format_bytes "$(stat -c '%s' "$selected_archive" 2>/dev/null || echo "")")"
+  selected_mtime="$(stat -c '%y' "$selected_archive" 2>/dev/null | cut -d'.' -f1)"
+
+  if ! _ui_yesno "Confirm Delete" "Delete this backup file?\n\nRow: ${PICKED_BACKUP_ROW:-?}\nName: $selected_base\nSize: $selected_size\nModified: ${selected_mtime:-unknown}\n\nFull path:\n$selected_archive" 16 96 "Delete" "Cancel"; then
+    return
+  fi
+
+  _ui_loading "Delete Backup" "Deleting selected backup file..." 1
+  host_rc=0
+  err_file="$(mktemp)"
+
+  if ! rm -f -- "$selected_archive" 2>"$err_file"; then
+    host_rc=$?
+  fi
+  rm_err="$(cat "$err_file" 2>/dev/null || true)"
+  rm -f "$err_file"
+
+  if [[ ! -e "$selected_archive" ]]; then
+    _ui_msg "Delete Backup" "Delete result: success\n\nName: $selected_base\nRow: ${PICKED_BACKUP_ROW:-?}" 9 78
+    return
+  fi
+
+  if [[ "$host_rc" -eq 0 && -z "$rm_err" ]]; then
+    rm_err="host rm returned 0 but file still exists"
+  fi
+  selected_dir="$(dirname "$selected_archive")"
+  dir_perm="$(stat -c '%A %a' "$selected_dir" 2>/dev/null || echo '?')"
+  owner_info="$(stat -c '%U:%G' "$selected_archive" 2>/dev/null || echo '?')"
+  printf -v msg 'Delete result: failed\n\nName: %s\nRow: %s\nFile: %s\nOwner: %s\nDir perm: %s\nHost rm rc: %s\nExists after delete: yes\n\nHost rm error:\n%s' \
+    "$selected_base" "${PICKED_BACKUP_ROW:-?}" "$selected_archive" "$owner_info" "$dir_perm" "$host_rc" "${rm_err:-unknown error}"
+  _ui_scroll_msg "Delete Backup Failed" "$msg" 18 92
+}
+
+
+# ---------------------------------------------------------------------------
+#  DB: run sqlite3 (one-off container with volume mount)
+# ---------------------------------------------------------------------------
+_run_sqlite_script() {
+  local sql_file="$1"
+
+  docker run --rm -v "${VOLUME_NAME}:${DATA_MOUNT_PATH}" -v "${sql_file}:/q.sql:ro" alpine \
+    sh -ec "
+      if ! command -v sqlite3 >/dev/null 2>&1; then
+        apk add --no-cache sqlite >/dev/null 2>&1 || {
+          echo 'ERROR: Unable to install sqlite3 in helper container.'
+          echo 'Check network access for apk, or use an image with sqlite preinstalled.'
+          exit 1
+        }
+      fi
+      sqlite3 '${DB_PATH_IN_CONTAINER}' < /q.sql
+    " 2>&1
+}
+
+_db_exec() {
+  local sql="$1"
+  local tmp out status
+
+  tmp=$(mktemp)
+  printf '%s\n' "$sql" > "$tmp"
+
+  if out=$(_run_sqlite_script "$tmp"); then
+    status=0
+  else
+    status=$?
+  fi
+
+  rm -f "$tmp"
+  printf '%s' "$out"
+  return "$status"
+}
+
+# Display width for terminal: ASCII=1, other (e.g. CJK)=2.
+_cell_display_width() {
+  local s="$1" i=0 n=0 c codepoint
+  for (( i = 0; i < ${#s}; i++ )); do
+    c="${s:$i:1}"
+    codepoint=$(printf '%d' "'$c" 2>/dev/null)
+    [[ "${codepoint:-0}" -gt 127 ]] && n=$((n + 2)) || n=$((n + 1))
+  done
+  echo "$n"
+}
+
+# Pad or truncate cell to target display width (for column alignment with CJK).
+_pad_cell() {
+  local s="$1" target="${2:-16}" width i
+  s="${s//$'\n'/ }"
+  width=$(_cell_display_width "$s")
+
+  if [[ "$width" -gt "$target" ]]; then
+    while [[ "$width" -gt "$target" && ${#s} -gt 0 ]]; do
+      s="${s:0:-1}"
+      width=$(_cell_display_width "$s")
+    done
+    printf '%s' "$s"
+    return
+  fi
+
+  printf '%s' "$s"
+  for (( i = width; i < target; i++ )); do
+    printf ' '
+  done
+}
+
+# Run SQL with column-aligned output (tab mode + display-width truncate/pad, one line per row).
+_db_exec_column() {
+  local sql="$1"
+  local widths="${2:-20 24 22 24}"
+  local tmp raw line parts i j w
+  local -a width_arr
+
+  tmp=$(mktemp)
+  {
+    echo ".mode tab"
+    echo ".headers on"
+    echo "$sql"
+  } > "$tmp"
+
+  if ! raw=$(_run_sqlite_script "$tmp"); then
+    rm -f "$tmp"
+    printf '%s' "$raw"
+    return 1
+  fi
+  rm -f "$tmp"
+
+  for w in $widths; do
+    width_arr+=("$w")
+  done
+
+  local first=1
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    IFS=$'\t' read -r -a parts <<< "$line"
+
+    local out=""
+    for (( i = 0; i < ${#parts[@]}; i++ )); do
+      w=${width_arr[$i]:-16}
+      out+="$(_pad_cell "${parts[$i]}" "$w")"
+      [[ $i -lt $(( ${#parts[@]} - 1 )) ]] && out+=" "
+    done
+    printf '%s\n' "$out"
+
+    if [[ "$first" -eq 1 ]]; then
+      local sep=""
+      for (( i = 0; i < ${#parts[@]}; i++ )); do
+        w=${width_arr[$i]:-16}
+        for (( j = 0; j < w; j++ )); do
+          sep+="-"
+        done
+        [[ $i -lt $(( ${#parts[@]} - 1 )) ]] && sep+=" "
+      done
+      printf '%s\n' "$sep"
+      first=0
+    fi
+  done <<< "$raw"
+}
+
+# Escape single quote for SQL ('' in SQLite)
+_sql_escape() {
+  sed "s/'/''/g" <<< "$1"
+}
+
+# ---------------------------------------------------------------------------
+#  DB: view (predefined queries only)
+# ---------------------------------------------------------------------------
+_db_view_menu() {
+  local choice sql out col_widths query_title
+
+  while true; do
+    if ! choice=$(_ui_menu "DB Viewer" "Choose a read-only query:" 16 62 9 \
+      "users" "Users (latest lastSeen first)" \
+      "claims" "Device claims" \
+      "library" "Library items" \
+      "friends" "Friend pairs" \
+      "bans" "Bans" \
+      "sessions" "Active session count" \
+      "back" "Back"); then
+      return
+    fi
+
+    [[ -z "$choice" || "$choice" == "back" ]] && return
+
+    case "$choice" in
+      users)
+        query_title="Users"
+        sql="SELECT substr(userId,1,12) AS userId, substr(displayName,1,18) AS displayName, substr(email,1,28) AS email, substr(lastSeen,1,19) AS lastSeen FROM users ORDER BY lastSeen DESC;"
+        col_widths="12 18 28 19"
+        ;;
+      claims)
+        query_title="Claims"
+        sql="SELECT substr(deviceId,1,12) AS deviceId, substr(userId,1,12) AS userId, substr(userName,1,18) AS userName, substr(claimedAt,1,19) AS claimedAt FROM claims;"
+        col_widths="12 12 18 19"
+        ;;
+      library)
+        query_title="Library"
+        sql="SELECT substr(id,1,12) AS id, substr(filename,1,24) AS filename, substr(uploaderId,1,12) AS uploaderId, size, frameCount, substr(uploadedAt,1,19) AS uploadedAt FROM library ORDER BY uploadedAt DESC;"
+        col_widths="12 24 12 7 6 19"
+        ;;
+      friends)
+        query_title="Friends"
+        sql="SELECT substr(userId,1,12) AS userId, substr(friendId,1,12) AS friendId FROM friends ORDER BY userId;"
+        col_widths="12 12"
+        ;;
+      bans)
+        query_title="Bans"
+        sql="SELECT substr(type,1,10) AS type, substr(value,1,58) AS value FROM bans;"
+        col_widths="10 58"
+        ;;
+      sessions)
+        query_title="Active Sessions"
+        sql="SELECT COUNT(*) AS session_count FROM sessions WHERE expired > $(date +%s)000;"
+        col_widths=""
+        ;;
+      *)
+        continue
+        ;;
+    esac
+
+    _ui_loading "DB Viewer" "Running query: $query_title" 1
+    if [[ -n "$col_widths" ]]; then
+      if ! out=$(_db_exec_column "$sql" "$col_widths"); then
+        _ui_scroll_msg "Query Failed" "$out" 16 86
+        continue
+      fi
+    else
+      if ! out=$(_db_exec "$sql"); then
+        _ui_scroll_msg "Query Failed" "$out" 16 86
+        continue
+      fi
+    fi
+
+    [[ -z "$out" ]] && out="(no rows)"
+    [[ "$out" != "(no rows)" ]] && out="[Preview mode: long values are trimmed for readability]\n\n$out"
+    _ui_scroll_msg "Query Result: $query_title" "$out" 22 90
+  done
+}
+
+# ---------------------------------------------------------------------------
+#  Library: list and multi-delete (DB + files). Backend cache refreshes on restart.
+# ---------------------------------------------------------------------------
+_library_list() {
+  local raw line choice idx
+  local id fname uploader uploaded_at size frame_count download_count short_id
+  local header_cols
+  local -a menu_items=() row_lines=()
+
+  if ! _ensure_backend; then
+    return
+  fi
+
+  _ui_loading "Library Items" "Loading library list..." 1
+
+  if ! raw=$(_db_exec "SELECT id, filename, uploader, uploadedAt, size, frameCount, downloadCount FROM library ORDER BY uploadedAt DESC;"); then
+    _ui_scroll_msg "Library Items" "$raw" 16 88
+    return
+  fi
+
+  [[ -z "$raw" ]] && {
+    _ui_msg "Library Items" "No library items found." 5 44
+    return
+  }
+
+  idx=0
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    IFS='|' read -r id fname uploader uploaded_at size frame_count download_count <<< "$line"
+    [[ -z "$id" ]] && continue
+
+    idx=$((idx + 1))
+    row_lines+=("$line")
+    short_id="${id:0:10}"
+    menu_items+=(
+      "$idx"
+      "$(printf '%-10s %-24s %-14s %8s %6s %6s' \
+        "$short_id" "${fname:0:24}" "${uploader:0:14}" "${size:-0}" "${frame_count:-0}" "${download_count:-0}")"
+    )
+  done <<< "$raw"
+
+  [[ $idx -eq 0 ]] && {
+    _ui_msg "Library Items" "No library items found." 5 44
+    return
+  }
+
+  header_cols="$(printf '%-10s %-24s %-14s %8s %6s %6s' 'ID' 'Filename' 'Uploader' 'Size' 'Frm' 'D/L')"
+  menu_items=("0" "$header_cols" "${menu_items[@]}")
+
+  while true; do
+    if ! choice=$(_ui_menu "Library Items" "Total: $idx | 0 = column header | Enter = details" 22 110 14 \
+      "${menu_items[@]}" \
+      "back" "Back"); then
+      return
+    fi
+
+    [[ -z "$choice" || "$choice" == "back" ]] && return
+    [[ "$choice" =~ ^[0-9]+$ ]] || continue
+    [[ "$choice" == "0" ]] && continue
+    (( choice >= 1 && choice <= ${#row_lines[@]} )) || continue
+
+    line="${row_lines[$((choice - 1))]}"
+    IFS='|' read -r id fname uploader uploaded_at size frame_count download_count <<< "$line"
+
+    _ui_scroll_msg "Library Item Detail" "ID: $id\nFilename: $fname\nUploader: $uploader\nUploaded At: $uploaded_at\nSize: ${size:-0}\nFrame Count: ${frame_count:-0}\nDownload Count: ${download_count:-0}" 14 86
+  done
+}
+
+_library_delete_multi() {
+  local raw selected line id fname uploader size frame_count
+  local list_h box_h idx token n escaped_id sql db_out tmp_ids
+  local -a checklist=() id_map=() to_delete=()
+
+  if ! _ensure_backend; then
+    return
+  fi
+
+  _ui_loading "Library Delete" "Loading deletable library items..." 1
+  if ! raw=$(_db_exec "SELECT id, filename, uploader, size, frameCount FROM library ORDER BY uploadedAt DESC;"); then
+    _ui_scroll_msg "Library Delete" "$raw" 14 86
+    return
+  fi
+
+  [[ -z "$raw" ]] && { _ui_msg "Library Delete" "No library items found." 5 44; return; }
+
+  checklist+=("0" "$(printf '%-28s %-16s %8s %6s' 'Filename' 'Uploader' 'Size' 'Frames')" "off")
+  idx=0
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    IFS='|' read -r id fname uploader size frame_count <<< "$line"
+    [[ -z "$id" ]] && continue
+
+    idx=$((idx + 1))
+    id_map+=("$id")
+    checklist+=("$idx" "$(printf '%-28s %-16s %8s %6s' "${fname:0:28}" "${uploader:0:16}" "${size:-0}" "${frame_count:-0}")" "off")
+  done <<< "$raw"
+
+  [[ $idx -eq 0 ]] && { _ui_msg "Library Delete" "No library items found." 5 44; return; }
+
+  list_h=$((idx + 1))
+  [[ $list_h -gt 14 ]] && list_h=14
+  [[ $list_h -lt 6 ]] && list_h=6
+  box_h=$((list_h + 6))
+
+  if ! selected=$(_ui_checklist "Delete Library Items" "Select items to delete (DB row + .qgif file)." "$box_h" 80 "$list_h" "${checklist[@]}"); then
+    return
+  fi
+  [[ -z "$selected" ]] && return
+
+  for token in $selected; do
+    token="${token//\"/}"
+    [[ "$token" =~ ^[0-9]+$ ]] || continue
+    if (( token >= 1 && token <= ${#id_map[@]} )); then
+      id="${id_map[$((token - 1))]}"
+      if [[ " ${to_delete[*]-} " != *" $id "* ]]; then
+        to_delete+=("$id")
+      fi
+    fi
+  done
+
+  n=${#to_delete[@]}
+  if [[ "$n" -eq 0 ]]; then
+    _ui_msg "Delete Library Items" "No valid item selected." 5 40
+    return
+  fi
+
+  if ! _ui_yesno "Confirm Delete" "Delete $n item(s)?\n\nThis removes DB rows and /data/files/<id>.qgif.\nRestart backend afterwards to refresh web cache." 10 70 "Delete" "Cancel"; then
+    return
+  fi
+
+  sql="BEGIN;"
+  for id in "${to_delete[@]}"; do
+    escaped_id=$(_sql_escape "$id")
+    sql+="DELETE FROM library_stars WHERE libraryId = '$escaped_id';"
+    sql+="DELETE FROM library WHERE id = '$escaped_id';"
+  done
+  sql+="COMMIT;"
+
+  _ui_loading "Library Delete" "Deleting DB rows for $n item(s)..." 1
+  if ! db_out=$(_db_exec "$sql"); then
+    _ui_scroll_msg "Delete Failed" "$db_out" 14 86
+    return
+  fi
+
+  _ui_loading "Library Delete" "Deleting matching .qgif files..." 1
+  tmp_ids=$(mktemp)
+  printf '%s\n' "${to_delete[@]}" > "$tmp_ids"
+  docker run --rm -v "${VOLUME_NAME}:${DATA_MOUNT_PATH}" -v "${tmp_ids}:/ids.txt:ro" alpine \
+    sh -ec "
+      while IFS= read -r id; do
+        [ -z \"\$id\" ] && continue
+        case \"\$id\" in
+          *[!A-Za-z0-9._-]*) continue ;;
+        esac
+        rm -f '${DATA_MOUNT_PATH}/files/'\"\$id\"'.qgif'
+      done < /ids.txt
+    " >/dev/null 2>&1 || true
+  rm -f "$tmp_ids"
+
+  _ui_msg "Delete Complete" "$n item(s) removed from DB and matching .qgif files." 6 68
+
+  if [[ -n "${BACKEND_CONTAINER:-}" ]]; then
+    if _ui_yesno "Restart Backend" "Web library data is cached in memory.\n\nRestart backend now to refresh the website list?" 8 62 "Restart" "Later"; then
+      _ui_loading "Restart Backend" "Restarting backend: $BACKEND_CONTAINER" 1
+      if docker restart "$BACKEND_CONTAINER" &>/dev/null; then
+        _ui_msg "Restart Backend" "Success: backend restarted.\n\nContainer: $BACKEND_CONTAINER" 7 62
+      else
+        _ui_msg "Restart Backend" "Failed to restart backend.\n\nContainer: $BACKEND_CONTAINER\nRun manually:\ndocker restart $BACKEND_CONTAINER" 10 72
+      fi
+    fi
+  fi
+}
+
+_library_menu() {
+  local choice
+
+  while true; do
+    if ! _ensure_backend; then
+      return
+    fi
+
+    if ! choice=$(_ui_menu "Library Tools" "Manage DB records and /data/files/*.qgif" 12 70 5 \
+      "list" "List library items" \
+      "delete" "Delete multiple items" \
+      "back" "Back"); then
+      return
+    fi
+
+    [[ -z "$choice" || "$choice" == "back" ]] && return
+
+    case "$choice" in
+      list) _library_list ;;
+      delete) _library_delete_multi ;;
+    esac
+  done
+}
+
+# ---------------------------------------------------------------------------
+#  Main menus
+# ---------------------------------------------------------------------------
+_volume_menu() {
+  local choice
+
+  while true; do
+    if ! choice=$(_ui_menu "Volume Tools" "Volume: ${VOLUME_NAME:-unknown}" 14 68 8 \
+      "backup" "Create tar.gz backup" \
+      "restore" "Restore backup (overwrite current data)" \
+      "list" "List volume contents" \
+      "shell" "Open shell with volume mounted" \
+      "delete_backup" "Delete backup file from disk" \
+      "back" "Back"); then
+      return
+    fi
+
+    [[ -z "$choice" || "$choice" == "back" ]] && return
+
+    case "$choice" in
+      backup) _volume_backup ;;
+      restore) _volume_restore ;;
+      list) _volume_list ;;
+      shell) _volume_shell ;;
+      delete_backup) _volume_delete_backup ;;
+    esac
+  done
+}
+
+_main_menu() {
+  local choice status_line
+
+  while true; do
+    if _ensure_backend silent; then
+      if [[ -n "${BACKEND_CONTAINER:-}" ]]; then
+        status_line="Volume: $VOLUME_NAME | Backend: $BACKEND_CONTAINER"
+      else
+        status_line="Volume: $VOLUME_NAME | Backend: stopped"
+      fi
+    else
+      status_line="Volume: not found"
+    fi
+
+    if ! choice=$(_ui_menu "Main Menu" "$status_line" 14 70 6 \
+      "volume" "Backup / Restore / Inspect volume" \
+      "db" "View DB (read-only queries)" \
+      "library" "List / Delete library items" \
+      "quit" "Quit"); then
+      choice="quit"
+    fi
+
+    [[ -z "$choice" ]] && choice="quit"
+
+    case "$choice" in
+      volume) _ensure_backend && _volume_menu ;;
+      db) _ensure_backend && _db_view_menu ;;
+      library) _library_menu ;;
+      quit)
+        clear
+        exit 0
+        ;;
+    esac
+  done
+}
+
+# ---------------------------------------------------------------------------
+#  Entry
+# ---------------------------------------------------------------------------
+main() {
+  export BACKEND_CONTAINER VOLUME_NAME PICKED_BACKUP_ROW PICKED_BACKUP_PATH
+  PICKED_BACKUP_ROW=""
+  PICKED_BACKUP_PATH=""
+  _main_menu
+}
+
+main "$@"
