@@ -74,6 +74,46 @@
   </div>
 
   <div class="card collapsible collapsed">
+    <div class="card-title">Web Cam</div>
+    <div class="cam-preview-wrap">
+      <button class="cam-nav cam-nav-left" id="btnCamModePrev" type="button" aria-label="Previous mode" disabled>&lsaquo;</button>
+      <canvas id="camPreviewCanvas" width="256" height="128" class="cam-preview"></canvas>
+      <button class="cam-nav cam-nav-right" id="btnCamModeNext" type="button" aria-label="Next mode" disabled>&rsaquo;</button>
+
+      <button class="cam-overlay-btn" id="btnCamOverlay" type="button" aria-label="Start/stop stream">
+        <span class="cam-overlay-icon" aria-hidden="true"></span>
+      </button>
+
+      <div class="cam-mode-watermark" id="camModeLabel">Bayer (ordered)</div>
+    </div>
+
+    <div class="setting cam-param" id="camParamCutoff" style="display:none">
+      <label class="setting-label">Cutoff</label>
+      <input type="range" id="camCutoff" class="slider" min="0" max="255" value="128" disabled>
+      <span class="setting-val" id="camCutoffVal">128</span>
+    </div>
+
+    <div class="setting cam-param" id="camParamBayer" style="display:none">
+      <label class="setting-label">Bayer</label>
+      <select id="camBayerSize" class="input-select" disabled style="max-width:110px;flex:none">
+        <option value="4">4×4</option>
+        <option value="8" selected>8×8</option>
+      </select>
+      <span class="setting-label" style="width:auto;flex:none;opacity:.9">Strength</span>
+      <input type="range" id="camBayerStrength" class="slider" min="0" max="255" value="96" disabled>
+      <span class="setting-val" id="camBayerStrengthVal">96</span>
+    </div>
+
+    <div class="setting cam-param" id="camParamNoise" style="display:none">
+      <label class="setting-label">Noise</label>
+      <input type="range" id="camNoise" class="slider" min="0" max="128" value="24" disabled>
+      <span class="setting-val" id="camNoiseVal">24</span>
+    </div>
+
+    <div class="msg" id="camMsg"></div>
+  </div>
+
+  <div class="card collapsible collapsed">
     <div class="card-title">MQTT</div>
     <div class="setting">
       <label class="setting-label">Enabled</label>
@@ -182,7 +222,6 @@
     <div class="msg" id="pinMsg"></div>
     <button class="btn btn-save" id="btnPinSave">Save Pins</button>
   </div>
-
 
   <script src="/jszip.min.js"></script>
   <script src="/script.js"></script>

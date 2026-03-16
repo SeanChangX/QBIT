@@ -89,8 +89,9 @@ Long press to open; tap to scroll, long press to enter. Double-tap at top level 
 ROOT
 ├── TIMER          (countdown: set H/M/S, start; alarm on expiry, tap dismiss / long-press back)
 ├── GAMES
-│   ├── T-Rex Runner
-│   └── Flappy Bird
+│   ├── T-Rex Runner   (Chrome dino game)
+│   ├── Flappy Bird    (tap-to-fly through pipes)
+│   └── Car Avoidance  (lane-dodge driving game)
 └── SETTING
     ├── QBIT Sound   (buzzer on/off)
     ├── GIF Invert   (invert animation colours)
@@ -169,13 +170,15 @@ Once connected to Wi-Fi, the QBIT hosts a local web dashboard accessible at `htt
 
 <table style="table-layout: fixed; width: 100%;">
 <tr>
-<td width="33%" align="center" valign="middle"><img src="docs/images/QBIT_Dashboard_01.png" alt="Dashboard" width="100%" style="max-width: 280px; display: block; margin: 0 auto;"></td>
-<td width="33%" align="center" valign="middle"><img src="docs/images/QBIT_Dashboard_02.png" alt="Files" width="100%" style="max-width: 280px; display: block; margin: 0 auto;"></td>
-<td width="33%" align="center" valign="middle"><img src="docs/images/QBIT_Dashboard_03.png" alt="Settings" width="100%" style="max-width: 280px; display: block; margin: 0 auto;"></td>
+<td width="25%" align="center" valign="middle"><img src="docs/images/QBIT_Dashboard_01.png" alt="Dashboard" width="100%" style="max-width: 280px; display: block; margin: 0 auto;"></td>
+<td width="25%" align="center" valign="middle"><img src="docs/images/QBIT_Dashboard_02.png" alt="Files" width="100%" style="max-width: 280px; display: block; margin: 0 auto;"></td>
+<td width="25%" align="center" valign="middle"><img src="docs/images/QBIT_Dashboard_WebCam.png" alt="Web Cam" width="100%" style="max-width: 280px; display: block; margin: 0 auto;"></td>
+<td width="25%" align="center" valign="middle"><img src="docs/images/QBIT_Dashboard_03.png" alt="Settings" width="100%" style="max-width: 280px; display: block; margin: 0 auto;"></td>
 </tr>
 <tr>
 <td align="center"><strong>Dashboard</strong><br>Storage, upload, device</td>
 <td align="center"><strong>Files</strong><br>Manage .qgif animations</td>
+<td align="center"><strong>Web Cam</strong><br>Stream camera to OLED</td>
 <td align="center"><strong>Settings</strong><br>MQTT, timezone, GPIO</td>
 </tr>
 </table>
@@ -186,6 +189,7 @@ From the dashboard you can:
 - Adjust display brightness, buzzer volume, and animation playback speed
 - Upload and manage .qgif animation files
 - Configure a local MQTT broker connection for home automation (see [MQTT & Home Assistant](#mqtt--home-assistant))
+- Stream your device camera to the OLED in real time via Web Cam (single client at a time; supports multiple dithering modes)
 
 ---
 

@@ -99,6 +99,25 @@ void setup() {
 
     // 9. Web dashboard + server
     webDashboardInit(server);
+    // Wire cam WebSocket connect/disconnect → display task state machine
+    webCamSetCallbacks(
+        []() {
+            NetworkEvent evt = {};
+            evt.kind = NetworkEvent::CAM_START;
+            BaseType_t ok = xQueueSend(networkEventQueue, &evt, pdMS_TO_TICKS(10));
+            if (ok != pdPASS) {
+                Serial.println("WARN: failed to enqueue CAM_START");
+            }
+        },
+        []() {
+            NetworkEvent evt = {};
+            evt.kind = NetworkEvent::CAM_STOP;
+            BaseType_t ok = xQueueSend(networkEventQueue, &evt, pdMS_TO_TICKS(10));
+            if (ok != pdPASS) {
+                Serial.println("WARN: failed to enqueue CAM_STOP");
+            }
+        }
+    );
     server.begin();
 
     Serial.println("Web server started");

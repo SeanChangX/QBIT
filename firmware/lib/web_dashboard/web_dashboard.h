@@ -64,4 +64,27 @@ extern void    setTimezoneIANA(const String &tz);
 // Time manager -- implemented by time_manager.cpp.
 extern void timeManagerSetTimezone(const String &ianaTz);
 
+// ==========================================================================
+//  Web Cam streaming over WebSocket (/ws_cam)
+// ==========================================================================
+//
+//  The browser captures the camera, converts each frame to a 1024-byte
+//  packed monochrome bitmap (QGIF format: bit 0 = lit pixel, bit 1 = dark),
+//  and sends it as a binary WebSocket message to /ws_cam.
+//
+//  Register callbacks to be notified when the first client connects (onStart)
+//  or the last client disconnects (onStop).  Call before server.begin().
+void webCamSetCallbacks(void (*onStart)(), void (*onStop)());
+
+// Returns true if a new cam frame (1024 bytes, QGIF format) is available.
+bool webCamHasNewFrame();
+
+// Copy the latest cam frame into dst (must be >= 1024 bytes).
+// Clears the new-frame flag after copying.
+void webCamConsumeFrame(uint8_t *dst);
+
+// Close all connected cam WebSocket clients (e.g. called from display task
+// when the user taps the device to exit cam view).
+void webCamDisconnectAll();
+
 #endif // WEB_DASHBOARD_H
