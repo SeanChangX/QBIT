@@ -15,6 +15,7 @@ enum class GameMenuAction {
     Scroll,         // cursor moved (caller redraws)
     Launch0,        // launch game index 0 (T-Rex Runner)
     Launch1,        // launch game index 1 (Flappy Bird)
+    Launch2,        // launch game index 2 (Car Avoidance)
     OpenContribute, // open "contribute" hint (fake "More games" item)
     Back            // return to settings
 };
