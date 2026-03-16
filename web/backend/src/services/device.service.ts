@@ -2,6 +2,7 @@
 //  Device service -- WebSocket server, device state, heartbeat
 // ---------------------------------------------------------------------------
 
+import crypto from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import { Server as HttpServer } from 'http';
@@ -56,6 +57,7 @@ export function getDeviceList() {
     const claim = claimService.getClaimByDevice(d.id);
     return {
       id: d.id,
+      pokeToken: d.pokeToken,
       name: d.name,
       ip: d.ip,
       publicIp: d.publicIp,
@@ -155,6 +157,13 @@ export function getDeviceCount(): number {
 
 export function getDevicesRaw(): Map<string, DeviceState> {
   return devices;
+}
+
+export function getDeviceByPokeToken(token: string): DeviceState | undefined {
+  for (const dev of devices.values()) {
+    if (dev.pokeToken === token) return dev;
+  }
+  return undefined;
 }
 
 export function disconnectDevice(deviceId: string): void {
@@ -361,6 +370,7 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
             version,
             ws,
             connectedAt,
+            pokeToken: existing?.pokeToken ?? crypto.randomBytes(12).toString('hex'),
           });
           const lastSeen = connectedAt.toISOString();
           stmtRecordUpsert.run(msg.id, name, ip, publicIp, version, lastSeen, 'online');

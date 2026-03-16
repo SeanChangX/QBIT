@@ -105,8 +105,11 @@ function fmt(b) {
 
   btnMqttSave.addEventListener('click', function () {
     btnMqttSave.disabled = true;
-    var params = 'host=' + encodeURIComponent(mqttHost.value)
-               + '&port=' + encodeURIComponent(mqttPort.value)
+    var host = String(mqttHost.value).trim();
+    var portNum = parseInt(mqttPort.value, 10);
+    if (isNaN(portNum) || portNum < 1 || portNum > 65535) portNum = 1883;
+    var params = 'host=' + encodeURIComponent(host)
+               + '&port=' + String(portNum)
                + '&user=' + encodeURIComponent(mqttUser.value)
                + '&pass=' + encodeURIComponent(mqttPass.value)
                + '&prefix=' + encodeURIComponent(mqttPrefix.value)

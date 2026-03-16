@@ -13,7 +13,7 @@ enum TouchState {
     TOUCH_WAIT_SECOND_TAP
 };
 
-#define LONG_PRESS_MS      1500
+#define LONG_PRESS_MS      900
 #define DOUBLE_TAP_WINDOW  300
 #define POLL_INTERVAL_MS   10
 

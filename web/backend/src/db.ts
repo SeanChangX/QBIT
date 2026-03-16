@@ -92,6 +92,14 @@ try {
   // Column already exists
 }
 
+// Migration: add contentHash for duplicate detection (same content = same file, any user).
+// Index on contentHash is maintained only in library.service.ts (single UNIQUE index).
+try {
+  db.exec('ALTER TABLE library ADD COLUMN contentHash TEXT');
+} catch {
+  // Column already exists
+}
+
 // Reports (user-reported accounts for admin review)
 db.exec(`
   CREATE TABLE IF NOT EXISTS reports (

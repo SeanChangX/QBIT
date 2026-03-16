@@ -21,6 +21,7 @@ export interface DeviceState {
   version: string;
   ws: WebSocket;
   connectedAt: Date;
+  pokeToken: string;
 }
 
 // ---- Claims ----
@@ -96,3 +97,6 @@ export interface LibraryItem {
   starCount?: number;
   starredByMe?: boolean;
 }
+
+/** API response shape: uploaderId replaced by uploaderPublicId, no internal fields */
+export type LibraryItemResponse = Omit<LibraryItem, 'uploaderId'> & { uploaderPublicId: string };

@@ -4,6 +4,7 @@ import type { Device, User, OnlineUser } from '../types';
 interface Props {
   device: Device;
   user: User | null;
+  /** targetId is an opaque poke token from backend, not the claim/friend device id. */
   onPoke: (targetId: string, text: string, bitmapData?: BitmapPayload) => void;
   onClaim: (device: Device) => void;
   onUnclaim: (device: Device) => void;
@@ -169,9 +170,9 @@ export default function PokeDialog({
       textBitmapWidth: textResult.width,
     };
 
-    await onPoke(device.id, msg.trim(), bitmapData);
+    await onPoke(device.pokeToken, msg.trim(), bitmapData);
     setSending(false);
-  }, [sending, user, device.id, onPoke]);
+  }, [sending, user, device.pokeToken, onPoke]);
 
   return (
     <div className="poke-overlay" onPointerDown={handleOverlayPointerDown} onClick={handleOverlayClick}>

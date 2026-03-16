@@ -430,14 +430,17 @@ static void handleGetMqtt(AsyncWebServerRequest *request) {
 
 static void handlePostMqtt(AsyncWebServerRequest *request) {
     String  host    = request->hasParam("host")   ? request->getParam("host")->value()   : getMqttHost();
-    uint16_t port   = request->hasParam("port")   ? request->getParam("port")->value().toInt() : getMqttPort();
+    int     portVal = request->hasParam("port")   ? request->getParam("port")->value().toInt() : (int)getMqttPort();
     String  user    = request->hasParam("user")   ? request->getParam("user")->value()   : getMqttUser();
     String  pass    = request->hasParam("pass")   ? request->getParam("pass")->value()   : getMqttPass();
     String  prefix  = request->hasParam("prefix") ? request->getParam("prefix")->value() : getMqttPrefix();
     bool    enabled = request->hasParam("enabled") ? (request->getParam("enabled")->value() == "1") : getMqttEnabled();
 
-    if (port == 0) port = 1883;
+    host.trim();
+    prefix.trim();
     if (prefix.length() == 0) prefix = "qbit";
+    if (portVal < 1 || portVal > 65535) portVal = 1883;
+    uint16_t port = (uint16_t)portVal;
 
     setMqttConfig(host, port, user, pass, prefix, enabled);
 

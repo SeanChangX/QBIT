@@ -81,7 +81,7 @@
     </div>
     <div class="setting">
       <label class="setting-label">Host</label>
-      <input type="text" id="mqttHost" class="input-text" placeholder="192.168.1.x">
+      <input type="text" id="mqttHost" class="input-text" placeholder="192.168.1.x" maxlength="127">
     </div>
     <div class="setting">
       <label class="setting-label">Port</label>
@@ -89,15 +89,15 @@
     </div>
     <div class="setting">
       <label class="setting-label">User</label>
-      <input type="text" id="mqttUser" class="input-text" placeholder="(optional)">
+      <input type="text" id="mqttUser" class="input-text" placeholder="(optional)" maxlength="128">
     </div>
     <div class="setting">
       <label class="setting-label">Password</label>
-      <input type="password" id="mqttPass" class="input-text" placeholder="(optional)">
+      <input type="password" id="mqttPass" class="input-text" placeholder="(optional)" maxlength="128">
     </div>
     <div class="setting">
       <label class="setting-label">Prefix</label>
-      <input type="text" id="mqttPrefix" class="input-text" value="qbit" placeholder="qbit">
+      <input type="text" id="mqttPrefix" class="input-text" value="qbit" placeholder="qbit" maxlength="64">
     </div>
     <div class="mqtt-hint">
       Topics: <code>&lt;prefix&gt;/&lt;id&gt;/status</code>, <code>.../info</code>, <code>.../command</code>

@@ -219,35 +219,52 @@ export default function LibraryPage({ user, apiUrl }: Props) {
 
     let successCount = 0;
     let failCount = 0;
+    let duplicateCount = 0;
+    const CONCURRENCY = 4;
 
-    for (const file of qgifFiles) {
+    const uploadOne = async (file: File): Promise<void> => {
       try {
         const fd = new FormData();
         fd.append('file', file);
-
         const res = await fetch(`${apiUrl}/api/library/upload`, {
           method: 'POST',
           credentials: 'include',
           body: fd,
         });
-
         if (res.ok) {
           successCount++;
         } else {
-          failCount++;
+          const data = await res.json().catch(() => ({}));
+          if (res.status === 409 && data.code === 'DUPLICATE_CONTENT') {
+            duplicateCount++;
+          } else {
+            failCount++;
+          }
         }
       } catch {
         failCount++;
       }
+    };
+
+    for (let i = 0; i < qgifFiles.length; i += CONCURRENCY) {
+      const chunk = qgifFiles.slice(i, i + CONCURRENCY);
+      await Promise.all(chunk.map(uploadOne));
     }
 
     await fetchItems();
 
-    if (failCount === 0) {
+    if (failCount === 0 && duplicateCount === 0) {
       setUploadMsg({ text: `Uploaded ${successCount} file${successCount > 1 ? 's' : ''}`, ok: true });
+    } else if (failCount === 0 && duplicateCount > 0) {
+      setUploadMsg({
+        text: successCount > 0
+          ? `Uploaded ${successCount}, ${duplicateCount} duplicate(s) skipped (same content already in library)`
+          : `All ${duplicateCount} file(s) already in library (same content)`,
+        ok: successCount > 0,
+      });
     } else {
       setUploadMsg({
-        text: `${successCount} uploaded, ${failCount} failed`,
+        text: `${successCount} uploaded, ${failCount} failed${duplicateCount > 0 ? `, ${duplicateCount} duplicate(s) skipped` : ''}`,
         ok: successCount > 0,
       });
     }

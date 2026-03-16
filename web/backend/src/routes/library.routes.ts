@@ -15,7 +15,7 @@ import { LIBRARY_RATE_LIMIT, MAX_QGIF_SIZE } from '../config';
 import * as libraryService from '../services/library.service';
 import { ensurePublicUserId } from '../services/publicUserId.service';
 import logger from '../logger';
-import type { AppUser } from '../types';
+import type { AppUser, LibraryItemResponse } from '../types';
 
 const router = Router();
 
@@ -42,15 +42,25 @@ const upload = multer({
   },
 });
 
-// GET /api/library -- list all items (query: sort=newest|stars|downloads, default stars); expose uploaderPublicId only
+// GET /api/library -- list all items (query: sort=newest|stars|downloads, default stars); whitelist DTO only
 router.get('/', (req, res) => {
   const sort = (req.query.sort as string) || 'stars';
   const validSort = ['newest', 'stars', 'downloads'].includes(sort) ? (sort as libraryService.LibrarySort) : 'stars';
   const userId = req.isAuthenticated() ? (req.user as AppUser).id : undefined;
   const items = libraryService.getAll(validSort, userId);
-  res.json(
-    items.map(({ uploaderId, ...rest }) => ({ ...rest, uploaderPublicId: ensurePublicUserId(uploaderId) }))
-  );
+  const payload: LibraryItemResponse[] = items.map((item) => ({
+    id: item.id,
+    filename: item.filename,
+    uploader: item.uploader,
+    uploadedAt: item.uploadedAt,
+    size: item.size,
+    frameCount: item.frameCount,
+    downloadCount: item.downloadCount,
+    starCount: item.starCount,
+    starredByMe: item.starredByMe,
+    uploaderPublicId: ensurePublicUserId(item.uploaderId),
+  }));
+  res.json(payload);
 });
 
 // POST /api/library/upload -- upload a .qgif file
@@ -89,9 +99,41 @@ router.post('/upload', requireNotBanned, (req, res) => {
     }
 
     const user = req.user as AppUser;
-    const item = libraryService.addItem(buf, req.file.originalname, user.displayName || 'Unknown', user.id, frameCount);
-    const { uploaderId, ...rest } = item;
-    res.json({ ...rest, uploaderPublicId: ensurePublicUserId(uploaderId) });
+    try {
+      const item = libraryService.addItem(
+        buf,
+        req.file.originalname,
+        user.displayName || 'Unknown',
+        user.id,
+        frameCount
+      );
+      const payload: LibraryItemResponse = {
+        id: item.id,
+        filename: item.filename,
+        uploader: item.uploader,
+        uploadedAt: item.uploadedAt,
+        size: item.size,
+        frameCount: item.frameCount,
+        downloadCount: item.downloadCount,
+        uploaderPublicId: ensurePublicUserId(item.uploaderId),
+      };
+      res.json(payload);
+    } catch (err) {
+      if (err instanceof libraryService.DuplicateContentError) {
+        return res.status(409).json({
+          error: 'This file is already in the library (same content)',
+          code: 'DUPLICATE_CONTENT',
+        });
+      }
+      if (err instanceof libraryService.LibraryUploadUnavailableError) {
+        return res.status(503).json({
+          error: 'Library upload temporarily unavailable',
+          code: 'SERVICE_UNAVAILABLE',
+        });
+      }
+      logger.error({ err }, 'Library upload failed');
+      return res.status(500).json({ error: 'Internal server error' });
+    }
   });
 });
 
