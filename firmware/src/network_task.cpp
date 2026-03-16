@@ -620,7 +620,15 @@ void networkTask(void *param) {
                 evt.connected = false;
                 xQueueSend(networkEventQueue, &evt, 0);
             }
+            NetWizardPortalState portalState = NW.getPortalState();
+            bool portalActive = (portalState != NetWizardPortalState::IDLE);
+
+            // Reconnect portal is only for devices that were already configured.
+            // During first-time provisioning, NetWizard may already be running a
+            // portal, and forcing startPortal() again can break /netwizard/save flow.
             if (!_portalRestartedForReconnect &&
+                NW.isConfigured() &&
+                !portalActive &&
                 (millis() - _wifiLostMs > WIFI_RECONNECT_TIMEOUT_MS)) {
                 _portalRestartedForReconnect = true;
                 _portalRetryAfterMs = millis() + PORTAL_RETRY_INTERVAL_MS;
