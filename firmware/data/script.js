@@ -435,9 +435,15 @@ dz.addEventListener('drop', function (e) {
     wtMsg.style.display = 'none';
     _selected = null;
     btnSave.disabled = true;
-    fetch('/api/weather/search?q=' + encodeURIComponent(q), { method: 'POST' })
+    fetch('/api/weather/search?q=' + encodeURIComponent(q))
       .then(function (r) { return r.json(); })
       .then(function (arr) {
+        if (arr && arr.error) {
+          wtMsg.className = 'msg error';
+          wtMsg.textContent = 'Search error: ' + arr.error;
+          wtMsg.style.display = 'block';
+          return;
+        }
         if (!Array.isArray(arr) || arr.length === 0) {
           wtMsg.className = 'msg error';
           wtMsg.textContent = 'No results found.';

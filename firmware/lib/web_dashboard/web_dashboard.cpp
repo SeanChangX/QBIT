@@ -704,7 +704,25 @@ static void handlePostWeather(AsyncWebServerRequest *request) {
     handleGetWeather(request);
 }
 
-// POST /api/weather/search?q=CityName
+// Percent-encode a string for use as a URL query value
+static String urlEncodeParam(const String &s) {
+    String out;
+    out.reserve(s.length() * 3);
+    for (size_t i = 0; i < s.length(); i++) {
+        char c = s[i];
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+            out += c;
+        } else {
+            char enc[4];
+            snprintf(enc, sizeof(enc), "%%%02X", (unsigned char)c);
+            out += enc;
+        }
+    }
+    return out;
+}
+
+// GET /api/weather/search?q=CityName
 // · Geocode via Open-Meteo Geocoding API (proxied by the device)
 // · Returns JSON array: [{name, country, lat, lon}] (max 5 results)
 static void handleWeatherSearch(AsyncWebServerRequest *request) {
@@ -720,18 +738,21 @@ static void handleWeatherSearch(AsyncWebServerRequest *request) {
     }
     // Build URL using plain HTTP to avoid cert overhead on ESP32-C3
     char url[256];
+    String qEnc = urlEncodeParam(q);
     snprintf(url, sizeof(url),
         "http://geocoding-api.open-meteo.com/v1/search"
         "?name=%s&count=5&language=en&format=json",
-        q.c_str());
+        qEnc.c_str());
 
     HTTPClient http;
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setTimeout(8000);
     http.begin(url);
     int code = http.GET();
-    if (code != 200) {
+    if (code < 200 || code >= 300) {
+        String errMsg = "{\"error\":\"Geocoding unavailable (HTTP " + String(code) + ")\"}";
         http.end();
-        request->send(502, "application/json", "{\"error\":\"Geocoding unavailable\"}");
+        request->send(502, "application/json", errMsg);
         return;
     }
     String body = http.getString();
@@ -801,7 +822,7 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/timezone",      HTTP_POST, handlePostTimezone);
     server.on("/api/weather",       HTTP_GET,  handleGetWeather);
     server.on("/api/weather",       HTTP_POST, handlePostWeather);
-    server.on("/api/weather/search",HTTP_POST, handleWeatherSearch);
+    server.on("/api/weather/search",HTTP_GET,  handleWeatherSearch);
 
     // Catch-all: serve .qgif files from LittleFS for browser preview (path-normalized)
     server.onNotFound([](AsyncWebServerRequest *request) {
