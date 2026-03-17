@@ -58,6 +58,12 @@ static bool _negativeGif     = false;
 // Time format: true = 24h, false = 12h
 static bool _timeFormat24h   = true;
 
+// Weather location
+static String  _weatherCity        = "Pune";
+static float   _weatherLat         = 18.52f;
+static float   _weatherLon         = 73.85f;
+static String  _weatherDisplayName = "Pune, IN";
+
 // ==========================================================================
 //  Time format (24h/12h)
 // ==========================================================================
@@ -163,6 +169,15 @@ void loadSettings() {
     _trexHighScore   = _prefs.getUInt("trexHi",    0);
     _flappyHighScore = _prefs.getUInt("flappyHi",  0);
     _carHighScore    = _prefs.getUInt("carHi",     0);
+
+    // Weather location (defaults to Pune, IN)
+    _weatherCity        = _prefs.getString("wtCity", "Pune");
+    if (_weatherCity.length() > WEATHER_CITY_MAX_LEN) _weatherCity = _weatherCity.substring(0, WEATHER_CITY_MAX_LEN);
+    _weatherLat         = _prefs.getFloat("wtLat",  18.52f);
+    _weatherLon         = _prefs.getFloat("wtLon",  73.85f);
+    _weatherDisplayName = _prefs.getString("wtName", "Pune, IN");
+    if (_weatherDisplayName.length() > WEATHER_NAME_MAX_LEN) _weatherDisplayName = _weatherDisplayName.substring(0, WEATHER_NAME_MAX_LEN);
+
     xSemaphoreGive(_prefsMutex);
 
     // Apply speed
@@ -203,6 +218,11 @@ void saveSettings() {
     _prefs.putUInt("trexHi",     _trexHighScore);
     _prefs.putUInt("flappyHi",   _flappyHighScore);
     _prefs.putUInt("carHi",      _carHighScore);
+    // Weather location
+    _prefs.putString("wtCity",   _weatherCity);
+    _prefs.putFloat("wtLat",     _weatherLat);
+    _prefs.putFloat("wtLon",     _weatherLon);
+    _prefs.putString("wtName",   _weatherDisplayName);
     xSemaphoreGive(_prefsMutex);
     Serial.println("Settings saved to NVS");
 }
@@ -345,5 +365,33 @@ void     setCarHighScore(uint32_t s) {
             _prefs.putUInt("carHi", _carHighScore);
             xSemaphoreGive(_prefsMutex);
         }
+    }
+}
+
+// ==========================================================================
+//  Weather location
+// ==========================================================================
+
+String getWeatherCity()                  { return _weatherCity; }
+void   setWeatherCity(const String &c)   { _weatherCity = c.length() > WEATHER_CITY_MAX_LEN ? c.substring(0, WEATHER_CITY_MAX_LEN) : c; }
+float  getWeatherLat()                   { return _weatherLat; }
+void   setWeatherLat(float lat)          { _weatherLat = lat; }
+float  getWeatherLon()                   { return _weatherLon; }
+void   setWeatherLon(float lon)          { _weatherLon = lon; }
+String getWeatherDisplayName()           { return _weatherDisplayName; }
+void   setWeatherDisplayName(const String &n) { _weatherDisplayName = n.length() > WEATHER_NAME_MAX_LEN ? n.substring(0, WEATHER_NAME_MAX_LEN) : n; }
+
+void setWeatherLocation(float lat, float lon,
+                        const String &city, const String &displayName) {
+    _weatherLat         = lat;
+    _weatherLon         = lon;
+    _weatherCity        = city.length()        > WEATHER_CITY_MAX_LEN ? city.substring(0, WEATHER_CITY_MAX_LEN)               : city;
+    _weatherDisplayName = displayName.length() > WEATHER_NAME_MAX_LEN ? displayName.substring(0, WEATHER_NAME_MAX_LEN) : displayName;
+    if (_prefsReady && xSemaphoreTake(_prefsMutex, portMAX_DELAY) == pdTRUE) {
+        _prefs.putFloat("wtLat",   _weatherLat);
+        _prefs.putFloat("wtLon",   _weatherLon);
+        _prefs.putString("wtCity", _weatherCity);
+        _prefs.putString("wtName", _weatherDisplayName);
+        xSemaphoreGive(_prefsMutex);
     }
 }

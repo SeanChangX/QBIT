@@ -410,6 +410,115 @@ dz.addEventListener('drop', function (e) {
   if (e.dataTransfer.files.length) uf(e.dataTransfer.files);
 });
 
+// Weather location -- city search + save
+(function () {
+  var wtName    = document.getElementById('wtName');
+  var wtQuery   = document.getElementById('wtQuery');
+  var btnSearch = document.getElementById('btnWtSearch');
+  var wtResults = document.getElementById('wtResults');
+  var btnSave   = document.getElementById('btnWtSave');
+  var wtMsg     = document.getElementById('wtMsg');
+  var _selected = null; // {lat, lon, name, country}
+
+  // Fetch current saved location on load
+  fetch('/api/weather').then(function (r) { return r.json(); }).then(function (d) {
+    wtName.textContent = d.displayName || '--';
+  }).catch(function () {});
+
+  // Search
+  function doSearch() {
+    var q = wtQuery.value.trim();
+    if (!q) return;
+    btnSearch.disabled = true;
+    wtResults.style.display = 'none';
+    wtResults.innerHTML = '';
+    wtMsg.style.display = 'none';
+    _selected = null;
+    btnSave.disabled = true;
+    fetch('/api/weather/search?q=' + encodeURIComponent(q), { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (arr) {
+        if (!Array.isArray(arr) || arr.length === 0) {
+          wtMsg.className = 'msg error';
+          wtMsg.textContent = 'No results found.';
+          wtMsg.style.display = 'block';
+          return;
+        }
+        var html = '<div class="file-list">';
+        arr.forEach(function (item, i) {
+          var label = item.name + (item.country ? ', ' + item.country : '');
+          html += '<div class="file" style="cursor:pointer" data-idx="' + i + '">';
+          html += '<span class="file-name">' + label + '</span>';
+          html += '<span class="file-size">' + item.lat.toFixed(2) + ', ' + item.lon.toFixed(2) + '</span>';
+          html += '<button class="btn btn-play" type="button">Select</button>';
+          html += '</div>';
+        });
+        html += '</div>';
+        wtResults.innerHTML = html;
+        wtResults.style.display = 'block';
+        // Bind select buttons
+        var rows = wtResults.querySelectorAll('[data-idx]');
+        rows.forEach(function (row) {
+          var idx = parseInt(row.getAttribute('data-idx'), 10);
+          var item = arr[idx];
+          row.querySelector('.btn-play').addEventListener('click', function () {
+            _selected = item;
+            // Highlight selected row
+            rows.forEach(function (r2) { r2.style.background = ''; });
+            row.style.background = 'rgba(var(--accent-rgb,0,122,204),.15)';
+            btnSave.disabled = false;
+            wtMsg.style.display = 'none';
+          });
+        });
+      })
+      .catch(function () {
+        wtMsg.className = 'msg error';
+        wtMsg.textContent = 'Search failed. Check connection.';
+        wtMsg.style.display = 'block';
+      })
+      .finally(function () { btnSearch.disabled = false; });
+  }
+
+  btnSearch.addEventListener('click', doSearch);
+  wtQuery.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') doSearch();
+  });
+
+  // Save
+  btnSave.addEventListener('click', function () {
+    if (!_selected) return;
+    btnSave.disabled = true;
+    var displayName = _selected.name + ((_selected.country && _selected.country.length > 0)
+      ? ', ' + _selected.country : '');
+    var params = 'lat=' + _selected.lat
+               + '&lon=' + _selected.lon
+               + '&city=' + encodeURIComponent(_selected.name)
+               + '&display_name=' + encodeURIComponent(displayName)
+               + '&save=1';
+    fetch('/api/weather?' + params, { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        wtName.textContent = d.displayName || displayName;
+        wtMsg.className = 'msg ok';
+        wtMsg.textContent = 'Saved. Weather screen will show new location next time.';
+        wtMsg.style.display = 'block';
+        btnSave.classList.add('saved');
+        btnSave.textContent = 'Saved';
+        setTimeout(function () {
+          btnSave.classList.remove('saved');
+          btnSave.textContent = 'Save Location';
+          btnSave.disabled = false;
+        }, 2000);
+      })
+      .catch(function () {
+        wtMsg.className = 'msg error';
+        wtMsg.textContent = 'Save failed.';
+        wtMsg.style.display = 'block';
+        btnSave.disabled = false;
+      });
+  });
+})();
+
 // Timezone setting -- fetch current timezone and allow saving
 (function () {
   var tzSelect = document.getElementById('tzSelect');

@@ -15,6 +15,7 @@
 #include "web_dashboard.h"
 #include "timer_ui.h"
 #include "games/game_menu.h"
+#include "weather/weather_screen.h"
 #include "games/trex_runner/trex_runner.h"
 #include "games/flappy_bird/flappy_bird.h"
 #include "games/car_avoidance/car_avoidance.h"
@@ -136,6 +137,14 @@ static void enterState(DisplayState newState) {
 #define SETTINGS_BOX_W   124
 #define SETTINGS_BOX_R   4    /* radius for rounded cap; drawn on buffer left so it shows on display left (icon side) */
 
+// 16x16 cloud icon for WEATHER menu entry
+static const uint8_t icon_weather_bits[] PROGMEM = {
+    0x00, 0x00, 0x00, 0x00, 0xC0, 0x01, 0xE0, 0x07,
+    0x30, 0x0C, 0x18, 0x18, 0x18, 0x18, 0xF8, 0x1F,
+    0xFC, 0x3F, 0xFC, 0x3F, 0xFC, 0x3F, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
 static const uint8_t icon_timer_bits[] PROGMEM = {
     0x9E, 0x3C, 0xCD, 0x59, 0xB7, 0x76, 0x0B, 0x68,
     0x05, 0x50, 0x82, 0x20, 0x82, 0x20, 0x81, 0x40,
@@ -157,20 +166,26 @@ static const uint8_t icon_setting_bits[] PROGMEM = {
 
 static void drawSettingsMenu() {
     if (_state == SETTINGS_MENU) {
-        static const char *labels[3] = { "TIMER", "GAME LIBRARY", "SETTING" };
-        static const uint8_t *icon_bits[3] = {
+        // 4 items: WEATHER(0), TIMER(1), GAME LIBRARY(2), SETTING(3)
+        // Display 3 rows at a time; scroll window follows cursor.
+        static const char *labels[4] = { "WEATHER", "TIMER", "GAME LIBRARY", "SETTING" };
+        static const uint8_t *icon_bits[4] = {
+            icon_weather_bits,
             icon_timer_bits,
             icon_game_bits,
             icon_setting_bits
         };
+        // Scroll window: show 3 rows, keep cursor visible
+        uint8_t top = (_settingsCursor >= 3) ? _settingsCursor - 2 : 0;
         u8g2.clearBuffer();
         u8g2.setFont(u8g2_font_7x14B_tr);
         for (uint8_t row = 0; row < 3; row++) {
+            uint8_t item = top + row;
+            if (item >= 4) break;
             uint8_t y = (row + 1) * SETTINGS_ROW_H;
-            bool isSelected = (row == _settingsCursor);
+            bool isSelected = (item == _settingsCursor);
             if (isSelected) {
                 u8g2.setDrawColor(1);
-                // Rounded on display left (icon side): draw rounded cap on buffer left, main box to its right.
                 uint8_t capW = (uint8_t)(SETTINGS_BOX_R * 2);
                 u8g2.drawBox(SETTINGS_BOX_X + capW, y - 14, (uint8_t)(SETTINGS_BOX_W - capW), 18);
                 u8g2.drawRBox(SETTINGS_BOX_X, y - 14, capW, 18, SETTINGS_BOX_R);
@@ -180,10 +195,10 @@ static void drawSettingsMenu() {
                 u8g2.setDrawColor(1);
             }
             u8g2.setBitmapMode(1);
-            u8g2.drawXBM(6, y - 13, SETTINGS_ICON_W, SETTINGS_ICON_H, icon_bits[row]);
+            u8g2.drawXBM(6, y - 13, SETTINGS_ICON_W, SETTINGS_ICON_H, icon_bits[item]);
             u8g2.setBitmapMode(0);
             u8g2.setDrawColor(isSelected ? 0 : 1);
-            u8g2.drawStr(SETTINGS_TEXT_X, y, labels[row]);
+            u8g2.drawStr(SETTINGS_TEXT_X, y, labels[item]);
         }
         u8g2.setDrawColor(1);
         rotateBuffer180();
@@ -711,24 +726,38 @@ void displayTask(void *param) {
                 case SETTINGS_MENU:
                     _stateEntryMs = now;
                     if (gesture.type == SINGLE_TAP) {
-                        _settingsCursor = (_settingsCursor + 1) % 3;
+                        _settingsCursor = (_settingsCursor + 1) % 4;
                         drawSettingsMenu();
                     } else if (gesture.type == DOUBLE_TAP) {
                         enterState(GIF_PLAYBACK);
                     } else if (gesture.type == LONG_PRESS) {
                         if (_settingsCursor == 0) {
+                            // WEATHER
+                            weatherScreenEnter();
+                            enterState(WEATHER_SCREEN);
+                        } else if (_settingsCursor == 1) {
+                            // TIMER
                             timerUiEnterSet();
                             enterState(TIMER_SET);
                             timerUiDrawSet();
-                        } else if (_settingsCursor == 1) {
+                        } else if (_settingsCursor == 2) {
+                            // GAME LIBRARY
                             gameMenuEnter();
                             enterState(GAME_MENU);
                             gameMenuDraw();
                         } else {
+                            // SETTING
                             _settingsCursor = 0;
                             enterState(SETTINGS_OPTIONS);
                             drawSettingsMenu();
                         }
+                    }
+                    break;
+
+                case WEATHER_SCREEN:
+                    _stateEntryMs = now;
+                    if (gesture.type == DOUBLE_TAP || gesture.type == LONG_PRESS) {
+                        enterSettingsMenu();
                     }
                     break;
 
@@ -1175,6 +1204,14 @@ void displayTask(void *param) {
             case SETTINGS_OPTIONS:
                 if (elapsed >= SETTINGS_MENU_IDLE_MS) {
                     enterState(GIF_PLAYBACK);
+                }
+                break;
+
+            case WEATHER_SCREEN:
+                // No auto-timeout; redrawn only on enter or gesture.
+                // Re-draw at ~1 fps so updated cached data appears promptly.
+                if (elapsed % 1000 < 10) {
+                    weatherScreenDraw();
                 }
                 break;
 

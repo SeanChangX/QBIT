@@ -1,7 +1,9 @@
 #include "web_dashboard.h"
 #include "gif_player.h"
+#include "../../src/settings.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include <HTTPClient.h>
 #if defined(ESP32) || defined(ESP8266)
 #include <WiFi.h>
 #endif
@@ -660,6 +662,103 @@ static void onCamWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 }
 
 // ==========================================================================
+//  Handlers -- Weather location API
+// ==========================================================================
+
+// GET /api/weather → {city, lat, lon, displayName}
+static void handleGetWeather(AsyncWebServerRequest *request) {
+    StaticJsonDocument<192> doc;
+    doc["city"]        = getWeatherCity();
+    doc["lat"]         = getWeatherLat();
+    doc["lon"]         = getWeatherLon();
+    doc["displayName"] = getWeatherDisplayName();
+    String json;
+    serializeJson(doc, json);
+    request->send(200, "application/json", json);
+}
+
+// POST /api/weather?lat=&lon=&display_name=&city=&save=1  → updated JSON
+static void handlePostWeather(AsyncWebServerRequest *request) {
+    if (request->hasParam("lat") && request->hasParam("lon")) {
+        float lat = request->getParam("lat")->value().toFloat();
+        float lon = request->getParam("lon")->value().toFloat();
+        // Basic range validation
+        if (lat < -90.0f || lat > 90.0f || lon < -180.0f || lon > 180.0f) {
+            request->send(400, "application/json", "{\"error\":\"lat/lon out of range\"}");
+            return;
+        }
+        String city = request->hasParam("city")
+            ? request->getParam("city")->value() : getWeatherCity();
+        String displayName = request->hasParam("display_name")
+            ? request->getParam("display_name")->value() : getWeatherDisplayName();
+        // Reject suspiciously long or empty values
+        if (city.length() == 0 || city.length() > WEATHER_CITY_MAX_LEN)
+            city = city.length() > WEATHER_CITY_MAX_LEN ? city.substring(0, WEATHER_CITY_MAX_LEN) : getWeatherCity();
+        if (displayName.length() > WEATHER_NAME_MAX_LEN)
+            displayName = displayName.substring(0, WEATHER_NAME_MAX_LEN);
+        // Persist immediately (setWeatherLocation also writes to NVS)
+        setWeatherLocation(lat, lon, city, displayName);
+        // Invalidate weather cache so next screen enter fetches fresh data
+        weatherScreenInvalidateCache();
+    }
+    handleGetWeather(request);
+}
+
+// POST /api/weather/search?q=CityName
+// · Geocode via Open-Meteo Geocoding API (proxied by the device)
+// · Returns JSON array: [{name, country, lat, lon}] (max 5 results)
+static void handleWeatherSearch(AsyncWebServerRequest *request) {
+    if (!request->hasParam("q")) {
+        request->send(400, "application/json", "{\"error\":\"Missing q\"}");
+        return;
+    }
+    String q = request->getParam("q")->value();
+    q.trim();
+    if (q.length() == 0 || q.length() > 64) {
+        request->send(400, "application/json", "{\"error\":\"q must be 1-64 chars\"}");
+        return;
+    }
+    // Build URL using plain HTTP to avoid cert overhead on ESP32-C3
+    char url[256];
+    snprintf(url, sizeof(url),
+        "http://geocoding-api.open-meteo.com/v1/search"
+        "?name=%s&count=5&language=en&format=json",
+        q.c_str());
+
+    HTTPClient http;
+    http.setTimeout(8000);
+    http.begin(url);
+    int code = http.GET();
+    if (code != 200) {
+        http.end();
+        request->send(502, "application/json", "{\"error\":\"Geocoding unavailable\"}");
+        return;
+    }
+    String body = http.getString();
+    http.end();
+
+    // Parse and re-emit a compact array
+    JsonDocument inDoc;
+    if (deserializeJson(inDoc, body) || !inDoc["results"].is<JsonArray>()) {
+        request->send(200, "application/json", "[]");
+        return;
+    }
+    JsonArray results = inDoc["results"].as<JsonArray>();
+    JsonDocument outDoc;
+    JsonArray arr = outDoc.to<JsonArray>();
+    for (JsonObject r : results) {
+        JsonObject item = arr.add<JsonObject>();
+        item["name"]    = r["name"].as<const char *>();
+        item["country"] = r["country_code"].as<const char *>();
+        item["lat"]     = r["latitude"].as<float>();
+        item["lon"]     = r["longitude"].as<float>();
+    }
+    String out;
+    serializeJson(outDoc, out);
+    request->send(200, "application/json", out);
+}
+
+// ==========================================================================
 //  Init
 // ==========================================================================
 
@@ -700,6 +799,9 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/pins",          HTTP_POST, handlePostPins);
     server.on("/api/timezone",      HTTP_GET,  handleGetTimezone);
     server.on("/api/timezone",      HTTP_POST, handlePostTimezone);
+    server.on("/api/weather",       HTTP_GET,  handleGetWeather);
+    server.on("/api/weather",       HTTP_POST, handlePostWeather);
+    server.on("/api/weather/search",HTTP_POST, handleWeatherSearch);
 
     // Catch-all: serve .qgif files from LittleFS for browser preview (path-normalized)
     server.onNotFound([](AsyncWebServerRequest *request) {

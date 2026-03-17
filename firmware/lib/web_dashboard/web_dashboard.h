@@ -64,6 +64,16 @@ extern void    setTimezoneIANA(const String &tz);
 // Time manager -- implemented by time_manager.cpp.
 extern void timeManagerSetTimezone(const String &ianaTz);
 
+// Weather location -- implemented by settings.cpp / weather_screen.cpp.
+extern String  getWeatherCity();
+extern float   getWeatherLat();
+extern float   getWeatherLon();
+extern String  getWeatherDisplayName();
+extern void    setWeatherLocation(float lat, float lon,
+                                   const String &city, const String &displayName);
+// Cache invalidation (defined in weather_screen.cpp).
+extern void weatherScreenInvalidateCache();
+
 // ==========================================================================
 //  Web Cam streaming over WebSocket (/ws_cam)
 // ==========================================================================

@@ -96,4 +96,20 @@ void     setFlappyHighScore(uint32_t score);
 uint32_t getCarHighScore();
 void     setCarHighScore(uint32_t score);
 
+// --- Weather location ---
+#define WEATHER_CITY_MAX_LEN 32
+#define WEATHER_NAME_MAX_LEN 32
+
+String  getWeatherCity();
+void    setWeatherCity(const String &city);
+float   getWeatherLat();
+void    setWeatherLat(float lat);
+float   getWeatherLon();
+void    setWeatherLon(float lon);
+String  getWeatherDisplayName();
+void    setWeatherDisplayName(const String &name);
+// Atomically set lat+lon+city+displayName and persist to NVS immediately.
+void    setWeatherLocation(float lat, float lon,
+                           const String &city, const String &displayName);
+
 #endif // SETTINGS_H

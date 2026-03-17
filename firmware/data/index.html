@@ -165,6 +165,22 @@
   </div>
 
   <div class="card collapsible collapsed">
+    <div class="card-title">Weather</div>
+    <div class="setting">
+      <label class="setting-label">Location</label>
+      <span class="setting-val-wide" id="wtName">--</span>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Search</label>
+      <input type="text" id="wtQuery" class="input-text" maxlength="64" placeholder="City name">
+      <button class="btn btn-secondary" id="btnWtSearch" style="flex:none;width:auto;padding:0 10px">Go</button>
+    </div>
+    <div id="wtResults" style="display:none;margin-top:6px"></div>
+    <button class="btn btn-save" id="btnWtSave" disabled>Save Location</button>
+    <div class="msg" id="wtMsg"></div>
+  </div>
+
+  <div class="card collapsible collapsed">
     <div class="card-title">Timezone</div>
     <div class="setting">
       <label class="setting-label">Zone</label>
