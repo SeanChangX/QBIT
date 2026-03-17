@@ -39,8 +39,6 @@ extern void rotateBuffer180();
 //  Cache configuration
 // ==========================================================================
 #define WEATHER_CACHE_MS      (10UL * 60UL * 1000UL) // 10 minutes
-#define WEATHER_ICON_W        24
-#define WEATHER_ICON_H        24
 #define WEATHER_HTTP_TIMEOUT  8000  // 8 s per request
 
 // ==========================================================================
@@ -124,6 +122,16 @@ static bool fetchWeatherData() {
 
 // ==========================================================================
 //  Render weather screen from cache
+//
+//  128×64 layout:
+//
+//  ┌─────────────── Location (5x8_tr) ────────────────┐  y=0..12
+//  ├──────── left col (x=0..74) ──────┬─right (76..127)┤  y=12 h-divider
+//  │ [cond icon 16×16]  AQI          │ [cond icon]     │  y=18..34
+//  │                    nnn          │                 │
+//  │ [humid icon 11×16] Humidity     │   Temp          │  y=41..57
+//  │                    nn %         │   nn °C         │
+//  └──────────────────────────────────┴─────────────────┘
 // ==========================================================================
 void weatherScreenDraw() {
     if (!_hasData) {
@@ -132,74 +140,68 @@ void weatherScreenDraw() {
     }
 
     u8g2.clearBuffer();
+    u8g2.setFontMode(1);   // transparent — text doesn't black out background
+    u8g2.setBitmapMode(1); // transparent — XBM doesn't black out background
 
-    // ------------------------------------------------------------------
-    //  1.  Location name – top, centered
-    // ------------------------------------------------------------------
+    // --- Frame + dividers ---
+    u8g2.drawFrame(0, 0, 128, 64);
+    u8g2.drawHLine(0, 12, 128);
+    u8g2.drawVLine(75, 13, 50);   // y=13..62
+
+    // --- Top bar: location name (font_5x8_tr) ---
+    u8g2.setFont(u8g2_font_5x8_tr);
     String locName = getWeatherDisplayName();
-    // Truncate to 20 chars to guarantee it fits in 120 px at 6x13
-    if (locName.length() > 20) locName = locName.substring(0, 17) + "...";
-    u8g2.setFont(u8g2_font_6x13_tr);
+    if (locName.length() > 21) locName = locName.substring(0, 18) + "...";
     uint8_t locW = u8g2.getStrWidth(locName.c_str());
-    u8g2.drawStr((128 - locW) / 2, 11, locName.c_str());
+    u8g2.drawStr((128 - locW) / 2, 10, locName.c_str());
 
-    // ------------------------------------------------------------------
-    //  2.  Weather icon – 24×24 at x=3, y=13
-    // ------------------------------------------------------------------
-    const uint8_t *icon = getWeatherIcon(_wmoCode);
-    u8g2.setBitmapMode(1);
-    u8g2.drawXBM(3, 13, WEATHER_ICON_W, WEATHER_ICON_H, icon);
-    u8g2.setBitmapMode(0);
+    // --- Condition icon ---
+    WeatherIconInfo ico = getWeatherIcon(_wmoCode);
 
-    // ------------------------------------------------------------------
-    //  3.  AQI & Humidity – right side, right-aligned
-    // ------------------------------------------------------------------
-    u8g2.setFont(u8g2_font_6x10_tr);
+    // Left column: condition icon at (3, 18)
+    u8g2.drawXBM(3, 18, ico.width, 16, ico.bits);
 
-    char aqiBuf[12];
-    if (_aqi >= 0) {
-        snprintf(aqiBuf, sizeof(aqiBuf), "AQI:%d", (int)_aqi);
-    } else {
-        snprintf(aqiBuf, sizeof(aqiBuf), "AQI:--");
-    }
-    uint8_t aqiW = u8g2.getStrWidth(aqiBuf);
-    u8g2.drawStr(126 - aqiW, 24, aqiBuf);
+    // Left column: humidity drop icon at (3, 41)  [11×16]
+    u8g2.drawXBM(3, 41, 11, 16, WEATHER_HUMID_ICON);
 
-    char humBuf[10];
-    snprintf(humBuf, sizeof(humBuf), "Hum:%u%%", (unsigned)_humidity);
-    uint8_t humW = u8g2.getStrWidth(humBuf);
-    u8g2.drawStr(126 - humW, 36, humBuf);
+    // Right column: condition icon centered in x=76..127 (52 px wide)
+    uint8_t riX = 76 + (52 - ico.width) / 2;
+    u8g2.drawXBM(riX, 18, ico.width, 16, ico.bits);
 
-    // ------------------------------------------------------------------
-    //  4.  Temperature – below icon, centered in icon column (0..30)
-    // ------------------------------------------------------------------
-    u8g2.setFont(u8g2_font_7x14B_tr);
+    // --- Left column text ---
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawStr(23, 24, "AQI");
+
+    char aqiBuf[8];
+    if (_aqi >= 0)
+        snprintf(aqiBuf, sizeof(aqiBuf), "%d", (int)_aqi);
+    else
+        strlcpy(aqiBuf, "--", sizeof(aqiBuf));
+    u8g2.setFont(u8g2_font_profont10_tr);
+    u8g2.drawStr(23, 33, aqiBuf);
+
+    u8g2.setFont(u8g2_font_4x6_tr);
+    u8g2.drawStr(23, 47, "Humidity");
+
+    char humBuf[8];
+    snprintf(humBuf, sizeof(humBuf), "%u %%", (unsigned)_humidity);
+    u8g2.setFont(u8g2_font_profont10_tr);
+    u8g2.drawStr(22, 56, humBuf);
+
+    // --- Right column text ---
+    u8g2.setFont(u8g2_font_4x6_tr);
+    uint8_t lblW = u8g2.getStrWidth("Temp");
+    u8g2.drawStr(76 + (52 - lblW) / 2, 45, "Temp");
+
+    int tempInt = (int)(_temperature + (_temperature >= 0 ? 0.5f : -0.5f));
     char tempBuf[10];
-    int tempInt = (int)(_temperature + 0.5f);
-    // Degree symbol: font_7x14B_tr is latin1/ISO-8859-1; 0xB0 is the degree glyph.
-    snprintf(tempBuf, sizeof(tempBuf), "%d\xB0C", tempInt);
-    uint8_t tempW = u8g2.getStrWidth(tempBuf);
-    // Center within x=0..29 (icon column + left margin)
-    int16_t tempX = (30 - (int16_t)tempW) / 2;
-    if (tempX < 0) tempX = 0;
-    u8g2.drawStr((uint8_t)tempX, 50, tempBuf);
+    snprintf(tempBuf, sizeof(tempBuf), "%d \xB0""C", tempInt);
+    u8g2.setFont(u8g2_font_profont10_tr);
+    uint8_t tempValW = u8g2.getStrWidth(tempBuf);
+    u8g2.drawStr(76 + (52 - tempValW) / 2, 53, tempBuf);
 
-    // ------------------------------------------------------------------
-    //  5.  Separator line
-    // ------------------------------------------------------------------
-    u8g2.drawHLine(0, 53, 128);
-
-    // ------------------------------------------------------------------
-    //  6.  Condition text – bottom, centered
-    // ------------------------------------------------------------------
-    u8g2.setFont(u8g2_font_6x10_tr);
-    const char *cond = getWeatherCondition(_wmoCode);
-    // Truncate if needed (max 18 chars at 6px = 108 px wide)
-    char condBuf[20];
-    strncpy(condBuf, cond, 18);
-    condBuf[18] = '\0';
-    uint8_t condW = u8g2.getStrWidth(condBuf);
-    u8g2.drawStr((128 - condW) / 2, 63, condBuf);
+    u8g2.setFontMode(0);
+    u8g2.setBitmapMode(0);
 
     rotateBuffer180();
     u8g2.sendBuffer();
