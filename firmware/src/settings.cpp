@@ -162,7 +162,7 @@ void loadSettings() {
     _timeFormat24h   = _prefs.getBool("time24h",   true);
     _trexHighScore   = _prefs.getUInt("trexHi",    0);
     _flappyHighScore = _prefs.getUInt("flappyHi",  0);
-    _carHighScore    = _prefs.getUInt("carHi",      0);
+    _carHighScore    = _prefs.getUInt("carHi",     0);
     xSemaphoreGive(_prefsMutex);
 
     // Apply speed
@@ -284,8 +284,8 @@ String   getMqttPrefix()  { return _mqttPrefix; }
 bool     getMqttEnabled() { return _mqttEnabled; }
 
 void setMqttConfig(const String &host, uint16_t port,
-                  const String &user, const String &pass,
-                  const String &prefix, bool enabled) {
+                   const String &user, const String &pass,
+                   const String &prefix, bool enabled) {
     _mqttHost = host.length() > MQTT_HOST_MAX_LEN ? host.substring(0, MQTT_HOST_MAX_LEN) : host;
     _mqttPort = (port >= MQTT_PORT_MIN && port <= MQTT_PORT_MAX) ? port : MQTT_PORT_DEFAULT;
     _mqttUser = user.length() > MQTT_USER_MAX_LEN ? user.substring(0, MQTT_USER_MAX_LEN) : user;

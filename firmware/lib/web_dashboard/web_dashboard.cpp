@@ -421,21 +421,21 @@ static void handleGetMqtt(AsyncWebServerRequest *request) {
     StaticJsonDocument<512> doc;
     doc["enabled"] = getMqttEnabled();
     doc["host"]    = getMqttHost();
-    doc["port"]   = getMqttPort();
-    doc["user"]   = getMqttUser();
-    doc["pass"]   = getMqttPass();
-    doc["prefix"] = getMqttPrefix();
+    doc["port"]    = getMqttPort();
+    doc["user"]    = getMqttUser();
+    doc["pass"]    = getMqttPass();
+    doc["prefix"]  = getMqttPrefix();
     String json;
     serializeJson(doc, json);
     request->send(200, "application/json", json);
 }
 
 static void handlePostMqtt(AsyncWebServerRequest *request) {
-    String  host    = request->hasParam("host")   ? request->getParam("host")->value()   : getMqttHost();
-    int     portVal = request->hasParam("port")   ? request->getParam("port")->value().toInt() : (int)getMqttPort();
-    String  user    = request->hasParam("user")   ? request->getParam("user")->value()   : getMqttUser();
-    String  pass    = request->hasParam("pass")   ? request->getParam("pass")->value()   : getMqttPass();
-    String  prefix  = request->hasParam("prefix") ? request->getParam("prefix")->value() : getMqttPrefix();
+    String  host    = request->hasParam("host")    ?  request->getParam("host")->value()            : getMqttHost();
+    int     portVal = request->hasParam("port")    ?  request->getParam("port")->value().toInt()    : (int)getMqttPort();
+    String  user    = request->hasParam("user")    ?  request->getParam("user")->value()            : getMqttUser();
+    String  pass    = request->hasParam("pass")    ?  request->getParam("pass")->value()            : getMqttPass();
+    String  prefix  = request->hasParam("prefix")  ?  request->getParam("prefix")->value()          : getMqttPrefix();
     bool    enabled = request->hasParam("enabled") ? (request->getParam("enabled")->value() == "1") : getMqttEnabled();
 
     host.trim();
@@ -564,13 +564,13 @@ static void handlePostTimezone(AsyncWebServerRequest *request) {
 
 static AsyncWebSocket      _camWs("/ws_cam");
 static uint8_t             _camBuf[QGIF_FRAME_SIZE];
-static volatile bool       _camFrameNew      = false;
-static SemaphoreHandle_t   _camMutex         = nullptr;
-static volatile int        _camClientCount   = 0;
+static volatile bool       _camFrameNew       = false;
+static SemaphoreHandle_t   _camMutex          = nullptr;
+static volatile int        _camClientCount    = 0;
 static uint32_t            _camActiveClientId = 0;
 static uint32_t            _camLastFrameMs    = 0;
-static void              (*_onCamStart)()    = nullptr;
-static void              (*_onCamStop)()     = nullptr;
+static void              (*_onCamStart)()     = nullptr;
+static void              (*_onCamStop)()      = nullptr;
 
 void webCamSetCallbacks(void (*onStart)(), void (*onStop)()) {
     _onCamStart = onStart;
@@ -681,13 +681,13 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/inter-latin.woff2", HTTP_GET,  handleFont);
 
     // API endpoints
-    server.on("/api/list",    HTTP_GET,  handleList);
-    server.on("/api/storage", HTTP_GET,  handleStorage);
-    server.on("/api/upload",  HTTP_POST, handleUploadDone, handleUploadData);
-    server.on("/api/delete",   HTTP_POST, handleDelete);
-    server.on("/api/play",     HTTP_POST, handlePlay);
-    server.on("/api/current",  HTTP_GET,  handleCurrent);
-    server.on("/api/file",     HTTP_GET,  handleGetFile);
+    server.on("/api/list",          HTTP_GET,  handleList);
+    server.on("/api/storage",       HTTP_GET,  handleStorage);
+    server.on("/api/upload",        HTTP_POST, handleUploadDone, handleUploadData);
+    server.on("/api/delete",        HTTP_POST, handleDelete);
+    server.on("/api/play",          HTTP_POST, handlePlay);
+    server.on("/api/current",       HTTP_GET,  handleCurrent);
+    server.on("/api/file",          HTTP_GET,  handleGetFile);
     server.on("/api/settings",      HTTP_GET,  handleGetSettings);
     server.on("/api/settings",      HTTP_POST, handlePostSettings);
     server.on("/api/device",        HTTP_GET,  handleGetDevice);

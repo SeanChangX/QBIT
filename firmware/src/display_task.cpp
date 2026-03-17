@@ -31,65 +31,65 @@
 //  Configuration
 // ==========================================================================
 
-#define BOOT_GIF_SPEED       10
-#define CONNECTED_INFO_MS    3000
-#define CLAIM_TIMEOUT_MS     30000
-#define CLAIM_LONG_PRESS_MS  2000
-#define HISTORY_IDLE_MS      3000
+#define BOOT_GIF_SPEED        10
+#define CONNECTED_INFO_MS     3000
+#define CLAIM_TIMEOUT_MS      30000
+#define CLAIM_LONG_PRESS_MS   2000
+#define HISTORY_IDLE_MS       3000
 #define SETTINGS_MENU_IDLE_MS 10000
-#define OFFLINE_OVERLAY_MS   2000
-#define UPDATE_PROMPT_MS     8000
+#define OFFLINE_OVERLAY_MS    2000
+#define UPDATE_PROMPT_MS      8000
 // Must match network_task WIFI_RECONNECT_TIMEOUT_MS (AP portal starts after this)
-#define WIFI_AP_TIMEOUT_MS   15000
-#define WIFI_AP_PROGRESS_LEN 18
+#define WIFI_AP_TIMEOUT_MS    15000
+#define WIFI_AP_PROGRESS_LEN  18
 
 // ==========================================================================
 //  Internal state
 // ==========================================================================
 
-static DisplayState _state = BOOT_ANIM;
-static DisplayState _prevState = GIF_PLAYBACK;
+static DisplayState  _state        = BOOT_ANIM;
+static DisplayState  _prevState    = GIF_PLAYBACK;
 static unsigned long _stateEntryMs = 0;
 
 // Boot animation
-static uint8_t _bootFrame = 0;
+static uint8_t       _bootFrame = 0;
 
 // History browsing
-static uint8_t _historyIndex = 0;
-static int16_t _historyScrollOffset = 0;
-static unsigned long _historyLastScrollMs = 0;
+static uint8_t       _historyIndex                   = 0;
+static int16_t       _historyScrollOffset            = 0;
+static unsigned long _historyLastScrollMs            = 0;
 // Text-only history: separate scroll like bitmap
-static uint16_t _historyTextSenderWidth = 0;
-static uint16_t _historyTextMessageWidth = 0;
-static int16_t _historyTextSenderScrollOffset = 0;
-static int16_t _historyTextMessageScrollOffset = 0;
+static uint16_t      _historyTextSenderWidth         = 0;
+static uint16_t      _historyTextMessageWidth        = 0;
+static int16_t       _historyTextSenderScrollOffset  = 0;
+static int16_t       _historyTextMessageScrollOffset = 0;
 
 // Offline overlay
-static bool          _offlineShown = false;
-static unsigned long _offlineStartMs = 0;
-static const char*   _offlineMsg = nullptr;
+static bool          _offlineShown          = false;
+static unsigned long _offlineStartMs        = 0;
+static const char*   _offlineMsg            = nullptr;
 static bool          _serverOfflineNotified = false;
 
 // WiFi setup: QR vs text toggle; only show QR when AP portal is active
-static bool _wifiSetupShowQR = true;
-static bool _wifiSetupPortalDrawn = false;
+static bool          _wifiSetupShowQR       = true;
+static bool          _wifiSetupPortalDrawn  = false;
 // Throttle redraw for connecting progress (only when bar or seconds change)
-static uint8_t _lastWifiConnBar = 0xFF;
-static uint8_t _lastWifiConnSec = 0xFF;
+static uint8_t       _lastWifiConnBar       = 0xFF;
+static uint8_t       _lastWifiConnSec       = 0xFF;
 
 // Melody tracking
-static bool _melodyWasPlaying = false;
+static bool          _melodyWasPlaying      = false;
 // Timer alarm: play even when muted; restore mute when melody ends
-static bool _timerAlarmRestoreMute = false;
-static bool _timerAlarmStarted    = false;
+static bool          _timerAlarmRestoreMute = false;
+static bool          _timerAlarmStarted     = false;
 
 // Cam frame render buffer (owned by display task; gifRenderFrame inverts in-place)
-static uint8_t _camRenderBuf[QGIF_FRAME_SIZE];
+static uint8_t       _camRenderBuf[QGIF_FRAME_SIZE];
 
 // Settings menu
-static uint8_t _settingsCursor    = 0;
-static bool    _settingsConfirming = false;
-static bool    _settingsSelected   = false;  // row is "entered" via hold
+static uint8_t       _settingsCursor        = 0;
+static bool          _settingsConfirming    = false;
+static bool          _settingsSelected      = false;  // row is "entered" via hold
 
 struct SettingsPending {
     bool gifSound;
@@ -877,9 +877,9 @@ void displayTask(void *param) {
                 }
 
                 case TREX_RUNNING: {
-                    TrexRunnerGestureType rg = TrexRunnerGestureType::None;
-                    if (gesture.type == TOUCH_DOWN) rg = TrexRunnerGestureType::TouchDown;
-                    else if (gesture.type == TOUCH_UP) rg = TrexRunnerGestureType::TouchUp;
+                    TrexRunnerGestureType                rg = TrexRunnerGestureType::None;
+                    if      (gesture.type == TOUCH_DOWN) rg = TrexRunnerGestureType::TouchDown;
+                    else if (gesture.type == TOUCH_UP)   rg = TrexRunnerGestureType::TouchUp;
                     else if (gesture.type == SINGLE_TAP) rg = TrexRunnerGestureType::SingleTap;
                     else if (gesture.type == DOUBLE_TAP) rg = TrexRunnerGestureType::DoubleTap;
                     else if (gesture.type == LONG_PRESS) rg = TrexRunnerGestureType::LongPress;
@@ -913,8 +913,8 @@ void displayTask(void *param) {
                     break;
 
                 case FLAPPY_RUNNING: {
-                    FlappyGestureType fg = FlappyGestureType::None;
-                    if (gesture.type == TOUCH_UP)    fg = FlappyGestureType::TouchUp;
+                    FlappyGestureType                     fg = FlappyGestureType::None;
+                    if      (gesture.type == TOUCH_UP)    fg = FlappyGestureType::TouchUp;
                     else if (gesture.type == TOUCH_DOWN)  fg = FlappyGestureType::TouchDown;
                     else if (gesture.type == SINGLE_TAP)  fg = FlappyGestureType::SingleTap;
                     else if (gesture.type == DOUBLE_TAP)  fg = FlappyGestureType::DoubleTap;
@@ -942,8 +942,8 @@ void displayTask(void *param) {
                     break;
 
                 case CAR_RUNNING: {
-                    CarGestureType cg = CarGestureType::None;
-                    if (gesture.type == TOUCH_UP)         cg = CarGestureType::TouchUp;
+                    CarGestureType                        cg = CarGestureType::None;
+                    if      (gesture.type == TOUCH_UP)    cg = CarGestureType::TouchUp;
                     else if (gesture.type == TOUCH_DOWN)  cg = CarGestureType::TouchDown;
                     else if (gesture.type == SINGLE_TAP)  cg = CarGestureType::SingleTap;
                     else if (gesture.type == DOUBLE_TAP)  cg = CarGestureType::DoubleTap;

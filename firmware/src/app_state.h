@@ -122,7 +122,7 @@ struct PokeRecord {
 // ==========================================================================
 #define WIFI_CONNECTED_BIT  (1 << 0)
 #define WS_CONNECTED_BIT    (1 << 1)
-#define MQTT_CONNECTED_BIT (1 << 2)
+#define MQTT_CONNECTED_BIT  (1 << 2)
 #define PORTAL_ACTIVE_BIT   (1 << 3)
 
 // ==========================================================================

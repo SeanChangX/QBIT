@@ -407,9 +407,9 @@ void handlePokeBitmap(const char *sender, const char *text,
         _pokeTextHeight = (textLen / textW) * 8;
     }
 
-    _pokeBitmapMode  = true;
-    _pokeActive      = true;
-    _pokeStartMs     = millis();
+    _pokeBitmapMode   = true;
+    _pokeActive       = true;
+    _pokeStartMs      = millis();
     _pokeScrollOffset = 0;
     _pokeLastScrollMs = millis();
 

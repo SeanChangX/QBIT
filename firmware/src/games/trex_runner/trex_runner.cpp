@@ -7,23 +7,23 @@
 #include <stdio.h>
 #include <pgmspace.h>
 
-#define GAME_GROUND_Y   63
-#define GAME_TREX_X     5
-#define GAME_TICK_MS    50
-#define GAME_SPEED_INIT 5
-#define GAME_SPEEDUP_AT 256
-#define GAME_SPEED_MAX  12
-#define GAME_GROUND_W   64
-#define TREX_JUMP_VEL   -13
-#define GRAVITY         2
-#define GRAVITY_DUCK    8
-#define CACTUS_Y        63
-#define PTERO_Y1        15
-#define PTERO_Y2        25
-#define PTERO_Y3        35
-#define MIN_GAP         48
-#define RESPAWN_WAIT_MIN 15
-#define RESPAWN_WAIT_RANGE 35
+#define GAME_GROUND_Y       63
+#define GAME_TREX_X         5
+#define GAME_TICK_MS        50
+#define GAME_SPEED_INIT     5
+#define GAME_SPEEDUP_AT     256
+#define GAME_SPEED_MAX      12
+#define GAME_GROUND_W       64
+#define TREX_JUMP_VEL      -13
+#define GRAVITY             2
+#define GRAVITY_DUCK        8
+#define CACTUS_Y            63
+#define PTERO_Y1            15
+#define PTERO_Y2            25
+#define PTERO_Y3            35
+#define MIN_GAP             48
+#define RESPAWN_WAIT_MIN    15
+#define RESPAWN_WAIT_RANGE  35
 
 // T-rex format: first 2 bytes = width, height; data at +2, row-major 8 vertical bits/byte.
 // Mask: 1 = transparent (skip). Draw only pixels inside [0,127] x [0,63].
@@ -96,7 +96,7 @@ static unsigned long _lastTickMs = 0;
 static uint8_t   _animTick    = 0;
 static uint16_t  _randState   = 1;
 static uint8_t   _respawnWait[2] = { 0, 0 };
-static uint32_t  _gameTicks = 0;
+static uint32_t  _gameTicks   = 0;
 
 static uint16_t trexRand() {
     if (_randState == 0) _randState = 1;
@@ -233,7 +233,7 @@ void trexRunnerDrawGameOver() {
 
 TrexRunnerAction trexRunnerOnGesture(TrexRunnerGestureType g) {
     if (g == TrexRunnerGestureType::TouchDown) return TrexRunnerAction::Duck;
-    if (g == TrexRunnerGestureType::TouchUp) return TrexRunnerAction::Jump;
+    if (g == TrexRunnerGestureType::TouchUp)   return TrexRunnerAction::Jump;
     if (g == TrexRunnerGestureType::SingleTap) return TrexRunnerAction::None;
     if (g == TrexRunnerGestureType::DoubleTap) return TrexRunnerAction::None;
     if (g == TrexRunnerGestureType::LongPress) return TrexRunnerAction::None;

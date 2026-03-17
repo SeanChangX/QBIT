@@ -35,7 +35,7 @@
 
 // Enemy car lifecycle
 #define CA_SPAWN_Y          (CA_ROAD_TOP_Y + 1)   // just inside top border
-#define CA_DESPAWN_Y        CA_ROAD_BTM_Y          // removed when y reaches bottom border
+#define CA_DESPAWN_Y         CA_ROAD_BTM_Y        // removed when y reaches bottom border
 
 #define CA_MAX_ENEMIES      4
 
@@ -135,7 +135,7 @@ static unsigned long _lastTickMs       = 0;
 static EnemyCar      _enemies[CA_MAX_ENEMIES];
 static uint16_t      _randState        = 1;
 static int16_t       _dashOffset       = 0;
-static uint8_t       _spawnTimer       = 0;       // ticks until next spawn attempt
+static uint8_t       _spawnTimer       = 0;    // ticks until next spawn attempt
 static uint8_t       _spawnInterval    = CA_SPAWN_MAX_TICKS;
 static bool          _nearMiss         = false;
 

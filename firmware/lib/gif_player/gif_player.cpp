@@ -12,39 +12,39 @@ extern SemaphoreHandle_t gifPlayerMutex;
 // ---------------------------------------------------------------------------
 // Internal state
 // ---------------------------------------------------------------------------
-static U8G2     *_display       = nullptr;
-static File      _file;
-static bool      _playing       = false;
-static uint8_t   _frameCount    = 0;
-static uint16_t  _width         = 0;
-static uint16_t  _height        = 0;
-static uint16_t  _delays[QGIF_MAX_FRAMES];
-static uint8_t   _frameBuf[QGIF_FRAME_SIZE];
-static uint8_t   _currentFrame  = 0;
-static unsigned long _lastFrameMs = 0;
-static uint32_t  _dataOffset    = 0;   // byte offset to first frame in file
-static String    _currentFile;
-static String    _requestedFile;
-static bool      _fileChanged   = false;
-static uint16_t  _speedDivisor  = 1;
+static U8G2         *_display       = nullptr;
+static File          _file;
+static bool          _playing       = false;
+static uint8_t       _frameCount    = 0;
+static uint16_t      _width         = 0;
+static uint16_t      _height        = 0;
+static uint16_t      _delays[QGIF_MAX_FRAMES];
+static uint8_t       _frameBuf[QGIF_FRAME_SIZE];
+static uint8_t       _currentFrame  = 0;
+static unsigned long _lastFrameMs   = 0;
+static uint32_t      _dataOffset    = 0;   // byte offset to first frame in file
+static String        _currentFile;
+static String        _requestedFile;
+static bool          _fileChanged   = false;
+static uint16_t      _speedDivisor  = 1;
 
 // --- Shuffle bag (fair random) ---
-static String   _shuffleBag[QGIF_MAX_FRAMES];
-static uint8_t  _shuffleTotal = 0;   // number of files in the bag
-static uint8_t  _shufflePos   = 0;   // next index to hand out
+static String        _shuffleBag[QGIF_MAX_FRAMES];
+static uint8_t       _shuffleTotal  = 0;   // number of files in the bag
+static uint8_t       _shufflePos    = 0;   // next index to hand out
 
 // --- Auto-advance ---
-static uint8_t  _loopCount       = 0;
-static uint8_t  _loopsPerGif     = 0; // 0 = disabled
+static uint8_t       _loopCount     = 0;
+static uint8_t       _loopsPerGif   = 0;   // 0 = disabled
 
 // --- Idle animation (PROGMEM, played between GIFs) ---
-static const AnimatedGIF *_idleAnim       = nullptr;
-static bool               _idlePlaying    = false;
-static uint8_t            _idleFrame      = 0;
+static const AnimatedGIF *_idleAnim        = nullptr;
+static bool               _idlePlaying     = false;
+static uint8_t            _idleFrame       = 0;
 static unsigned long      _idleLastFrameMs = 0;
 static uint8_t            _idleFrameBuf[QGIF_FRAME_SIZE];
-static uint8_t            _idleLoopCount  = 0;
-static uint8_t            _idleLoopTarget = 1;
+static uint8_t            _idleLoopCount   = 0;
+static uint8_t            _idleLoopTarget  = 1;
 
 // ---------------------------------------------------------------------------
 // Private helpers

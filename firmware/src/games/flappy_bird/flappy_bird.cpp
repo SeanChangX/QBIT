@@ -56,16 +56,16 @@ struct FlappyPipe {
 // --------------------------------------------------------------------------
 //  State
 // --------------------------------------------------------------------------
-static int16_t       _birdY4    = 0;   // bird top Y × 4 (sub-pixel)
-static int16_t       _velY4     = 0;
-static bool          _dead      = false;
-static uint8_t       _birdFrame = 0;   // 0=mid, 1=up, 2=down
-static uint8_t       _animTick  = 0;
-static uint32_t      _score     = 0;
-static uint8_t       _speed     = FB_SPEED_INIT;
+static int16_t       _birdY4     = 0;   // bird top Y × 4 (sub-pixel)
+static int16_t       _velY4      = 0;
+static bool          _dead       = false;
+static uint8_t       _birdFrame  = 0;   // 0=mid, 1=up, 2=down
+static uint8_t       _animTick   = 0;
+static uint32_t      _score      = 0;
+static uint8_t       _speed      = FB_SPEED_INIT;
 static unsigned long _lastTickMs = 0;
 static FlappyPipe    _pipes[2];
-static uint16_t      _randState = 1;
+static uint16_t      _randState  = 1;
 
 // --------------------------------------------------------------------------
 //  Simple XOR-shift RNG (same pattern as trex_runner.cpp)

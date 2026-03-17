@@ -6,15 +6,15 @@
 #include "display_helpers.h"
 #include <stdio.h>
 
-static uint8_t  _hours   = 0;
-static uint8_t  _minutes = 0;
-static uint8_t  _seconds = 0;
-static uint8_t  _field   = 0;  // 0=HH, 1=MM, 2=SS
-static uint32_t _remainSec   = 0;
-static unsigned long _lastTickMs     = 0;
+static uint8_t  _hours      = 0;
+static uint8_t  _minutes    = 0;
+static uint8_t  _seconds    = 0;
+static uint8_t  _field      = 0;  // 0=HH, 1=MM, 2=SS
+static uint32_t _remainSec  = 0;
+static unsigned long _lastTickMs = 0;
 static uint32_t _lastDisplaySec = UINT32_MAX;
-static bool     _done    = false;
-static bool     _started = false;
+static bool     _done       = false;
+static bool     _started    = false;
 
 void timerUiEnterSet() {
     _hours   = 0;
