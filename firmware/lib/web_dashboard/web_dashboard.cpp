@@ -665,41 +665,75 @@ static void onCamWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 //  Handlers -- Weather location API
 // ==========================================================================
 
+static void handleWeatherSearch(AsyncWebServerRequest *request);
+
 // GET /api/weather → {city, lat, lon, displayName}
 static void handleGetWeather(AsyncWebServerRequest *request) {
-    StaticJsonDocument<192> doc;
+    // Defensive guard: some router versions/plugins may do prefix matching.
+    // If /api/weather/search lands here, forward to the proper handler.
+    if (request->url() == "/api/weather/search") {
+        handleWeatherSearch(request);
+        return;
+    }
+    Serial.println("[WEATHER] GET /api/weather");
+    StaticJsonDocument<256> doc;
     doc["city"]        = getWeatherCity();
     doc["lat"]         = getWeatherLat();
     doc["lon"]         = getWeatherLon();
     doc["displayName"] = getWeatherDisplayName();
+    // Keep snake_case alias for backward compatibility across UI versions.
+    doc["display_name"] = getWeatherDisplayName();
     String json;
     serializeJson(doc, json);
     request->send(200, "application/json", json);
 }
 
+// Returns request parameter from URL query first, then POST body.
+static bool getParamValue(AsyncWebServerRequest *request, const char *name, String &out) {
+    const AsyncWebParameter *p = request->getParam(name, false);
+    if (!p) p = request->getParam(name, true);
+    if (!p) return false;
+    out = p->value();
+    return true;
+}
+
 // POST /api/weather?lat=&lon=&display_name=&city=&save=1  → updated JSON
 static void handlePostWeather(AsyncWebServerRequest *request) {
-    if (request->hasParam("lat") && request->hasParam("lon")) {
-        float lat = request->getParam("lat")->value().toFloat();
-        float lon = request->getParam("lon")->value().toFloat();
+    Serial.println("[WEATHER] POST /api/weather");
+    String latStr, lonStr;
+    if (getParamValue(request, "lat", latStr) && getParamValue(request, "lon", lonStr)) {
+        float lat = latStr.toFloat();
+        float lon = lonStr.toFloat();
+        Serial.printf("[WEATHER] save request lat=%.5f lon=%.5f\n", lat, lon);
         // Basic range validation
         if (lat < -90.0f || lat > 90.0f || lon < -180.0f || lon > 180.0f) {
+            Serial.println("[WEATHER] rejected: lat/lon out of range");
             request->send(400, "application/json", "{\"error\":\"lat/lon out of range\"}");
             return;
         }
-        String city = request->hasParam("city")
-            ? request->getParam("city")->value() : getWeatherCity();
-        String displayName = request->hasParam("display_name")
-            ? request->getParam("display_name")->value() : getWeatherDisplayName();
+        String city;
+        if (!getParamValue(request, "city", city)) city = getWeatherCity();
+
+        String displayName;
+        if (!getParamValue(request, "display_name", displayName)) {
+            // Also accept camelCase from any older/newer UI variants.
+            if (!getParamValue(request, "displayName", displayName)) {
+                displayName = getWeatherDisplayName();
+            }
+        }
         // Reject suspiciously long or empty values
         if (city.length() == 0 || city.length() > WEATHER_CITY_MAX_LEN)
             city = city.length() > WEATHER_CITY_MAX_LEN ? city.substring(0, WEATHER_CITY_MAX_LEN) : getWeatherCity();
         if (displayName.length() > WEATHER_NAME_MAX_LEN)
             displayName = displayName.substring(0, WEATHER_NAME_MAX_LEN);
+        Serial.printf("[WEATHER] applying city='%s' display='%s'\n", city.c_str(), displayName.c_str());
         // Persist immediately (setWeatherLocation also writes to NVS)
         setWeatherLocation(lat, lon, city, displayName);
-        // Invalidate weather cache so next screen enter fetches fresh data
-        weatherScreenInvalidateCache();
+        // Fetch fresh weather now so active weather screen doesn't show "No data".
+        bool refreshed = weatherScreenRefreshNow();
+        Serial.printf("[WEATHER] refresh after save: %s\n", refreshed ? "ok" : "failed");
+    } else {
+        Serial.println("[WEATHER] save ignored: missing lat/lon params");
     }
     handleGetWeather(request);
 }
@@ -726,13 +760,17 @@ static String urlEncodeParam(const String &s) {
 // · Geocode via Open-Meteo Geocoding API (proxied by the device)
 // · Returns JSON array: [{name, country, lat, lon}] (max 5 results)
 static void handleWeatherSearch(AsyncWebServerRequest *request) {
+    Serial.println("[WEATHER] GET /api/weather/search");
     if (!request->hasParam("q")) {
+        Serial.println("[WEATHER] search rejected: missing q");
         request->send(400, "application/json", "{\"error\":\"Missing q\"}");
         return;
     }
     String q = request->getParam("q")->value();
     q.trim();
+    Serial.printf("[WEATHER] search q='%s'\n", q.c_str());
     if (q.length() == 0 || q.length() > 64) {
+        Serial.println("[WEATHER] search rejected: q length invalid");
         request->send(400, "application/json", "{\"error\":\"q must be 1-64 chars\"}");
         return;
     }
@@ -748,7 +786,9 @@ static void handleWeatherSearch(AsyncWebServerRequest *request) {
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setTimeout(8000);
     http.begin(url);
+    Serial.printf("[WEATHER] geocode url=%s\n", url);
     int code = http.GET();
+    Serial.printf("[WEATHER] geocode HTTP=%d\n", code);
     if (code < 200 || code >= 300) {
         String errMsg = "{\"error\":\"Geocoding unavailable (HTTP " + String(code) + ")\"}";
         http.end();
@@ -761,10 +801,12 @@ static void handleWeatherSearch(AsyncWebServerRequest *request) {
     // Parse and re-emit a compact array
     JsonDocument inDoc;
     if (deserializeJson(inDoc, body) || !inDoc["results"].is<JsonArray>()) {
+        Serial.println("[WEATHER] geocode parse: no results array");
         request->send(200, "application/json", "[]");
         return;
     }
     JsonArray results = inDoc["results"].as<JsonArray>();
+    Serial.printf("[WEATHER] geocode results=%u\n", (unsigned)results.size());
     JsonDocument outDoc;
     JsonArray arr = outDoc.to<JsonArray>();
     for (JsonObject r : results) {
@@ -820,9 +862,10 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/pins",          HTTP_POST, handlePostPins);
     server.on("/api/timezone",      HTTP_GET,  handleGetTimezone);
     server.on("/api/timezone",      HTTP_POST, handlePostTimezone);
+    // Register more specific weather route first to avoid accidental prefix captures.
+    server.on("/api/weather/search",HTTP_GET,  handleWeatherSearch);
     server.on("/api/weather",       HTTP_GET,  handleGetWeather);
     server.on("/api/weather",       HTTP_POST, handlePostWeather);
-    server.on("/api/weather/search",HTTP_GET,  handleWeatherSearch);
 
     // Catch-all: serve .qgif files from LittleFS for browser preview (path-normalized)
     server.onNotFound([](AsyncWebServerRequest *request) {

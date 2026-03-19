@@ -73,6 +73,7 @@ extern void    setWeatherLocation(float lat, float lon,
                                    const String &city, const String &displayName);
 // Cache invalidation (defined in weather_screen.cpp).
 extern void weatherScreenInvalidateCache();
+extern bool weatherScreenRefreshNow();
 
 // ==========================================================================
 //  Web Cam streaming over WebSocket (/ws_cam)

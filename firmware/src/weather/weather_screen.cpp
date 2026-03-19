@@ -1,14 +1,11 @@
 // ==========================================================================
 //  QBIT -- Weather screen implementation
 //
-//  Layout (128×64, U8G2 y = baseline):
-//    y= 0-11  │ Location name centered (font_6x13_tr)
-//    y=13-36  │ 24×24 icon at x=3
-//             │ AQI  string right-aligned (font_6x10_tr, y=24)
-//             │ Hum  string right-aligned (font_6x10_tr, y=36)
-//    y=50     │ Temperature centered in icon column (font_7x14B_tr)
-//    y=53     │ Full-width separator line
-//    y=54-63  │ Condition text centered (font_6x10_tr, y=63)
+//  Layout (128x64, U8G2 y = baseline):
+//    y= 0-11  : Bracketed location title centered  [ <location> ]
+//    y=14-45  : Left area shows enlarged 2x weather condition icon
+//    y=18-58  : Right area shows AQI face icon + AQI value + humidity
+//    y=59     : Temperature value only (degree marker drawn manually)
 //
 //  APIs used (plain HTTP, no HTTPS — avoids cert overhead on ESP32-C3):
 //    Weather: http://api.open-meteo.com  (redirects to HTTPS internally)
@@ -51,6 +48,69 @@ static float    _temperature          = 0.0f;
 static uint8_t  _humidity             = 0;
 static uint8_t  _wmoCode              = 0;
 static int16_t  _aqi                  = -1;   // -1 = unavailable
+
+static void drawXbm2x(int x, int y, uint8_t w, uint8_t h, const uint8_t *bits) {
+    uint8_t bytesPerRow = (w + 7) >> 3;
+    for (uint8_t py = 0; py < h; py++) {
+        for (uint8_t px = 0; px < w; px++) {
+            uint16_t idx = (uint16_t)py * bytesPerRow + (px >> 3);
+            uint8_t b = pgm_read_byte(bits + idx);
+            if (b & (1U << (px & 7))) {
+                u8g2.drawBox(x + (px * 2), y + (py * 2), 2, 2);
+            }
+        }
+    }
+}
+
+// Map European AQI score to 1..5 quality level (5 = worst).
+static uint8_t getAqiLevel(int16_t aqi) {
+    if (aqi < 0)   return 0;
+    if (aqi <= 20) return 1;
+    if (aqi <= 40) return 2;
+    if (aqi <= 60) return 3;
+    if (aqi <= 80) return 4;
+    return 5;
+}
+
+// Tiny AQI icon: face-style mood changes with AQI quality.
+static void drawAqiIcon(int x, int y, int16_t aqi) {
+    u8g2.drawCircle(x + 5, y + 5, 5, U8G2_DRAW_ALL);
+    uint8_t level = getAqiLevel(aqi);
+
+    // Eyes
+    u8g2.drawPixel(x + 3, y + 4);
+    u8g2.drawPixel(x + 7, y + 4);
+
+    if (level == 0) {
+        // Unknown AQI: neutral dash mouth.
+        u8g2.drawHLine(x + 3, y + 8, 5);
+        return;
+    }
+
+    if (level <= 2) {
+        // Good/Fair: smile
+        u8g2.drawPixel(x + 3, y + 7);
+        u8g2.drawPixel(x + 4, y + 8);
+        u8g2.drawPixel(x + 5, y + 8);
+        u8g2.drawPixel(x + 6, y + 8);
+        u8g2.drawPixel(x + 7, y + 7);
+    } else if (level == 3) {
+        // Moderate: flat
+        u8g2.drawHLine(x + 3, y + 8, 5);
+    } else {
+        // Poor/Very poor: sad
+        u8g2.drawPixel(x + 3, y + 9);
+        u8g2.drawPixel(x + 4, y + 8);
+        u8g2.drawPixel(x + 5, y + 8);
+        u8g2.drawPixel(x + 6, y + 8);
+        u8g2.drawPixel(x + 7, y + 9);
+        if (level == 5) {
+            // Very poor: add eyebrows
+            u8g2.drawLine(x + 2, y + 3, x + 4, y + 2);
+            u8g2.drawLine(x + 6, y + 2, x + 8, y + 3);
+        }
+    }
+}
 
 // ==========================================================================
 //  HTTP GET helper (returns body string or empty on error)
@@ -123,15 +183,10 @@ static bool fetchWeatherData() {
 // ==========================================================================
 //  Render weather screen from cache
 //
-//  128×64 layout:
-//
-//  ┌─────────────── Location (5x8_tr) ────────────────┐  y=0..12
-//  ├──────── left col (x=0..74) ──────┬─right (76..127)┤  y=12 h-divider
-//  │ [cond icon 16×16]  AQI          │ [cond icon]     │  y=18..34
-//  │                    nnn          │                 │
-//  │ [humid icon 11×16] Humidity     │   Temp          │  y=41..57
-//  │                    nn %         │   nn °C         │
-//  └──────────────────────────────────┴─────────────────┘
+//  Current visual style is intentionally "info-only" (no frame or dividers).
+//  Content is arranged in two logical columns using `dividerX`:
+//    - Left side: large condition icon and temperature value
+//    - Right side: AQI icon/value and humidity
 // ==========================================================================
 void weatherScreenDraw() {
     if (!_hasData) {
@@ -143,68 +198,89 @@ void weatherScreenDraw() {
     u8g2.setFontMode(1);   // transparent — text doesn't black out background
     u8g2.setBitmapMode(1); // transparent — XBM doesn't black out background
 
-    // --- Frame + dividers ---
-    u8g2.drawFrame(0, 0, 128, 64);
-    u8g2.drawHLine(0, 12, 128);
-    u8g2.drawVLine(75, 13, 50);   // y=13..62
+    const uint8_t dividerX = 54;          // logical split; no divider line is drawn
+    const uint8_t leftW = dividerX;
+    const uint8_t rightX = dividerX + 1;
 
-    // --- Top bar: location name (font_5x8_tr) ---
-    u8g2.setFont(u8g2_font_5x8_tr);
+    // --- Top bar: location name ---
+    u8g2.setFont(u8g2_font_6x10_tr);
     String locName = getWeatherDisplayName();
-    if (locName.length() > 21) locName = locName.substring(0, 18) + "...";
-    uint8_t locW = u8g2.getStrWidth(locName.c_str());
-    u8g2.drawStr((128 - locW) / 2, 10, locName.c_str());
+    String title = "[ " + locName + " ]";
+    while (title.length() > 0 && u8g2.getStrWidth(title.c_str()) > 126) {
+        if (locName.length() > 3) {
+            locName = locName.substring(0, locName.length() - 1);
+            title = "[ " + locName + "... ]";
+        } else {
+            break;
+        }
+    }
+    uint8_t locW = u8g2.getStrWidth(title.c_str());
+    u8g2.drawStr((128 - locW) / 2, 10, title.c_str());
 
     // --- Condition icon ---
     WeatherIconInfo ico = getWeatherIcon(_wmoCode);
 
-    // Left column: condition icon at (3, 18)
-    u8g2.drawXBM(3, 18, ico.width, 16, ico.bits);
+    // Left column: enlarged condition icon
+    uint8_t iconW = ico.width * 2;
+    uint8_t liX = (leftW - iconW) / 2;
+    drawXbm2x(liX, 14, ico.width, 16, ico.bits);
 
-    // Left column: humidity drop icon at (3, 41)  [11×16]
-    u8g2.drawXBM(3, 41, 11, 16, WEATHER_HUMID_ICON);
+    // --- Right column text (AQI + Humidity) ---
+    drawAqiIcon(rightX + 2, 18, _aqi);
+    u8g2.drawXBM(rightX + 2, 41, 11, 16, WEATHER_HUMID_ICON);
 
-    // Right column: condition icon centered in x=76..127 (52 px wide)
-    uint8_t riX = 76 + (52 - ico.width) / 2;
-    u8g2.drawXBM(riX, 18, ico.width, 16, ico.bits);
-
-    // --- Left column text ---
-    u8g2.setFont(u8g2_font_4x6_tr);
-    u8g2.drawStr(23, 24, "AQI");
+    u8g2.setFont(u8g2_font_5x8_tr);
+    u8g2.drawStr(rightX + 18, 25, "AQI");
 
     char aqiBuf[8];
     if (_aqi >= 0)
         snprintf(aqiBuf, sizeof(aqiBuf), "%d", (int)_aqi);
     else
         strlcpy(aqiBuf, "--", sizeof(aqiBuf));
-    u8g2.setFont(u8g2_font_profont10_tr);
-    u8g2.drawStr(23, 33, aqiBuf);
+    u8g2.setFont(u8g2_font_6x10_tr);
+    u8g2.drawStr(rightX + 18, 35, aqiBuf);
 
-    u8g2.setFont(u8g2_font_4x6_tr);
-    u8g2.drawStr(23, 47, "Humidity");
+    u8g2.setFont(u8g2_font_5x8_tr);
+    u8g2.drawStr(rightX + 18, 48, "Humidity");
 
     char humBuf[8];
     snprintf(humBuf, sizeof(humBuf), "%u %%", (unsigned)_humidity);
-    u8g2.setFont(u8g2_font_profont10_tr);
-    u8g2.drawStr(22, 56, humBuf);
-
-    // --- Right column text ---
-    u8g2.setFont(u8g2_font_4x6_tr);
-    uint8_t lblW = u8g2.getStrWidth("Temp");
-    u8g2.drawStr(76 + (52 - lblW) / 2, 45, "Temp");
+    u8g2.setFont(u8g2_font_6x10_tr);
+    u8g2.drawStr(rightX + 18, 58, humBuf);
 
     int tempInt = (int)(_temperature + (_temperature >= 0 ? 0.5f : -0.5f));
-    char tempBuf[10];
-    snprintf(tempBuf, sizeof(tempBuf), "%d \xB0""C", tempInt);
-    u8g2.setFont(u8g2_font_profont10_tr);
-    uint8_t tempValW = u8g2.getStrWidth(tempBuf);
-    u8g2.drawStr(76 + (52 - tempValW) / 2, 53, tempBuf);
+    char tempNumBuf[8];
+    // Some u8g2 fonts don't include the degree glyph; draw it manually.
+    snprintf(tempNumBuf, sizeof(tempNumBuf), "%d", tempInt);
+    u8g2.setFont(u8g2_font_7x14B_tr);
+    uint8_t numW = u8g2.getStrWidth(tempNumBuf);
+    uint8_t cW = u8g2.getStrWidth("C");
+    const uint8_t unitGap = 4; // visual space between number and C
+    uint8_t tempValW = numW + unitGap + cW;
+    int tempX = (leftW - tempValW) / 2;
+    int tempY = 59;
+    int cX = tempX + numW + unitGap;
+    u8g2.drawStr(tempX, tempY, tempNumBuf);
+    u8g2.drawStr(cX, tempY, "C");
+    // Degree marker sits in the gap before 'C' to avoid overlap.
+    int degX = cX - 2;
+    int degY = tempY - 11;
+    u8g2.drawCircle(degX, degY, 1, U8G2_DRAW_ALL);
 
     u8g2.setFontMode(0);
     u8g2.setBitmapMode(0);
 
     rotateBuffer180();
     u8g2.sendBuffer();
+}
+
+bool weatherScreenRefreshNow() {
+    bool ok = fetchWeatherData();
+    if (ok) {
+        _hasData = true;
+        _lastFetchMs = millis();
+    }
+    return ok;
 }
 
 // ==========================================================================
@@ -222,11 +298,8 @@ void weatherScreenEnter() {
     // Show loading indicator while fetching
     showText("[ Weather ]", "", "Loading...", "");
 
-    bool ok = fetchWeatherData();
-    if (ok) {
-        _hasData    = true;
-        _lastFetchMs = millis();
-    } else {
+    bool ok = weatherScreenRefreshNow();
+    if (!ok) {
         // Keep stale data if we have it; otherwise show error
         if (!_hasData) {
             showText("[ Weather ]", "", "Fetch failed.", "Check Wi-Fi");

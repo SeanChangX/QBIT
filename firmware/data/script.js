@@ -420,15 +420,33 @@ dz.addEventListener('drop', function (e) {
   var wtMsg     = document.getElementById('wtMsg');
   var _selected = null; // {lat, lon, name, country}
 
+  function applyWeatherLocation(d) {
+    var name = (d && (d.displayName || d.display_name || d.city)) || '--';
+    wtName.textContent = name;
+  }
+
   // Fetch current saved location on load
-  fetch('/api/weather').then(function (r) { return r.json(); }).then(function (d) {
-    wtName.textContent = d.displayName || '--';
-  }).catch(function () {});
+  function refreshWeatherLocation() {
+    return fetch('/api/weather?_ts=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('GET /api/weather failed: HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (d) {
+        console.log('[WEATHER] loaded location', d);
+        applyWeatherLocation(d);
+      })
+      .catch(function (e) {
+        console.error('[WEATHER] location load failed', e);
+      });
+  }
+  refreshWeatherLocation();
 
   // Search
   function doSearch() {
     var q = wtQuery.value.trim();
     if (!q) return;
+    console.log('[WEATHER] search click q=', q);
     btnSearch.disabled = true;
     wtResults.style.display = 'none';
     wtResults.innerHTML = '';
@@ -436,8 +454,12 @@ dz.addEventListener('drop', function (e) {
     _selected = null;
     btnSave.disabled = true;
     fetch('/api/weather/search?q=' + encodeURIComponent(q))
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (!r.ok) throw new Error('Search request failed: HTTP ' + r.status);
+        return r.json();
+      })
       .then(function (arr) {
+        console.log('[WEATHER] search results', arr);
         if (arr && arr.error) {
           wtMsg.className = 'msg error';
           wtMsg.textContent = 'Search error: ' + arr.error;
@@ -456,7 +478,7 @@ dz.addEventListener('drop', function (e) {
           html += '<div class="file" style="cursor:pointer" data-idx="' + i + '">';
           html += '<span class="file-name">' + label + '</span>';
           html += '<span class="file-size">' + item.lat.toFixed(2) + ', ' + item.lon.toFixed(2) + '</span>';
-          html += '<button class="btn btn-play" type="button">Select</button>';
+          html += '<input type="radio" name="wtSelect" class="wt-radio" aria-label="Select ' + label.replace(/"/g, '&quot;') + '">';
           html += '</div>';
         });
         html += '</div>';
@@ -467,19 +489,33 @@ dz.addEventListener('drop', function (e) {
         rows.forEach(function (row) {
           var idx = parseInt(row.getAttribute('data-idx'), 10);
           var item = arr[idx];
-          row.querySelector('.btn-play').addEventListener('click', function () {
+          var radio = row.querySelector('.wt-radio');
+          function selectRow() {
             _selected = item;
             // Highlight selected row
-            rows.forEach(function (r2) { r2.style.background = ''; });
+            rows.forEach(function (r2) {
+              r2.style.background = '';
+              var r = r2.querySelector('.wt-radio');
+              if (r) r.checked = false;
+            });
             row.style.background = 'rgba(var(--accent-rgb,0,122,204),.15)';
+            if (radio) radio.checked = true;
             btnSave.disabled = false;
             wtMsg.style.display = 'none';
-          });
+          }
+          row.addEventListener('click', selectRow);
+          if (radio) {
+            radio.addEventListener('click', function (e) {
+              e.stopPropagation();
+              selectRow();
+            });
+          }
         });
       })
-      .catch(function () {
+      .catch(function (e) {
+        console.error('[WEATHER] search failed', e);
         wtMsg.className = 'msg error';
-        wtMsg.textContent = 'Search failed. Check connection.';
+        wtMsg.textContent = 'Search failed: ' + (e && e.message ? e.message : 'Check connection.');
         wtMsg.style.display = 'block';
       })
       .finally(function () { btnSearch.disabled = false; });
@@ -502,9 +538,15 @@ dz.addEventListener('drop', function (e) {
                + '&display_name=' + encodeURIComponent(displayName)
                + '&save=1';
     fetch('/api/weather?' + params, { method: 'POST' })
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (!r.ok) throw new Error('Save request failed: HTTP ' + r.status);
+        return r.json();
+      })
       .then(function (d) {
-        wtName.textContent = d.displayName || displayName;
+        console.log('[WEATHER] save response', d);
+        // Immediate UI update from selected value for snappy feedback.
+        wtName.textContent = displayName;
+        applyWeatherLocation(d);
         wtMsg.className = 'msg ok';
         wtMsg.textContent = 'Saved. Weather screen will show new location next time.';
         wtMsg.style.display = 'block';
@@ -515,10 +557,16 @@ dz.addEventListener('drop', function (e) {
           btnSave.textContent = 'Save Location';
           btnSave.disabled = false;
         }, 2000);
+
+        // Re-fetch from device to confirm persisted value in UI.
+        setTimeout(function () {
+          refreshWeatherLocation();
+        }, 150);
       })
-      .catch(function () {
+      .catch(function (e) {
+        console.error('[WEATHER] save failed', e);
         wtMsg.className = 'msg error';
-        wtMsg.textContent = 'Save failed.';
+        wtMsg.textContent = 'Save failed: ' + (e && e.message ? e.message : 'unknown error');
         wtMsg.style.display = 'block';
         btnSave.disabled = false;
       });

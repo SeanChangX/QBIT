@@ -14,6 +14,10 @@ void weatherScreenEnter();
 // Redraw the weather screen using cached data (called periodically by display task).
 void weatherScreenDraw();
 
+// Fetch weather data now and update cache.
+// Returns true if fresh data was fetched successfully.
+bool weatherScreenRefreshNow();
+
 // Invalidate the cache so the next weatherScreenEnter() forces a fresh fetch.
 void weatherScreenInvalidateCache();
 
