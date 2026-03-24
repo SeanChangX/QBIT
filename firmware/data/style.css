@@ -4,7 +4,7 @@
   font-style: normal;
   font-weight: 400 700;
   font-display: swap;
-  src: url(/inter-latin.woff2) format('woff2');
+  src: url('inter-latin.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
     U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
     U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
@@ -82,11 +82,44 @@ body {
   flex-shrink: 0;
   padding: 0;
   line-height: 1;
+  overflow: hidden;
 }
 .theme-toggle:hover {
   background: var(--bg-hover);
   border-color: var(--red);
   color: var(--text-primary);
+}
+.theme-toggle .theme-icon {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.theme-icon-sun,
+.theme-icon-moon {
+  transform-origin: 50% 50%;
+  transition: transform .3s ease, opacity .25s ease;
+}
+.theme-icon-sun {
+  opacity: 0;
+  transform: scale(0.6) rotate(-45deg);
+}
+.theme-icon-moon {
+  fill: none;
+  stroke: currentColor;
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+.theme-toggle.is-light .theme-icon-sun {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+.theme-toggle.is-light .theme-icon-moon {
+  opacity: 0;
+  transform: scale(0.6) rotate(45deg);
 }
 
 /* Header */
@@ -537,6 +570,65 @@ body {
 }
 .input-text:focus {
   border-color: var(--red);
+}
+.input-number {
+  width: 92px;
+  text-align: center;
+  flex: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+.input-number::-webkit-outer-spin-button,
+.input-number::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.input-number[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.number-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-accent);
+  height: 30px;
+  overflow: hidden;
+}
+.number-stepper:focus-within {
+  border-color: var(--red);
+}
+.step-btn {
+  width: 30px;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.step-btn:hover {
+  background: var(--bg-hover);
+}
+#mqttPortDec {
+  border-right: 1px solid var(--border);
+}
+#mqttPortInc {
+  border-left: 1px solid var(--border);
+}
+.step-icon {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  fill: none;
 }
 .setting-val-wide {
   font-size: .82em;
