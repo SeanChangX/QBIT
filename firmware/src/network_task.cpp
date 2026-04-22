@@ -254,11 +254,17 @@ static void wsEvent(WebsocketsClient &client, WebsocketsEvent event, WSInterface
             xEventGroupClearBits(connectivityBits, WS_CONNECTED_BIT);
             Serial.println("[WS] Disconnected");
             mqttPublishServerConnectionState(false);
+            // stopPortal() after captive provisioning tears down the link briefly; the socket closes
+            // here then reconnects seconds later. Suppress OLED "Server Offline" in the same window
+            // used for WiFi disconnect UI (set when stopPortal runs / portal success is latched).
             {
-                NetworkEvent evt = {};
-                evt.kind = NetworkEvent::WS_STATUS;
-                evt.connected = false;
-                xQueueSend(networkEventQueue, &evt, 0);
+                const unsigned long until = _wifiSuppressDisconnectUiUntilMs;
+                if (until == 0 || millis() >= until) {
+                    NetworkEvent evt = {};
+                    evt.kind = NetworkEvent::WS_STATUS;
+                    evt.connected = false;
+                    xQueueSend(networkEventQueue, &evt, 0);
+                }
             }
             break;
         case WebsocketsEvent::GotPing:
