@@ -112,4 +112,9 @@ void    setWeatherDisplayName(const String &name);
 void    setWeatherLocation(float lat, float lon,
                            const String &city, const String &displayName);
 
+// When false, weather location may be updated from IP (same pass as timezone auto-detect).
+// Set true after the user saves a location in the web dashboard.
+bool getWeatherManual();
+void setWeatherManual(bool manual);
+
 #endif // SETTINGS_H

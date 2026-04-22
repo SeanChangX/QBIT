@@ -66,6 +66,7 @@ static String  _weatherCity        = "London";
 static float   _weatherLat         = 51.5074f;
 static float   _weatherLon         = -0.1278f;
 static String  _weatherDisplayName = "London, GB";
+static bool    _weatherManual      = false;
 
 // ==========================================================================
 //  Time format (24h/12h)
@@ -180,6 +181,14 @@ void loadSettings() {
     _weatherLon         = _prefs.getFloat("wtLon",  -0.1278f);
     _weatherDisplayName = _prefs.getString("wtName", "London, GB");
     if (_weatherDisplayName.length() > WEATHER_NAME_MAX_LEN) _weatherDisplayName = _weatherDisplayName.substring(0, WEATHER_NAME_MAX_LEN);
+    if (_prefs.isKey("wtMan")) {
+        _weatherManual = _prefs.getBool("wtMan", false);
+    } else if (_prefs.isKey("wtCity") || _prefs.isKey("wtLat")) {
+        // Legacy NVS had weather before pin flag existed — do not overwrite with IP.
+        _weatherManual = true;
+    } else {
+        _weatherManual = false;
+    }
 
     xSemaphoreGive(_prefsMutex);
 
@@ -226,6 +235,7 @@ void saveSettings() {
     _prefs.putFloat("wtLat",     _weatherLat);
     _prefs.putFloat("wtLon",     _weatherLon);
     _prefs.putString("wtName",   _weatherDisplayName);
+    _prefs.putBool("wtMan",     _weatherManual);
     xSemaphoreGive(_prefsMutex);
     Serial.println("Settings saved to NVS");
 }
@@ -398,4 +408,14 @@ void setWeatherLocation(float lat, float lon,
         xSemaphoreGive(_prefsMutex);
     }
     weatherScreenInvalidateCache();
+}
+
+bool getWeatherManual() { return _weatherManual; }
+
+void setWeatherManual(bool manual) {
+    _weatherManual = manual;
+    if (_prefsReady && xSemaphoreTake(_prefsMutex, portMAX_DELAY) == pdTRUE) {
+        _prefs.putBool("wtMan", _weatherManual);
+        xSemaphoreGive(_prefsMutex);
+    }
 }

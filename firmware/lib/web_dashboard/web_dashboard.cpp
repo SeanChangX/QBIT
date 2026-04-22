@@ -729,6 +729,7 @@ static void handlePostWeather(AsyncWebServerRequest *request) {
         Serial.printf("[WEATHER] applying city='%s' display='%s'\n", city.c_str(), displayName.c_str());
         // Persist immediately (setWeatherLocation also writes to NVS)
         setWeatherLocation(lat, lon, city, displayName);
+        setWeatherManual(true);
         // Fetch fresh weather now so active weather screen doesn't show "No data".
         bool refreshed = weatherScreenRefreshNow();
         Serial.printf("[WEATHER] refresh after save: %s\n", refreshed ? "ok" : "failed");
