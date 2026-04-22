@@ -2,14 +2,13 @@
 //  QBIT -- Weather screen implementation
 //
 //  Layout (128x64, U8G2 y = baseline):
-//    y= 0-11  : Bracketed location title centered  [ <location> ]
-//    y=14-45  : Left area shows enlarged 2x weather condition icon
-//    y=18-58  : Right area shows AQI face icon + AQI value + humidity
-//    y=59     : Temperature value only (degree marker drawn manually)
+//    y≈10     : Location title; ~3px gap below, then main content.
+//    Left: 2x condition icon from y≈17; temperature baseline ~62 (fits 64 rows).
+//    Right: small icons ~x=58, text from x=75 (gap after icons; strings fit <128).
 //
 //  APIs used (plain HTTP, no HTTPS — avoids cert overhead on ESP32-C3):
 //    Weather: http://api.open-meteo.com  (redirects to HTTPS internally)
-//    AQI:     http://air-quality-api.open-meteo.com
+//    AQI:     http://air-quality-api.open-meteo.com (European AQI index)
 //
 //  NOTE: We use plain http:// so WiFiClient (not WiFiClientSecure) is
 //  sufficient, keeping RAM usage low.  HTTPClient follows redirects like the
@@ -47,7 +46,7 @@ static bool          _hasData         = false;
 static float    _temperature          = 0.0f;
 static uint8_t  _humidity             = 0;
 static uint8_t  _wmoCode              = 0;
-static int16_t  _aqi                  = -1;   // -1 = unavailable
+static int16_t  _aqi                  = -1;   // European AQI; -1 = unavailable
 
 static void drawXbm2x(int x, int y, uint8_t w, uint8_t h, const uint8_t *bits) {
     uint8_t bytesPerRow = (w + 7) >> 3;
@@ -159,7 +158,7 @@ static bool fetchWeatherData() {
         _wmoCode     = (uint8_t)cur["weather_code"].as<int>();
     }
 
-    // --- AQI API ---
+    _aqi = -1;
     char aqiUrl[256];
     snprintf(aqiUrl, sizeof(aqiUrl),
         "http://air-quality-api.open-meteo.com/v1/air-quality"
@@ -187,7 +186,7 @@ static bool fetchWeatherData() {
 //  Current visual style is intentionally "info-only" (no frame or dividers).
 //  Content is arranged in two logical columns using `dividerX`:
 //    - Left side: large condition icon and temperature value
-//    - Right side: AQI icon/value and humidity
+//    - Right side: AQI + humidity (icons then spaced text, within 128px width)
 // ==========================================================================
 void weatherScreenDraw() {
     if (!_hasData) {
@@ -202,6 +201,20 @@ void weatherScreenDraw() {
     const uint8_t dividerX = 54;          // logical split; no divider line is drawn
     const uint8_t leftW = dividerX;
     const uint8_t rightX = dividerX + 1;
+
+    // Vertical: extra space below title before main blocks (~3px).
+    const uint8_t kGapBelowTitle = 3;
+    const uint8_t yIconMain     = 14 + kGapBelowTitle;   // big condition icon (2x16 → ~48px tall)
+    const uint8_t yAqiIcon      = 18 + kGapBelowTitle;
+    const uint8_t yAqiLabel     = 25 + kGapBelowTitle;
+    const uint8_t yAqiValue     = 35 + kGapBelowTitle;
+    const uint8_t yHumidIcon    = 41 + kGapBelowTitle;
+    const uint8_t yHumidLabel   = 48 + kGapBelowTitle;
+    const uint8_t yHumidValue   = 58 + kGapBelowTitle;
+
+    // Right column: small icons (~11px) then a clear gap before text (fits in 128px).
+    const uint8_t rightIconX = rightX + 3;
+    const uint8_t rightTextX = rightIconX + 11 + 6; // icon width + gap
 
     // --- Top bar: location name ---
     u8g2.setFont(u8g2_font_6x10_tr);
@@ -224,14 +237,14 @@ void weatherScreenDraw() {
     // Left column: enlarged condition icon
     uint8_t iconW = ico.width * 2;
     uint8_t liX = (leftW - iconW) / 2;
-    drawXbm2x(liX, 14, ico.width, 16, ico.bits);
+    drawXbm2x(liX, yIconMain, ico.width, 16, ico.bits);
 
-    // --- Right column text (AQI + Humidity) ---
-    drawAqiIcon(rightX + 2, 18, _aqi);
-    u8g2.drawXBM(rightX + 2, 41, 11, 16, WEATHER_HUMID_ICON);
+    // --- Right column (AQI + Humidity) ---
+    drawAqiIcon(rightIconX, yAqiIcon, _aqi);
+    u8g2.drawXBM(rightIconX, yHumidIcon, 11, 16, WEATHER_HUMID_ICON);
 
     u8g2.setFont(u8g2_font_5x8_tr);
-    u8g2.drawStr(rightX + 14, 25, "EU AQI");
+    u8g2.drawStr(rightTextX, yAqiLabel, "EU AQI");
 
     char aqiBuf[8];
     if (_aqi >= 0)
@@ -239,15 +252,15 @@ void weatherScreenDraw() {
     else
         strlcpy(aqiBuf, "--", sizeof(aqiBuf));
     u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(rightX + 14, 35, aqiBuf);
+    u8g2.drawStr(rightTextX, yAqiValue, aqiBuf);
 
     u8g2.setFont(u8g2_font_5x8_tr);
-    u8g2.drawStr(rightX + 14, 48, "Humidity");
+    u8g2.drawStr(rightTextX, yHumidLabel, "Humidity");
 
     char humBuf[8];
-    snprintf(humBuf, sizeof(humBuf), "%u %%", (unsigned)_humidity);
+    snprintf(humBuf, sizeof(humBuf), "%u%%", (unsigned)_humidity);
     u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(rightX + 14, 58, humBuf);
+    u8g2.drawStr(rightTextX, yHumidValue, humBuf);
 
     int tempInt = (int)(_temperature + (_temperature >= 0 ? 0.5f : -0.5f));
     char tempNumBuf[8];
@@ -259,7 +272,7 @@ void weatherScreenDraw() {
     const uint8_t unitGap = 4; // visual space between number and C
     uint8_t tempValW = numW + unitGap + cW;
     int tempX = (leftW - tempValW) / 2;
-    int tempY = 59;
+    int tempY = 62;
     int cX = tempX + numW + unitGap;
     u8g2.drawStr(tempX, tempY, tempNumBuf);
     u8g2.drawStr(cX, tempY, "C");

@@ -471,7 +471,7 @@ dz.addEventListener('drop', function (e) {
     if (!q) return;
     console.log('[WEATHER] search click q=', q);
     btnSearch.disabled = true;
-    wtResults.style.display = 'none';
+    wtResults.hidden = true;
     wtResults.innerHTML = '';
     wtMsg.style.display = 'none';
     _selected = null;
@@ -495,44 +495,42 @@ dz.addEventListener('drop', function (e) {
           wtMsg.style.display = 'block';
           return;
         }
-        var html = '<div class="file-list">';
+        var html = '<div class="wt-results-list" role="listbox" aria-label="Search results">';
         arr.forEach(function (item, i) {
           var label = item.name + (item.country ? ', ' + item.country : '');
-          html += '<div class="file" style="cursor:pointer" data-idx="' + i + '">';
-          html += '<span class="file-name">' + label + '</span>';
-          html += '<span class="file-size">' + item.lat.toFixed(2) + ', ' + item.lon.toFixed(2) + '</span>';
-          html += '<input type="radio" name="wtSelect" class="wt-radio" aria-label="Select ' + label.replace(/"/g, '&quot;') + '">';
-          html += '</div>';
+          var labelEsc = String(label)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/"/g, '&quot;');
+          var coords = item.lat.toFixed(2) + ', ' + item.lon.toFixed(2);
+          html += '<button type="button" class="wt-result" data-idx="' + i + '" role="option" aria-selected="false">';
+          html += '<span class="wt-result-text">';
+          html += '<span class="wt-result-main">' + labelEsc + '</span>';
+          html += '<span class="wt-result-meta">' + coords + '</span>';
+          html += '</span>';
+          html += '<span class="wt-result-check" aria-hidden="true">';
+          html += '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+          html += '</span></button>';
         });
         html += '</div>';
         wtResults.innerHTML = html;
-        wtResults.style.display = 'block';
-        // Bind select buttons
-        var rows = wtResults.querySelectorAll('[data-idx]');
+        wtResults.hidden = false;
+        var rows = wtResults.querySelectorAll('.wt-result');
         rows.forEach(function (row) {
           var idx = parseInt(row.getAttribute('data-idx'), 10);
           var item = arr[idx];
-          var radio = row.querySelector('.wt-radio');
           function selectRow() {
             _selected = item;
-            // Highlight selected row
             rows.forEach(function (r2) {
-              r2.style.background = '';
-              var r = r2.querySelector('.wt-radio');
-              if (r) r.checked = false;
+              r2.classList.remove('is-selected');
+              r2.setAttribute('aria-selected', 'false');
             });
-            row.style.background = 'rgba(var(--accent-rgb,0,122,204),.15)';
-            if (radio) radio.checked = true;
+            row.classList.add('is-selected');
+            row.setAttribute('aria-selected', 'true');
             btnSave.disabled = false;
             wtMsg.style.display = 'none';
           }
           row.addEventListener('click', selectRow);
-          if (radio) {
-            radio.addEventListener('click', function (e) {
-              e.stopPropagation();
-              selectRow();
-            });
-          }
         });
       })
       .catch(function (e) {

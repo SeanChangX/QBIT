@@ -198,12 +198,19 @@
       <label class="setting-label">Location</label>
       <span class="setting-val-wide" id="wtName">--</span>
     </div>
-    <div class="setting">
-      <label class="setting-label">Search</label>
-      <input type="text" id="wtQuery" class="input-text" maxlength="64" placeholder="City name">
-      <button class="btn btn-secondary" id="btnWtSearch" style="flex:none;width:auto;padding:0 10px">Go</button>
+    <div class="setting wt-search-row">
+      <label class="setting-label" for="wtQuery">Search</label>
+      <div class="wt-search-wrap">
+        <input type="text" id="wtQuery" class="input-text wt-search-input" maxlength="64" placeholder="City name" autocomplete="off">
+        <button type="button" class="btn-wt-search" id="btnWtSearch" aria-label="Search">
+          <svg class="wt-search-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+            <circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2"/>
+            <path d="M15 15l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
     </div>
-    <div id="wtResults" style="display:none;margin-top:6px"></div>
+    <div id="wtResults" class="wt-results-host" hidden></div>
     <button class="btn btn-save" id="btnWtSave" disabled>Save Location</button>
     <div class="msg" id="wtMsg"></div>
   </div>
