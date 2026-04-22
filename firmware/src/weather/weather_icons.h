@@ -24,7 +24,6 @@ struct WeatherIconInfo {
 
 // --------------------------------------------------------------------------
 //  Clear — sun with rays (15×16)
-//  Source: image_weather_sun_bits
 // --------------------------------------------------------------------------
 static const uint8_t WEATHER_ICON_CLEAR[] PROGMEM = {
     0x80,0x00,  // row 0
@@ -47,7 +46,6 @@ static const uint8_t WEATHER_ICON_CLEAR[] PROGMEM = {
 
 // --------------------------------------------------------------------------
 //  Clouds — cloud with partial sun (17×16)
-//  Source: image_weather_cloud_sunny_bits
 // --------------------------------------------------------------------------
 static const uint8_t WEATHER_ICON_CLOUDS[] PROGMEM = {
     0x00,0x04,0x00,  // row 0
@@ -70,7 +68,6 @@ static const uint8_t WEATHER_ICON_CLOUDS[] PROGMEM = {
 
 // --------------------------------------------------------------------------
 //  Rain — cloud with rain drops (17×16)
-//  Source: image_weather_cloud_rain_bits
 // --------------------------------------------------------------------------
 static const uint8_t WEATHER_ICON_RAIN[] PROGMEM = {
     0x00,0x00,0x00,  // row 0
@@ -93,7 +90,6 @@ static const uint8_t WEATHER_ICON_RAIN[] PROGMEM = {
 
 // --------------------------------------------------------------------------
 //  Thunderstorm — cloud with lightning bolt (17×16)
-//  Source: image_weather_cloud_lightning_bolt_bits
 // --------------------------------------------------------------------------
 static const uint8_t WEATHER_ICON_STORM[] PROGMEM = {
     0x00,0x00,0x00,  // row 0
@@ -116,7 +112,6 @@ static const uint8_t WEATHER_ICON_STORM[] PROGMEM = {
 
 // --------------------------------------------------------------------------
 //  Mist / Wind (15×16)
-//  Source: image_weather_wind_bits
 // --------------------------------------------------------------------------
 static const uint8_t WEATHER_ICON_MIST[] PROGMEM = {
     0x00,0x00,  // row 0
@@ -139,7 +134,6 @@ static const uint8_t WEATHER_ICON_MIST[] PROGMEM = {
 
 // --------------------------------------------------------------------------
 //  Snow — snowflake / cloud (16×16)
-//  Source: image_imgbitmap_png_bits
 // --------------------------------------------------------------------------
 static const uint8_t WEATHER_ICON_SNOW[] PROGMEM = {
     0x00,0x00,  // row 0
@@ -161,8 +155,7 @@ static const uint8_t WEATHER_ICON_SNOW[] PROGMEM = {
 };
 
 // --------------------------------------------------------------------------
-//  Humidity water-drop icon — 11×16, XBM format (LSB-first)
-//  Source: image_Layer_5_bits from reference (already in u8g2/XBM format)
+//  Humidity water-drop (11×16, XBM LSB-first)
 // --------------------------------------------------------------------------
 static const uint8_t WEATHER_HUMID_ICON[] PROGMEM = {
     0x20, 0x00, 0x20, 0x00, 0x30, 0x00, 0x50, 0x00,

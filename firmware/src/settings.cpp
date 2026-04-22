@@ -61,11 +61,16 @@ static bool _negativeGif     = false;
 // Time format: true = 24h, false = 12h
 static bool _timeFormat24h   = true;
 
-// Weather location (neutral default for first boot; user sets via dashboard)
-static String  _weatherCity        = "London";
-static float   _weatherLat         = 51.5074f;
-static float   _weatherLon         = -0.1278f;
-static String  _weatherDisplayName = "London, GB";
+// Weather factory defaults (used for static init and NVS fallbacks in loadSettings)
+static const char     kWeatherCityDefault[] = "DIT Robotics";
+static const char     kWeatherNameDefault[] = "DIT, Hsinchu";
+static constexpr float kWeatherLatDefault  = 24.7949762f;
+static constexpr float kWeatherLonDefault  = 120.9961819f;
+
+static String  _weatherCity        = kWeatherCityDefault;
+static float   _weatherLat         = kWeatherLatDefault;
+static float   _weatherLon         = kWeatherLonDefault;
+static String  _weatherDisplayName = kWeatherNameDefault;
 static bool    _weatherManual      = false;
 
 // ==========================================================================
@@ -174,12 +179,12 @@ void loadSettings() {
     _flappyHighScore = _prefs.getUInt("flappyHi",  0);
     _carHighScore    = _prefs.getUInt("carHi",     0);
 
-    // Weather location (factory default London; override via dashboard / NVS)
-    _weatherCity        = _prefs.getString("wtCity", "London");
+    // Weather location (override via dashboard / NVS)
+    _weatherCity        = _prefs.getString("wtCity", kWeatherCityDefault);
     if (_weatherCity.length() > WEATHER_CITY_MAX_LEN) _weatherCity = _weatherCity.substring(0, WEATHER_CITY_MAX_LEN);
-    _weatherLat         = _prefs.getFloat("wtLat",  51.5074f);
-    _weatherLon         = _prefs.getFloat("wtLon",  -0.1278f);
-    _weatherDisplayName = _prefs.getString("wtName", "London, GB");
+    _weatherLat         = _prefs.getFloat("wtLat", kWeatherLatDefault);
+    _weatherLon         = _prefs.getFloat("wtLon", kWeatherLonDefault);
+    _weatherDisplayName = _prefs.getString("wtName", kWeatherNameDefault);
     if (_weatherDisplayName.length() > WEATHER_NAME_MAX_LEN) _weatherDisplayName = _weatherDisplayName.substring(0, WEATHER_NAME_MAX_LEN);
     if (_prefs.isKey("wtMan")) {
         _weatherManual = _prefs.getBool("wtMan", false);
