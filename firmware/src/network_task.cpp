@@ -653,11 +653,18 @@ void networkTask(void *param) {
                         _tzCheckAfterMs = millis() + 5000;
                     _versionCheckAfterMs = millis() + 15000;
                 }
-                if (_portalRestartedForReconnect) {
+                const bool portalSuccess = (NW.getPortalState() == NetWizardPortalState::SUCCESS);
+                if (_portalRestartedForReconnect || portalSuccess) {
                     _portalRestartedForReconnect = false;
+                    _portalRetryAfterMs = 0;
                     xEventGroupClearBits(connectivityBits, PORTAL_ACTIVE_BIT);
                     NW.stopPortal();
-                    Serial.println("[WiFi] Reconnected, stopping AP portal");
+                    wifiRestoreStaTxPower();
+                    if (portalSuccess) {
+                        Serial.println("[WiFi] Provisioning success, stopping AP portal");
+                    } else {
+                        Serial.println("[WiFi] Reconnected, stopping AP portal");
+                    }
                 }
                 _wifiLostMs = 0;
             }

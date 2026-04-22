@@ -11,12 +11,12 @@ const ui = {
     refreshBtn: document.getElementById('refresh-btn'),
 };
 
-let releaseData = null;
-
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
-    const isDark = !localStorage.getItem('qbit-light-mode');
-    if (!isDark) document.body.classList.add('light-mode');
+    const savedTheme = localStorage.getItem('theme');
+    const isLight = savedTheme === 'light';
+    if (isLight) document.documentElement.classList.add('light-mode');
+    syncThemeButton();
     ui.themeBtn.addEventListener('click', toggleTheme);
 
     loadLatestVersion();
@@ -24,8 +24,17 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function toggleTheme() {
-    document.body.classList.toggle('light-mode');
-    localStorage.setItem('qbit-light-mode', document.body.classList.contains('light-mode') ? 'true' : '');
+    document.documentElement.classList.toggle('light-mode');
+    const isLight = document.documentElement.classList.contains('light-mode');
+    localStorage.setItem('theme', isLight ? 'light' : 'dark');
+    syncThemeButton();
+}
+
+function syncThemeButton() {
+    const isLight = document.documentElement.classList.contains('light-mode');
+    ui.themeBtn.classList.toggle('is-light', isLight);
+    ui.themeBtn.setAttribute('aria-pressed', isLight ? 'true' : 'false');
+    ui.themeBtn.setAttribute('aria-label', isLight ? 'Switch to dark mode' : 'Switch to light mode');
 }
 
 // Firmware info
@@ -41,13 +50,17 @@ async function loadLatestVersion() {
         if (!response.ok) throw new Error(`Failed to fetch latest.json: ${response.status}`);
         const latestJson = await response.json();
 
-        releaseData = latestJson;
         ui.versionEl.textContent = latestJson.version || 'Unknown';
         ui.timestampEl.textContent = formatDate(latestJson.timestamp) || 'Unknown';
-        if (latestJson.files && latestJson.files['firmware.bin']) {
-            const fw = latestJson.files['firmware.bin'];
-            ui.firmwareSizeEl.textContent = formatBytes(fw.size);
-            ui.firmwareMd5El.textContent = fw.md5.substring(0, 16) + '...';
+        const fw = latestJson.files && latestJson.files['firmware.bin'];
+        if (fw) {
+            ui.firmwareSizeEl.textContent = typeof fw.size === 'number' ? formatBytes(fw.size) : 'Unknown';
+            ui.firmwareMd5El.textContent = typeof fw.md5 === 'string' && fw.md5.length >= 16
+                ? fw.md5.substring(0, 16) + '...'
+                : 'Unknown';
+        } else {
+            ui.firmwareSizeEl.textContent = 'Unknown';
+            ui.firmwareMd5El.textContent = 'Unknown';
         }
     } catch (error) {
         console.error('Load version failed:', error);

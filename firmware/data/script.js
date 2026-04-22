@@ -77,6 +77,8 @@ function fmt(b) {
   var btnMqtt     = document.getElementById('btnMqtt');
   var mqttHost    = document.getElementById('mqttHost');
   var mqttPort    = document.getElementById('mqttPort');
+  var mqttPortDec = document.getElementById('mqttPortDec');
+  var mqttPortInc = document.getElementById('mqttPortInc');
   var mqttUser    = document.getElementById('mqttUser');
   var mqttPass    = document.getElementById('mqttPass');
   var mqttPrefix  = document.getElementById('mqttPrefix');
@@ -86,6 +88,14 @@ function fmt(b) {
   function updateMqttBtn() {
     btnMqtt.textContent = _mqttOn ? 'ON' : 'OFF';
     btnMqtt.classList.toggle('muted', !_mqttOn);
+  }
+
+  function normalizePort(val) {
+    var n = parseInt(val, 10);
+    if (isNaN(n)) n = 1883;
+    if (n < 1) n = 1;
+    if (n > 65535) n = 65535;
+    return n;
   }
 
   fetch('/api/mqtt').then(function (r) { return r.json(); }).then(function (d) {
@@ -103,11 +113,24 @@ function fmt(b) {
     updateMqttBtn();
   });
 
+  mqttPortDec.addEventListener('click', function () {
+    mqttPort.value = String(normalizePort(mqttPort.value) - 1);
+    mqttPort.value = String(normalizePort(mqttPort.value));
+    mqttPort.dispatchEvent(new Event('change'));
+  });
+  mqttPortInc.addEventListener('click', function () {
+    mqttPort.value = String(normalizePort(mqttPort.value) + 1);
+    mqttPort.value = String(normalizePort(mqttPort.value));
+    mqttPort.dispatchEvent(new Event('change'));
+  });
+  mqttPort.addEventListener('change', function () {
+    mqttPort.value = String(normalizePort(mqttPort.value));
+  });
+
   btnMqttSave.addEventListener('click', function () {
     btnMqttSave.disabled = true;
     var host = String(mqttHost.value).trim();
-    var portNum = parseInt(mqttPort.value, 10);
-    if (isNaN(portNum) || portNum < 1 || portNum > 65535) portNum = 1883;
+    var portNum = normalizePort(mqttPort.value);
     var params = 'host=' + encodeURIComponent(host)
                + '&port=' + String(portNum)
                + '&user=' + encodeURIComponent(mqttUser.value)
@@ -620,19 +643,19 @@ dz.addEventListener('drop', function (e) {
   if (saved === 'light') document.documentElement.classList.add('light-mode');
 
   var btn = document.getElementById('themeBtn');
-  function updateIcon() {
-    // crescent moon for dark, sun for light
-    btn.innerHTML = document.documentElement.classList.contains('light-mode')
-      ? '&#9728;'   // sun
-      : '&#9790;';  // moon
+  function syncThemeButton() {
+    var isLight = document.documentElement.classList.contains('light-mode');
+    btn.classList.toggle('is-light', isLight);
+    btn.setAttribute('aria-pressed', isLight ? 'true' : 'false');
+    btn.setAttribute('aria-label', isLight ? 'Switch to dark mode' : 'Switch to light mode');
   }
-  updateIcon();
+  syncThemeButton();
 
   btn.addEventListener('click', function () {
     document.documentElement.classList.toggle('light-mode');
     var isLight = document.documentElement.classList.contains('light-mode');
     localStorage.setItem('theme', isLight ? 'light' : 'dark');
-    updateIcon();
+    syncThemeButton();
   });
 })();
 
