@@ -675,7 +675,6 @@ static void handleGetWeather(AsyncWebServerRequest *request) {
         handleWeatherSearch(request);
         return;
     }
-    Serial.println("[WEATHER] GET /api/weather");
     StaticJsonDocument<256> doc;
     doc["city"]        = getWeatherCity();
     doc["lat"]         = getWeatherLat();
@@ -699,15 +698,12 @@ static bool getParamValue(AsyncWebServerRequest *request, const char *name, Stri
 
 // POST /api/weather?lat=&lon=&display_name=&city=&save=1  → updated JSON
 static void handlePostWeather(AsyncWebServerRequest *request) {
-    Serial.println("[WEATHER] POST /api/weather");
     String latStr, lonStr;
     if (getParamValue(request, "lat", latStr) && getParamValue(request, "lon", lonStr)) {
         float lat = latStr.toFloat();
         float lon = lonStr.toFloat();
-        Serial.printf("[WEATHER] save request lat=%.5f lon=%.5f\n", lat, lon);
         // Basic range validation
         if (lat < -90.0f || lat > 90.0f || lon < -180.0f || lon > 180.0f) {
-            Serial.println("[WEATHER] rejected: lat/lon out of range");
             request->send(400, "application/json", "{\"error\":\"lat/lon out of range\"}");
             return;
         }
@@ -726,15 +722,11 @@ static void handlePostWeather(AsyncWebServerRequest *request) {
             city = city.length() > WEATHER_CITY_MAX_LEN ? city.substring(0, WEATHER_CITY_MAX_LEN) : getWeatherCity();
         if (displayName.length() > WEATHER_NAME_MAX_LEN)
             displayName = displayName.substring(0, WEATHER_NAME_MAX_LEN);
-        Serial.printf("[WEATHER] applying city='%s' display='%s'\n", city.c_str(), displayName.c_str());
         // Persist immediately (setWeatherLocation also writes to NVS)
         setWeatherLocation(lat, lon, city, displayName);
         setWeatherManual(true);
         // Fetch fresh weather now so active weather screen doesn't show "No data".
-        bool refreshed = weatherScreenRefreshNow();
-        Serial.printf("[WEATHER] refresh after save: %s\n", refreshed ? "ok" : "failed");
-    } else {
-        Serial.println("[WEATHER] save ignored: missing lat/lon params");
+        (void)weatherScreenRefreshNow();
     }
     handleGetWeather(request);
 }
@@ -761,17 +753,13 @@ static String urlEncodeParam(const String &s) {
 // · Geocode via Open-Meteo Geocoding API (proxied by the device)
 // · Returns JSON array: [{name, country, lat, lon}] (max 5 results)
 static void handleWeatherSearch(AsyncWebServerRequest *request) {
-    Serial.println("[WEATHER] GET /api/weather/search");
     if (!request->hasParam("q")) {
-        Serial.println("[WEATHER] search rejected: missing q");
         request->send(400, "application/json", "{\"error\":\"Missing q\"}");
         return;
     }
     String q = request->getParam("q")->value();
     q.trim();
-    Serial.printf("[WEATHER] search q='%s'\n", q.c_str());
     if (q.length() == 0 || q.length() > 64) {
-        Serial.println("[WEATHER] search rejected: q length invalid");
         request->send(400, "application/json", "{\"error\":\"q must be 1-64 chars\"}");
         return;
     }
@@ -787,9 +775,7 @@ static void handleWeatherSearch(AsyncWebServerRequest *request) {
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setTimeout(8000);
     http.begin(url);
-    Serial.printf("[WEATHER] geocode url=%s\n", url);
     int code = http.GET();
-    Serial.printf("[WEATHER] geocode HTTP=%d\n", code);
     if (code < 200 || code >= 300) {
         String errMsg = "{\"error\":\"Geocoding unavailable (HTTP " + String(code) + ")\"}";
         http.end();
@@ -802,12 +788,10 @@ static void handleWeatherSearch(AsyncWebServerRequest *request) {
     // Parse and re-emit a compact array
     JsonDocument inDoc;
     if (deserializeJson(inDoc, body) || !inDoc["results"].is<JsonArray>()) {
-        Serial.println("[WEATHER] geocode parse: no results array");
         request->send(200, "application/json", "[]");
         return;
     }
     JsonArray results = inDoc["results"].as<JsonArray>();
-    Serial.printf("[WEATHER] geocode results=%u\n", (unsigned)results.size());
     JsonDocument outDoc;
     JsonArray arr = outDoc.to<JsonArray>();
     for (JsonObject r : results) {

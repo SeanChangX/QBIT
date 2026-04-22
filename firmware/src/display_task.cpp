@@ -755,11 +755,7 @@ void displayTask(void *param) {
 
                 case WEATHER_SCREEN:
                     _stateEntryMs = now;
-                    if (gesture.type == SINGLE_TAP) {
-                        showText("[ Weather ]", "", "Updating...", "");
-                        weatherScreenRefreshNow();
-                        weatherScreenDraw();
-                    } else if (gesture.type == DOUBLE_TAP || gesture.type == LONG_PRESS) {
+                    if (gesture.type == DOUBLE_TAP || gesture.type == LONG_PRESS) {
                         enterSettingsMenu();
                     }
                     break;
@@ -1211,7 +1207,8 @@ void displayTask(void *param) {
                 break;
 
             case WEATHER_SCREEN:
-                // Static screen: redraw only on enter, single-tap refresh, or web POST refresh.
+                // Hourly background refresh while this screen stays open (see weather_screen.cpp).
+                weatherScreenIdleTick();
                 break;
 
             case GAME_MENU:

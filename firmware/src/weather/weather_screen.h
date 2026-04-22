@@ -7,11 +7,15 @@
 #include <Arduino.h>
 
 // Call when entering the WEATHER_SCREEN state.
-// Checks 10-minute cache; fetches fresh data from Open-Meteo if stale,
+// Uses a 1-hour cache; fetches fresh data from Open-Meteo if stale,
 // shows "Loading..." while fetching, then draws the full screen.
 void weatherScreenEnter();
 
-// Redraw the weather screen using cached data (called periodically by display task).
+// Call from the display task while staying on WEATHER_SCREEN: refreshes in the
+// background when cache is older than one hour (same interval as enter()).
+void weatherScreenIdleTick();
+
+// Redraw the weather screen from cache (after enter/fetch or web save refresh).
 void weatherScreenDraw();
 
 // Fetch weather data now and update cache.

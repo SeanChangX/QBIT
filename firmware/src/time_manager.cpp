@@ -150,8 +150,6 @@ void timeManagerDetectTimezone() {
                             disp += cc;
                         }
                     }
-                    Serial.printf("[WEATHER] IP location: %s (%.4f, %.4f)\n",
-                                  disp.c_str(), lat, lon);
                     setWeatherLocation(lat, lon, city, disp);
                     changed = true;
                 }

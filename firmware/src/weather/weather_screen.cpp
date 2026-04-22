@@ -34,8 +34,11 @@ extern void rotateBuffer180();
 // ==========================================================================
 //  Cache configuration
 // ==========================================================================
-#define WEATHER_CACHE_MS      (10UL * 60UL * 1000UL) // 10 minutes
-#define WEATHER_HTTP_TIMEOUT  8000  // 8 s per request
+// Open-Meteo refetch interval (enter screen, background tick while staying on it).
+#define WEATHER_CACHE_MS           (60UL * 60UL * 1000UL) // 1 hour
+// After a stale fetch fails, wait before retrying (avoids hammering APIs / Wi-Fi).
+#define WEATHER_RETRY_INTERVAL_MS  (60UL * 1000UL)        // 1 minute
+#define WEATHER_HTTP_TIMEOUT       8000                   // 8 s per request
 
 // ==========================================================================
 //  Cached weather data
@@ -121,7 +124,7 @@ static String httpGet(const char *url) {
     http.begin(url);
     int code = http.GET();
     String body;
-    if (code == 200) {
+    if (code >= 200 && code < 300) {
         body = http.getString();
     }
     http.end();
@@ -190,7 +193,7 @@ static bool fetchWeatherData() {
 // ==========================================================================
 void weatherScreenDraw() {
     if (!_hasData) {
-        showText("[ Weather ]", "", "No data.", "TAP = refresh  2x = menu");
+        showText("[ Weather ]", "", "No data.", "Re-enter to refresh  2x = menu");
         return;
     }
 
@@ -298,6 +301,30 @@ bool weatherScreenRefreshNow() {
 }
 
 // ==========================================================================
+//  While on WEATHER_SCREEN: hourly background refresh (no full-screen "Loading")
+// ==========================================================================
+void weatherScreenIdleTick() {
+    if (WiFi.status() != WL_CONNECTED)
+        return;
+    if (!_hasData)
+        return;
+
+    unsigned long now = millis();
+    if ((unsigned long)(now - _lastFetchMs) < WEATHER_CACHE_MS)
+        return;
+
+    static unsigned long s_lastAttemptMs = 0;
+    if (s_lastAttemptMs != 0 &&
+        (unsigned long)(now - s_lastAttemptMs) < WEATHER_RETRY_INTERVAL_MS) {
+        return;
+    }
+    s_lastAttemptMs = now;
+
+    if (weatherScreenRefreshNow())
+        weatherScreenDraw();
+}
+
+// ==========================================================================
 //  Enter: cache check → optional fetch → draw
 // ==========================================================================
 void weatherScreenEnter() {
@@ -316,7 +343,7 @@ void weatherScreenEnter() {
     if (!ok) {
         // Keep stale data if we have it; otherwise show error
         if (!_hasData) {
-            showText("[ Weather ]", "", "Fetch failed.", "TAP = retry  2x = menu");
+            showText("[ Weather ]", "", "Fetch failed.", "Re-enter to retry  2x = menu");
             return;
         }
         // Draw with stale data

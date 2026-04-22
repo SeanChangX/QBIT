@@ -456,12 +456,9 @@ dz.addEventListener('drop', function (e) {
         return r.json();
       })
       .then(function (d) {
-        console.log('[WEATHER] loaded location', d);
         applyWeatherLocation(d);
       })
-      .catch(function (e) {
-        console.error('[WEATHER] location load failed', e);
-      });
+      .catch(function () {});
   }
   refreshWeatherLocation();
 
@@ -469,7 +466,6 @@ dz.addEventListener('drop', function (e) {
   function doSearch() {
     var q = wtQuery.value.trim();
     if (!q) return;
-    console.log('[WEATHER] search click q=', q);
     btnSearch.disabled = true;
     wtResults.hidden = true;
     wtResults.innerHTML = '';
@@ -482,7 +478,6 @@ dz.addEventListener('drop', function (e) {
         return r.json();
       })
       .then(function (arr) {
-        console.log('[WEATHER] search results', arr);
         if (arr && arr.error) {
           wtMsg.className = 'msg error';
           wtMsg.textContent = 'Search error: ' + arr.error;
@@ -534,7 +529,6 @@ dz.addEventListener('drop', function (e) {
         });
       })
       .catch(function (e) {
-        console.error('[WEATHER] search failed', e);
         wtMsg.className = 'msg error';
         wtMsg.textContent = 'Search failed: ' + (e && e.message ? e.message : 'Check connection.');
         wtMsg.style.display = 'block';
@@ -564,7 +558,6 @@ dz.addEventListener('drop', function (e) {
         return r.json();
       })
       .then(function (d) {
-        console.log('[WEATHER] save response', d);
         // Immediate UI update from selected value for snappy feedback.
         wtName.textContent = displayName;
         applyWeatherLocation(d);
@@ -585,7 +578,6 @@ dz.addEventListener('drop', function (e) {
         }, 150);
       })
       .catch(function (e) {
-        console.error('[WEATHER] save failed', e);
         wtMsg.className = 'msg error';
         wtMsg.textContent = 'Save failed: ' + (e && e.message ? e.message : 'unknown error');
         wtMsg.style.display = 'block';
