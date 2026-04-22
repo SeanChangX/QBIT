@@ -5,21 +5,152 @@ function fmt(b) {
   return (b / 1048576).toFixed(1) + ' MB';
 }
 
+// Uptime from seconds: smallest unit is minutes (no ticking seconds on the page).
+// Firmware boot/WS uptime uses esp_timer-based seconds (ESP32); uint32 JSON is fine for many years.
+function fmtUptime(sec) {
+  sec = Math.floor(Number(sec) || 0);
+  if (sec < 0) sec = 0;
+  if (sec < 60) return '< 1 min';
+  var totalMin = Math.floor(sec / 60);
+  var d = Math.floor(totalMin / 1440);
+  var h = Math.floor((totalMin % 1440) / 60);
+  var m = totalMin % 60;
+  var parts = [];
+  if (d > 0) parts.push(d + 'd');
+  if (h > 0) parts.push(h + 'h');
+  if (m > 0) parts.push(m + 'm');
+  return parts.length ? parts.join(' ') : '< 1 min';
+}
+
+function setServerPill(el, connected) {
+  el.classList.remove('pill-na');
+  el.textContent = connected ? 'Connected' : 'Disconnected';
+  el.classList.toggle('pill-on', connected);
+  el.classList.toggle('pill-off', !connected);
+}
+
+function setMqttPill(el, enabled, connected) {
+  el.classList.remove('pill-on', 'pill-off', 'pill-na');
+  if (!enabled) {
+    el.textContent = 'Off';
+    el.classList.add('pill-na');
+    return;
+  }
+  el.textContent = connected ? 'Connected' : 'Disconnected';
+  el.classList.add(connected ? 'pill-on' : 'pill-off');
+}
+
 // Device info -- fetch ID and name, allow renaming
 (function () {
   var devId = document.getElementById('devId');
   var devName = document.getElementById('devName');
   var btnDevSave = document.getElementById('btnDevSave');
+  var devFwHost = document.getElementById('devFwHost');
+  var devFirmwarePill = document.getElementById('devFirmwarePill');
+  var devFwNotifyDot = document.getElementById('devFwNotifyDot');
+  var devFwPopover = document.getElementById('devFwPopover');
+  var devFwPopoverCur = document.getElementById('devFwPopoverCur');
+  var devFwPopoverLatest = document.getElementById('devFwPopoverLatest');
+  var devServerPill = document.getElementById('devServerPill');
+  var devMqttPill = document.getElementById('devMqttPill');
+  var devCombinedUptime = document.getElementById('devCombinedUptime');
 
-  fetch('/api/device').then(function (r) { return r.json(); }).then(function (d) {
+  var fwPopoverOpenTimer = null;
+  var fwPopoverCloseTimer = null;
+  var hasFwUpdate = false;
+  // Avoid overwriting the name field while the user edits (5s /api/device poll).
+  var devNameDirty = false;
+  if (devName) {
+    devName.addEventListener('input', function () {
+      devNameDirty = true;
+    });
+  }
+
+  function closeFwPopover() {
+    clearTimeout(fwPopoverOpenTimer);
+    if (!devFwPopover.hidden) {
+      devFwPopover.hidden = true;
+      devFirmwarePill.setAttribute('aria-expanded', 'false');
+    }
+  }
+
+  function openFwPopover() {
+    if (!hasFwUpdate) return;
+    clearTimeout(fwPopoverCloseTimer);
+    devFwPopover.hidden = false;
+    devFirmwarePill.setAttribute('aria-expanded', 'true');
+  }
+
+  function scheduleOpenFwPopover() {
+    if (!hasFwUpdate) return;
+    clearTimeout(fwPopoverCloseTimer);
+    clearTimeout(fwPopoverOpenTimer);
+    fwPopoverOpenTimer = setTimeout(openFwPopover, 160);
+  }
+
+  function scheduleCloseFwPopover() {
+    clearTimeout(fwPopoverOpenTimer);
+    fwPopoverCloseTimer = setTimeout(closeFwPopover, 240);
+  }
+
+  function applyDevice(d) {
     devId.textContent = d.id;
-    devName.value = d.name;
-  }).catch(function () {});
+    var nameBusy = devNameDirty || (devName && document.activeElement === devName);
+    if (devName && !nameBusy) {
+      devName.value = d.name;
+    }
+    setServerPill(devServerPill, !!d.server_connected);
+    setMqttPill(devMqttPill, !!d.mqtt_enabled, !!d.mqtt_connected);
+
+    var boot = fmtUptime(d.uptime_s);
+    var srv = d.server_connected ? fmtUptime(d.server_uptime_s) : '—';
+    devCombinedUptime.textContent = 'Boot: ' + boot + ' · Server: ' + srv;
+
+    devFirmwarePill.textContent = d.firmware || '—';
+    hasFwUpdate = !!(d.update_available && d.latest_version);
+    if (hasFwUpdate) {
+      devFwNotifyDot.hidden = false;
+      devFwPopoverCur.textContent = d.firmware || '—';
+      devFwPopoverLatest.textContent = d.latest_version;
+      devFirmwarePill.classList.add('has-fw-update');
+    } else {
+      devFwNotifyDot.hidden = true;
+      devFirmwarePill.classList.remove('has-fw-update');
+      closeFwPopover();
+    }
+  }
+
+  function refreshDevice() {
+    fetch('/api/device').then(function (r) { return r.json(); }).then(applyDevice).catch(function () {});
+  }
+
+  if (devFwHost && devFirmwarePill) {
+    devFwHost.addEventListener('mouseenter', scheduleOpenFwPopover);
+    devFwHost.addEventListener('mouseleave', scheduleCloseFwPopover);
+    devFirmwarePill.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (!hasFwUpdate) return;
+      if (devFwPopover.hidden) openFwPopover();
+      else closeFwPopover();
+    });
+    document.addEventListener('click', function (e) {
+      if (devFwHost.contains(e.target)) return;
+      closeFwPopover();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeFwPopover();
+    });
+  }
+
+  refreshDevice();
+  // Device card: status + minute-granularity uptimes — 5s keeps UI fresh without hammering the MCU.
+  setInterval(refreshDevice, 5000);
 
   btnDevSave.addEventListener('click', function () {
     btnDevSave.disabled = true;
     fetch('/api/device?name=' + encodeURIComponent(devName.value) + '&save=1', { method: 'POST' })
       .then(function () {
+        devNameDirty = false;
         btnDevSave.classList.add('saved');
         btnDevSave.textContent = 'Saved';
       })

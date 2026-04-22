@@ -1,6 +1,8 @@
 #include "web_dashboard.h"
 #include "gif_player.h"
 #include "../../src/settings.h"
+#include "../../src/app_state.h"
+#include "../../src/network_task.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
@@ -394,9 +396,20 @@ static void handleReboot(AsyncWebServerRequest *request) {
 // ==========================================================================
 
 static void handleGetDevice(AsyncWebServerRequest *request) {
-    StaticJsonDocument<256> doc;
-    doc["id"]   = getDeviceId();
-    doc["name"] = getDeviceName();
+    StaticJsonDocument<512> doc;
+    doc["id"]               = getDeviceId();
+    doc["name"]             = getDeviceName();
+    doc["uptime_s"]         = (uint32_t)networkGetBootUptimeSeconds();
+    doc["server_connected"] = networkIsCloudWsConnected();
+    doc["server_uptime_s"]  = (uint32_t)networkGetCloudWsUptimeSeconds();
+    EventBits_t bits        = xEventGroupGetBits(connectivityBits);
+    doc["mqtt_connected"]   = (bits & MQTT_CONNECTED_BIT) != 0;
+    doc["mqtt_enabled"]     = getMqttEnabled();
+    doc["firmware"]         = kQbitVersion;
+    bool ua = updateAvailable;
+    doc["update_available"] = ua;
+    doc["latest_version"]   =
+        (ua && updateAvailableVersion[0] != '\0') ? String(updateAvailableVersion) : String("");
     String json;
     serializeJson(doc, json);
     request->send(200, "application/json", json);

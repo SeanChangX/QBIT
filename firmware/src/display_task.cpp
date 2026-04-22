@@ -1075,27 +1075,35 @@ void displayTask(void *param) {
                     _offlineMsg = nullptr;
                 }
 
-                // Update available prompt (once per boot)
-                if (updateAvailable) {
+                // Update available: OLED overlay for UPDATE_PROMPT_MS only; do not clear
+                // updateAvailable (web /api/device and HA still need the flag until flash or re-check).
+                {
                     static unsigned long updatePromptStartMs = 0;
-                    if (updatePromptStartMs == 0) updatePromptStartMs = now;
-                    char curLine[32], latLine[32];
-                    // Add "v" only for semantic versions (e.g. 0.0.0); show dev-build etc as-is
-                    auto fmtCur = (kQbitVersion[0] == 'v' || kQbitVersion[0] == 'V')
-                        ? "Current: %s"
-                        : (kQbitVersion[0] >= '0' && kQbitVersion[0] <= '9') ? "Current: v%s" : "Current: %s";
-                    auto fmtLat = (updateAvailableVersion[0] == 'v' || updateAvailableVersion[0] == 'V')
-                        ? "Latest: %s"
-                        : (updateAvailableVersion[0] >= '0' && updateAvailableVersion[0] <= '9') ? "Latest: v%s" : "Latest: %s";
-                    snprintf(curLine, sizeof(curLine), fmtCur, kQbitVersion);
-                    snprintf(latLine, sizeof(latLine), fmtLat, updateAvailableVersion);
-                    showText("[ Update available ]", "", curLine, latLine);
-                    if (now - updatePromptStartMs >= UPDATE_PROMPT_MS) {
-                        updateAvailable = false;
+                    static bool          updateOledDismissed = false;
+                    if (!updateAvailable) {
+                        updateOledDismissed = false;
                         updatePromptStartMs = 0;
                     }
-                } else if (!_offlineShown) {
-                    gifPlayerTick();
+                    if (updateAvailable && !updateOledDismissed) {
+                        if (updatePromptStartMs == 0) updatePromptStartMs = now;
+                        char curLine[32], latLine[32];
+                        // Add "v" only for semantic versions (e.g. 0.0.0); show dev-build etc as-is
+                        auto fmtCur = (kQbitVersion[0] == 'v' || kQbitVersion[0] == 'V')
+                            ? "Current: %s"
+                            : (kQbitVersion[0] >= '0' && kQbitVersion[0] <= '9') ? "Current: v%s" : "Current: %s";
+                        auto fmtLat = (updateAvailableVersion[0] == 'v' || updateAvailableVersion[0] == 'V')
+                            ? "Latest: %s"
+                            : (updateAvailableVersion[0] >= '0' && updateAvailableVersion[0] <= '9') ? "Latest: v%s" : "Latest: %s";
+                        snprintf(curLine, sizeof(curLine), fmtCur, kQbitVersion);
+                        snprintf(latLine, sizeof(latLine), fmtLat, updateAvailableVersion);
+                        showText("[ Update available ]", "", curLine, latLine);
+                        if (now - updatePromptStartMs >= UPDATE_PROMPT_MS) {
+                            updateOledDismissed = true;
+                            updatePromptStartMs = 0;
+                        }
+                    } else if (!_offlineShown) {
+                        gifPlayerTick();
+                    }
                 }
                 break;
 

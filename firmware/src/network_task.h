@@ -22,6 +22,13 @@ void networkSendFriendReject();
 // Time when WiFi was declared lost (0 if connected or not yet lost). Used for AP countdown.
 unsigned long networkGetWifiLostMs();
 
+// Boot uptime (seconds since power-on). On ESP32 uses esp_timer (64-bit us), not millis() wrap (~49d).
+unsigned long networkGetBootUptimeSeconds();
+
+// Backend WebSocket (cloud server) connection state and uptime since last connect.
+bool          networkIsCloudWsConnected();
+unsigned long networkGetCloudWsUptimeSeconds();
+
 // Reset WiFi to initial state and remove saved credentials (NetWizard reset). Device will disconnect.
 void networkWifiReset();
 

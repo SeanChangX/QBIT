@@ -54,7 +54,19 @@
   </div>
 
   <div class="card">
-    <div class="card-title">Device</div>
+    <div class="card-title card-title-row">
+      <span class="card-title-text">Device</span>
+      <div class="card-title-fw-host" id="devFwHost">
+        <button type="button" class="card-title-pill card-title-pill--fw" id="devFirmwarePill" aria-expanded="false" aria-haspopup="true" title="Firmware">--</button>
+        <span class="fw-notify-dot" id="devFwNotifyDot" hidden aria-hidden="true"></span>
+        <div class="fw-update-popover" id="devFwPopover" role="dialog" aria-label="Firmware update" hidden>
+          <p class="fw-popover-cur">Current: <span id="devFwPopoverCur"></span></p>
+          <p class="fw-popover-title">Latest version</p>
+          <p class="fw-popover-version" id="devFwPopoverLatest"></p>
+          <a class="btn btn-save fw-popover-flash" href="https://seanchangx.github.io/QBIT/" target="_blank" rel="noopener noreferrer">Open QBIT Flasher</a>
+        </div>
+      </div>
+    </div>
     <div class="setting">
       <label class="setting-label">ID</label>
       <span class="setting-val-wide" id="devId">--</span>
@@ -63,6 +75,18 @@
     <div class="setting">
       <label class="setting-label">Name</label>
       <input type="text" id="devName" class="input-text" maxlength="32" placeholder="Device name">
+    </div>
+    <div class="setting">
+      <label class="setting-label">Server</label>
+      <span class="pill pill-status" id="devServerPill" aria-live="polite">--</span>
+    </div>
+    <div class="setting">
+      <label class="setting-label">MQTT</label>
+      <span class="pill pill-status" id="devMqttPill" aria-live="polite">--</span>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Uptime</label>
+      <span class="setting-val-wide setting-uptime-combined" id="devCombinedUptime" title="Boot time since power-on; Server time since last cloud connection">--</span>
     </div>
     <button class="btn btn-save" id="btnDevSave">Save Name</button>
     <div class="device-actions">

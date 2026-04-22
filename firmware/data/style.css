@@ -238,6 +238,143 @@ body {
   border-color: var(--red);
   box-shadow: 0 0 0 2px var(--red);
 }
+/* Device title row: firmware pill + update dot + hover/click popover */
+.card-title-fw-host {
+  display: inline-flex;
+  justify-content: flex-end;
+  position: relative;
+  margin-left: auto;
+  flex: 0 0 auto;
+  max-width: min(220px, calc(100% - 100px));
+  width: auto;
+}
+.card-title-row .card-title-pill {
+  margin-left: 0;
+  flex-shrink: 0;
+  padding: 6px 14px;
+  font-size: .72em;
+  font-weight: 600;
+  letter-spacing: .02em;
+  text-transform: none;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-accent);
+  color: var(--text-muted);
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  cursor: default;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.card-title-row .card-title-pill--fw {
+  display: inline-block;
+  width: auto;
+  max-width: 100%;
+  text-align: center;
+  vertical-align: middle;
+  font-family: inherit;
+  background: var(--bg-accent);
+  color: var(--text-muted);
+  border-color: var(--border);
+  outline: none;
+}
+.card-title-row .card-title-pill--fw.has-fw-update {
+  cursor: pointer;
+  padding-right: 18px;
+}
+.card-title-row .card-title-pill--fw.has-fw-update:hover {
+  border-color: var(--red-light);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.card-title-row .card-title-pill--fw:focus-visible {
+  box-shadow: 0 0 0 2px rgba(136, 136, 136, .45);
+}
+.light-mode .card-title-row .card-title-pill--fw:focus-visible {
+  box-shadow: 0 0 0 2px rgba(119, 119, 119, .35);
+}
+.fw-notify-dot {
+  position: absolute;
+  top: -3px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--red);
+  border: 2px solid var(--bg-primary);
+  pointer-events: none;
+  animation: fw-dot-blink 1.1s ease-in-out infinite;
+}
+.light-mode .fw-notify-dot {
+  border-color: var(--bg-secondary);
+}
+@keyframes fw-dot-blink {
+  0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(211, 47, 47, .5); }
+  50% { opacity: 0.65; transform: scale(0.88); box-shadow: 0 0 0 4px rgba(211, 47, 47, 0); }
+}
+.fw-update-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 120;
+  min-width: min(260px, calc(100vw - 40px));
+  padding: 14px 16px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 36px rgba(0, 0, 0, .45);
+}
+/* Invisible hover bridge so cursor can reach popover without closing */
+.fw-update-popover::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  height: 10px;
+}
+.light-mode .fw-update-popover {
+  box-shadow: 0 10px 32px rgba(0, 0, 0, .18);
+}
+.fw-popover-cur {
+  font-size: .78em;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+  word-break: break-all;
+}
+.fw-popover-title {
+  font-size: .72em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-muted);
+  margin: 0 0 6px;
+}
+.fw-popover-version {
+  font-size: 1.05em;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 14px;
+  word-break: break-all;
+}
+.fw-popover-flash {
+  display: block;
+  width: 100%;
+  text-align: center;
+  text-decoration: none;
+  box-sizing: border-box;
+  margin-top: 0;
+  font-size: .85em;
+}
+.fw-update-popover .fw-popover-flash.btn-save {
+  margin-top: 0;
+}
+.setting-uptime-combined {
+  white-space: normal;
+  line-height: 1.4;
+}
 .backup-progress-wrap {
   margin-top: 8px;
   margin-bottom: 4px;
@@ -800,6 +937,31 @@ body {
   white-space: nowrap;
   flex-shrink: 0;
 }
+.pill-status.pill-on {
+  background: rgba(76, 175, 80, .18);
+  color: var(--success);
+  border: 1px solid rgba(76, 175, 80, .35);
+}
+.pill-status.pill-off {
+  background: rgba(211, 47, 47, .12);
+  color: var(--red-light);
+  border: 1px solid rgba(211, 47, 47, .3);
+}
+.pill-status.pill-na {
+  background: var(--bg-accent);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  text-transform: none;
+  font-weight: 500;
+}
+.light-mode .pill-status.pill-on {
+  background: rgba(46, 125, 50, .14);
+  border-color: rgba(46, 125, 50, .35);
+}
+.light-mode .pill-status.pill-off {
+  background: rgba(198, 40, 40, .1);
+  border-color: rgba(198, 40, 40, .28);
+}
 .pill-hint {
   background: rgba(211, 47, 47, .15);
   color: var(--red-light);
@@ -1079,7 +1241,8 @@ body {
   .device-actions .btn {
     min-width: min(100px, 42%);
   }
-  .card-title-row .pill-btn {
+  .card-title-row .pill-btn,
+  .card-title-row .card-title-pill {
     margin-left: 0;
   }
 }

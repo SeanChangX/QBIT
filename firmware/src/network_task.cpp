@@ -18,9 +18,11 @@
 #include <PubSubClient.h>
 #if defined(ESP32)
 #include <esp_system.h>
+#include <esp_timer.h>
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/portmacro.h>
 #endif
 
 // ==========================================================================
@@ -73,7 +75,50 @@ extern NetWizard      NW;
 using namespace websockets;
 static WebsocketsClient _wsClient;
 static bool             _wsConnected = false;
+// esp_timer_get_time() (us) at last WS ConnectionOpened; 0 if disconnected. Avoids millis() ~49.7d wrap.
+static int64_t          _wsCloudConnectedAtUs = 0;
 static unsigned long    _wsLastReconnect = 0;
+
+// _wsConnected + _wsCloudConnectedAtUs are read from AsyncWeb handlers and written from WS / WiFi
+// paths; take a short critical section so int64 + bool are not observed torn on 32-bit MCUs.
+#if defined(ESP32)
+static portMUX_TYPE _wsCloudMux = portMUX_INITIALIZER_UNLOCKED;
+
+static void wsCloudSet(bool connected, int64_t connectedAtUs) {
+    portENTER_CRITICAL(&_wsCloudMux);
+    _wsConnected          = connected;
+    _wsCloudConnectedAtUs = connectedAtUs;
+    portEXIT_CRITICAL(&_wsCloudMux);
+}
+
+static bool wsIsCloudConnected(void) {
+    portENTER_CRITICAL(&_wsCloudMux);
+    bool c = _wsConnected;
+    portEXIT_CRITICAL(&_wsCloudMux);
+    return c;
+}
+
+static void wsCloudSnapshot(bool *outConn, int64_t *outUs) {
+    portENTER_CRITICAL(&_wsCloudMux);
+    *outConn = _wsConnected;
+    *outUs   = _wsCloudConnectedAtUs;
+    portEXIT_CRITICAL(&_wsCloudMux);
+}
+#else
+static void wsCloudSet(bool connected, int64_t connectedAtUs) {
+    _wsConnected          = connected;
+    _wsCloudConnectedAtUs = connectedAtUs;
+}
+
+static bool wsIsCloudConnected(void) {
+    return _wsConnected;
+}
+
+static void wsCloudSnapshot(bool *outConn, int64_t *outUs) {
+    *outConn = _wsConnected;
+    *outUs   = _wsCloudConnectedAtUs;
+}
+#endif
 
 static WiFiClient   _mqttWifi;
 static PubSubClient _mqttClient;   // setClient() called at runtime to avoid static init order issues (fixes #1)
@@ -127,7 +172,7 @@ static bool wsConnect() {
 }
 
 static void wsSendDeviceInfo() {
-    if (!_wsConnected) return;
+    if (!wsIsCloudConnected()) return;
     StaticJsonDocument<384> doc;
     doc["type"]    = "device.register";
     doc["id"]      = getDeviceId();
@@ -144,7 +189,7 @@ void networkSendDeviceInfo() {
 }
 
 void networkSendClaimConfirm() {
-    if (!_wsConnected) return;
+    if (!wsIsCloudConnected()) return;
     StaticJsonDocument<64> doc;
     doc["type"] = "claim_confirm";
     String msg;
@@ -154,7 +199,7 @@ void networkSendClaimConfirm() {
 }
 
 void networkSendClaimReject() {
-    if (!_wsConnected) return;
+    if (!wsIsCloudConnected()) return;
     StaticJsonDocument<64> doc;
     doc["type"] = "claim_reject";
     String msg;
@@ -164,7 +209,7 @@ void networkSendClaimReject() {
 }
 
 void networkSendFriendConfirm() {
-    if (!_wsConnected) return;
+    if (!wsIsCloudConnected()) return;
     StaticJsonDocument<64> doc;
     doc["type"] = "friend_confirm";
     String msg;
@@ -174,7 +219,7 @@ void networkSendFriendConfirm() {
 }
 
 void networkSendFriendReject() {
-    if (!_wsConnected) return;
+    if (!wsIsCloudConnected()) return;
     StaticJsonDocument<64> doc;
     doc["type"] = "friend_reject";
     String msg;
@@ -192,7 +237,7 @@ static void wsEvent(WebsocketsClient &client, WebsocketsEvent event, WSInterface
     (void)data;
     switch (event) {
         case WebsocketsEvent::ConnectionOpened:
-            _wsConnected = true;
+            wsCloudSet(true, esp_timer_get_time());
             xEventGroupSetBits(connectivityBits, WS_CONNECTED_BIT);
             Serial.println("[WS] Connected to backend");
             wsSendDeviceInfo();
@@ -205,7 +250,7 @@ static void wsEvent(WebsocketsClient &client, WebsocketsEvent event, WSInterface
             }
             break;
         case WebsocketsEvent::ConnectionClosed:
-            _wsConnected = false;
+            wsCloudSet(false, 0);
             xEventGroupClearBits(connectivityBits, WS_CONNECTED_BIT);
             Serial.println("[WS] Disconnected");
             mqttPublishServerConnectionState(false);
@@ -605,7 +650,7 @@ static void mqttReconnect() {
 
         // Publish HA discovery
         mqttPublishHADiscovery(&_mqttClient);
-        mqttPublishServerConnectionState(_wsConnected);
+        mqttPublishServerConnectionState(wsIsCloudConnected());
     } else {
         Serial.printf("[MQTT] Connection failed (rc=%d)\n", _mqttClient.state());
     }
@@ -692,7 +737,7 @@ void networkTask(void *param) {
                 // not enqueue WIFI_STATUS false (would be wrong for GIF_PLAYBACK) or log "lost".
                 const bool wasStaUp = _wifiConnected;
                 _wifiConnected = false;
-                _wsConnected = false;
+                wsCloudSet(false, 0);
                 xEventGroupClearBits(connectivityBits, WIFI_CONNECTED_BIT | WS_CONNECTED_BIT);
                 if (wasStaUp) {
                     Serial.println("[WiFi] Connection lost");
@@ -812,7 +857,7 @@ void networkTask(void *param) {
         }
 
         // --- WebSocket ---
-        if (_wsConnected) {
+        if (wsIsCloudConnected()) {
             _wsClient.poll();
         } else if (_wifiConnected) {
             unsigned long now = millis();
@@ -850,6 +895,34 @@ void networkTask(void *param) {
 
 unsigned long networkGetWifiLostMs() {
     return _wifiLostMs;
+}
+
+unsigned long networkGetBootUptimeSeconds() {
+#if defined(ESP32)
+    int64_t us = esp_timer_get_time();
+    if (us < 0) us = 0;
+    return (unsigned long)(us / 1000000LL);
+#else
+    return millis() / 1000UL;
+#endif
+}
+
+bool networkIsCloudWsConnected() {
+    return wsIsCloudConnected();
+}
+
+unsigned long networkGetCloudWsUptimeSeconds() {
+    bool     conn;
+    int64_t  atUs;
+    wsCloudSnapshot(&conn, &atUs);
+    if (!conn || atUs == 0) return 0;
+#if defined(ESP32)
+    int64_t delta = esp_timer_get_time() - atUs;
+    if (delta < 0) return 0;
+    return (unsigned long)(delta / 1000000LL);
+#else
+    return 0;
+#endif
 }
 
 void networkWifiReset() {
