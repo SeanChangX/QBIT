@@ -3,6 +3,9 @@
 // ==========================================================================
 #include "settings.h"
 #include "gif_player.h"
+
+extern void weatherScreenInvalidateCache();
+
 #include <Preferences.h>
 #include <WiFi.h>
 #include <freertos/FreeRTOS.h>
@@ -57,6 +60,13 @@ static bool _negativeGif     = false;
 
 // Time format: true = 24h, false = 12h
 static bool _timeFormat24h   = true;
+
+// Weather location (neutral default for first boot; user sets via dashboard)
+static String  _weatherCity        = "London";
+static float   _weatherLat         = 51.5074f;
+static float   _weatherLon         = -0.1278f;
+static String  _weatherDisplayName = "London, GB";
+static bool    _weatherManual      = false;
 
 // ==========================================================================
 //  Time format (24h/12h)
@@ -163,6 +173,23 @@ void loadSettings() {
     _trexHighScore   = _prefs.getUInt("trexHi",    0);
     _flappyHighScore = _prefs.getUInt("flappyHi",  0);
     _carHighScore    = _prefs.getUInt("carHi",     0);
+
+    // Weather location (factory default London; override via dashboard / NVS)
+    _weatherCity        = _prefs.getString("wtCity", "London");
+    if (_weatherCity.length() > WEATHER_CITY_MAX_LEN) _weatherCity = _weatherCity.substring(0, WEATHER_CITY_MAX_LEN);
+    _weatherLat         = _prefs.getFloat("wtLat",  51.5074f);
+    _weatherLon         = _prefs.getFloat("wtLon",  -0.1278f);
+    _weatherDisplayName = _prefs.getString("wtName", "London, GB");
+    if (_weatherDisplayName.length() > WEATHER_NAME_MAX_LEN) _weatherDisplayName = _weatherDisplayName.substring(0, WEATHER_NAME_MAX_LEN);
+    if (_prefs.isKey("wtMan")) {
+        _weatherManual = _prefs.getBool("wtMan", false);
+    } else if (_prefs.isKey("wtCity") || _prefs.isKey("wtLat")) {
+        // Legacy NVS had weather before pin flag existed — do not overwrite with IP.
+        _weatherManual = true;
+    } else {
+        _weatherManual = false;
+    }
+
     xSemaphoreGive(_prefsMutex);
 
     // Apply speed
@@ -203,6 +230,12 @@ void saveSettings() {
     _prefs.putUInt("trexHi",     _trexHighScore);
     _prefs.putUInt("flappyHi",   _flappyHighScore);
     _prefs.putUInt("carHi",      _carHighScore);
+    // Weather location
+    _prefs.putString("wtCity",   _weatherCity);
+    _prefs.putFloat("wtLat",     _weatherLat);
+    _prefs.putFloat("wtLon",     _weatherLon);
+    _prefs.putString("wtName",   _weatherDisplayName);
+    _prefs.putBool("wtMan",      _weatherManual);
     xSemaphoreGive(_prefsMutex);
     Serial.println("Settings saved to NVS");
 }
@@ -345,5 +378,44 @@ void     setCarHighScore(uint32_t s) {
             _prefs.putUInt("carHi", _carHighScore);
             xSemaphoreGive(_prefsMutex);
         }
+    }
+}
+
+// ==========================================================================
+//  Weather location
+// ==========================================================================
+
+String getWeatherCity()                  { return _weatherCity; }
+void   setWeatherCity(const String &c)   { _weatherCity = c.length() > WEATHER_CITY_MAX_LEN ? c.substring(0, WEATHER_CITY_MAX_LEN) : c; }
+float  getWeatherLat()                   { return _weatherLat; }
+void   setWeatherLat(float lat)          { _weatherLat = lat; }
+float  getWeatherLon()                   { return _weatherLon; }
+void   setWeatherLon(float lon)          { _weatherLon = lon; }
+String getWeatherDisplayName()           { return _weatherDisplayName; }
+void   setWeatherDisplayName(const String &n) { _weatherDisplayName = n.length() > WEATHER_NAME_MAX_LEN ? n.substring(0, WEATHER_NAME_MAX_LEN) : n; }
+
+void setWeatherLocation(float lat, float lon,
+                        const String &city, const String &displayName) {
+    _weatherLat         = lat;
+    _weatherLon         = lon;
+    _weatherCity        = city.length()        > WEATHER_CITY_MAX_LEN ? city.substring(0, WEATHER_CITY_MAX_LEN)               : city;
+    _weatherDisplayName = displayName.length() > WEATHER_NAME_MAX_LEN ? displayName.substring(0, WEATHER_NAME_MAX_LEN) : displayName;
+    if (_prefsReady && xSemaphoreTake(_prefsMutex, portMAX_DELAY) == pdTRUE) {
+        _prefs.putFloat("wtLat",   _weatherLat);
+        _prefs.putFloat("wtLon",   _weatherLon);
+        _prefs.putString("wtCity", _weatherCity);
+        _prefs.putString("wtName", _weatherDisplayName);
+        xSemaphoreGive(_prefsMutex);
+    }
+    weatherScreenInvalidateCache();
+}
+
+bool getWeatherManual() { return _weatherManual; }
+
+void setWeatherManual(bool manual) {
+    _weatherManual = manual;
+    if (_prefsReady && xSemaphoreTake(_prefsMutex, portMAX_DELAY) == pdTRUE) {
+        _prefs.putBool("wtMan", _weatherManual);
+        xSemaphoreGive(_prefsMutex);
     }
 }

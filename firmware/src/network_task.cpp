@@ -648,8 +648,8 @@ void networkTask(void *param) {
                     evt.connected = true;
                     xQueueSend(networkEventQueue, &evt, 0);
 
-                    // Defer timezone and version check so we don't block MQTT/WS (no blocking in this block)
-                    if (getTimezoneIANA().length() == 0)
+                    // Defer IP-based timezone/weather bootstrap (same HTTP as time_manager)
+                    if (getTimezoneIANA().length() == 0 || !getWeatherManual())
                         _tzCheckAfterMs = millis() + 5000;
                     _versionCheckAfterMs = millis() + 15000;
                 }
@@ -694,7 +694,7 @@ void networkTask(void *param) {
         // --- Deferred timezone detection (~5s after WiFi connect) ---
         if (_tzCheckAfterMs > 0 && millis() >= _tzCheckAfterMs) {
             _tzCheckAfterMs = 0;
-            if (getTimezoneIANA().length() == 0)
+            if (getTimezoneIANA().length() == 0 || !getWeatherManual())
                 timeManagerDetectTimezone();
         }
         // --- Deferred version check (~15s after WiFi connect) ---

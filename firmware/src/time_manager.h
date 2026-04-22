@@ -15,8 +15,9 @@ bool timeManagerSynced();
 // Set POSIX TZ string and apply it. Also saves IANA name to NVS.
 void timeManagerSetTimezone(const String &ianaTz);
 
-// Auto-detect timezone via ip-api.com HTTP request.
-// Falls back to NVS-stored value on failure.
+// One HTTP request to ip-api.com: auto timezone when NVS has none, and/or
+// rough lat/lon/city for weather when the user has not pinned a location (dashboard).
+// Falls back to NVS-stored timezone on failure.
 void timeManagerDetectTimezone();
 
 // Get formatted local time "HH:MM".

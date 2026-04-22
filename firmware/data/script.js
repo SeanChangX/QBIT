@@ -433,6 +433,167 @@ dz.addEventListener('drop', function (e) {
   if (e.dataTransfer.files.length) uf(e.dataTransfer.files);
 });
 
+// Weather location -- city search + save
+(function () {
+  var wtName    = document.getElementById('wtName');
+  var wtQuery   = document.getElementById('wtQuery');
+  var btnSearch = document.getElementById('btnWtSearch');
+  var wtResults = document.getElementById('wtResults');
+  var btnSave   = document.getElementById('btnWtSave');
+  var wtMsg     = document.getElementById('wtMsg');
+  var _selected = null; // {lat, lon, name, country}
+
+  function applyWeatherLocation(d) {
+    var name = (d && (d.displayName || d.display_name || d.city)) || '--';
+    wtName.textContent = name;
+  }
+
+  // Fetch current saved location on load
+  function refreshWeatherLocation() {
+    return fetch('/api/weather?_ts=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('GET /api/weather failed: HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (d) {
+        console.log('[WEATHER] loaded location', d);
+        applyWeatherLocation(d);
+      })
+      .catch(function (e) {
+        console.error('[WEATHER] location load failed', e);
+      });
+  }
+  refreshWeatherLocation();
+
+  // Search
+  function doSearch() {
+    var q = wtQuery.value.trim();
+    if (!q) return;
+    console.log('[WEATHER] search click q=', q);
+    btnSearch.disabled = true;
+    wtResults.hidden = true;
+    wtResults.innerHTML = '';
+    wtMsg.style.display = 'none';
+    _selected = null;
+    btnSave.disabled = true;
+    fetch('/api/weather/search?q=' + encodeURIComponent(q))
+      .then(function (r) {
+        if (!r.ok) throw new Error('Search request failed: HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (arr) {
+        console.log('[WEATHER] search results', arr);
+        if (arr && arr.error) {
+          wtMsg.className = 'msg error';
+          wtMsg.textContent = 'Search error: ' + arr.error;
+          wtMsg.style.display = 'block';
+          return;
+        }
+        if (!Array.isArray(arr) || arr.length === 0) {
+          wtMsg.className = 'msg error';
+          wtMsg.textContent = 'No results found.';
+          wtMsg.style.display = 'block';
+          return;
+        }
+        var html = '<div class="wt-results-list" role="listbox" aria-label="Search results">';
+        arr.forEach(function (item, i) {
+          var label = item.name + (item.country ? ', ' + item.country : '');
+          var labelEsc = String(label)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/"/g, '&quot;');
+          var coords = item.lat.toFixed(2) + ', ' + item.lon.toFixed(2);
+          html += '<button type="button" class="wt-result" data-idx="' + i + '" role="option" aria-selected="false">';
+          html += '<span class="wt-result-text">';
+          html += '<span class="wt-result-main">' + labelEsc + '</span>';
+          html += '<span class="wt-result-meta">' + coords + '</span>';
+          html += '</span>';
+          html += '<span class="wt-result-check" aria-hidden="true">';
+          html += '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+          html += '</span></button>';
+        });
+        html += '</div>';
+        wtResults.innerHTML = html;
+        wtResults.hidden = false;
+        var rows = wtResults.querySelectorAll('.wt-result');
+        rows.forEach(function (row) {
+          var idx = parseInt(row.getAttribute('data-idx'), 10);
+          var item = arr[idx];
+          function selectRow() {
+            _selected = item;
+            rows.forEach(function (r2) {
+              r2.classList.remove('is-selected');
+              r2.setAttribute('aria-selected', 'false');
+            });
+            row.classList.add('is-selected');
+            row.setAttribute('aria-selected', 'true');
+            btnSave.disabled = false;
+            wtMsg.style.display = 'none';
+          }
+          row.addEventListener('click', selectRow);
+        });
+      })
+      .catch(function (e) {
+        console.error('[WEATHER] search failed', e);
+        wtMsg.className = 'msg error';
+        wtMsg.textContent = 'Search failed: ' + (e && e.message ? e.message : 'Check connection.');
+        wtMsg.style.display = 'block';
+      })
+      .finally(function () { btnSearch.disabled = false; });
+  }
+
+  btnSearch.addEventListener('click', doSearch);
+  wtQuery.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') doSearch();
+  });
+
+  // Save
+  btnSave.addEventListener('click', function () {
+    if (!_selected) return;
+    btnSave.disabled = true;
+    var displayName = _selected.name + ((_selected.country && _selected.country.length > 0)
+      ? ', ' + _selected.country : '');
+    var params = 'lat=' + _selected.lat
+               + '&lon=' + _selected.lon
+               + '&city=' + encodeURIComponent(_selected.name)
+               + '&display_name=' + encodeURIComponent(displayName)
+               + '&save=1';
+    fetch('/api/weather?' + params, { method: 'POST' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('Save request failed: HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (d) {
+        console.log('[WEATHER] save response', d);
+        // Immediate UI update from selected value for snappy feedback.
+        wtName.textContent = displayName;
+        applyWeatherLocation(d);
+        wtMsg.className = 'msg ok';
+        wtMsg.textContent = 'Saved. Weather screen will show new location next time.';
+        wtMsg.style.display = 'block';
+        btnSave.classList.add('saved');
+        btnSave.textContent = 'Saved';
+        setTimeout(function () {
+          btnSave.classList.remove('saved');
+          btnSave.textContent = 'Save Location';
+          btnSave.disabled = false;
+        }, 2000);
+
+        // Re-fetch from device to confirm persisted value in UI.
+        setTimeout(function () {
+          refreshWeatherLocation();
+        }, 150);
+      })
+      .catch(function (e) {
+        console.error('[WEATHER] save failed', e);
+        wtMsg.className = 'msg error';
+        wtMsg.textContent = 'Save failed: ' + (e && e.message ? e.message : 'unknown error');
+        wtMsg.style.display = 'block';
+        btnSave.disabled = false;
+      });
+  });
+})();
+
 // Timezone setting -- fetch current timezone and allow saving
 (function () {
   var tzSelect = document.getElementById('tzSelect');

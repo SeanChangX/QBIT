@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <cstring>
 #include <time.h>
 
 // ==========================================================================
@@ -98,22 +99,68 @@ void timeManagerDetectTimezone() {
         return;
     }
 
+    const bool wantTz      = (getTimezoneIANA().length() == 0);
+    const bool wantWeather = !getWeatherManual();
+    if (!wantTz && !wantWeather) {
+        return;
+    }
+
     HTTPClient http;
-    http.begin("http://ip-api.com/json/?fields=timezone");
+    http.begin(
+        "http://ip-api.com/json/?fields=status,message,timezone,lat,lon,city,countryCode");
     http.setTimeout(5000);
     int httpCode = http.GET();
 
     if (httpCode == 200) {
         String payload = http.getString();
-        StaticJsonDocument<256> doc;
+        StaticJsonDocument<512> doc;
         if (!deserializeJson(doc, payload)) {
-            const char *tz = doc["timezone"];
-            if (tz) {
-                Serial.printf("[TZ] Detected timezone: %s\n", tz);
-                timeManagerSetTimezone(String(tz));
-                saveSettings();
-                http.end();
-                return;
+            const char *st = doc["status"].is<const char *>() ? doc["status"].as<const char *>() : "";
+            if (st[0] != '\0' && strcmp(st, "success") != 0) {
+                const char *msg = doc["message"].is<const char *>() ? doc["message"].as<const char *>() : "";
+                Serial.printf("[TZ] ip-api status=%s msg=%s\n", st, msg);
+            } else {
+                bool changed = false;
+
+                if (wantTz) {
+                    const char *tz = doc["timezone"].is<const char *>() ? doc["timezone"].as<const char *>() : "";
+                    if (tz[0] != '\0') {
+                        Serial.printf("[TZ] Detected timezone: %s\n", tz);
+                        timeManagerSetTimezone(String(tz));
+                        changed = true;
+                    }
+                }
+
+                if (wantWeather && !doc["lat"].isNull() && !doc["lon"].isNull()) {
+                    float lat = doc["lat"].as<float>();
+                    float lon = doc["lon"].as<float>();
+                    String city;
+                    if (doc["city"].is<const char *>()) {
+                        city = String(doc["city"].as<const char *>());
+                    }
+                    city.trim();
+                    if (city.length() == 0) {
+                        city = "IP";
+                    }
+                    String disp = city;
+                    if (doc["countryCode"].is<const char *>()) {
+                        const char *cc = doc["countryCode"].as<const char *>();
+                        if (cc && cc[0] != '\0') {
+                            disp += ", ";
+                            disp += cc;
+                        }
+                    }
+                    Serial.printf("[WEATHER] IP location: %s (%.4f, %.4f)\n",
+                                  disp.c_str(), lat, lon);
+                    setWeatherLocation(lat, lon, city, disp);
+                    changed = true;
+                }
+
+                if (changed) {
+                    saveSettings();
+                    http.end();
+                    return;
+                }
             }
         }
     }
