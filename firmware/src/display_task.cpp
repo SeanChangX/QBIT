@@ -40,6 +40,9 @@
 #define SETTINGS_MENU_IDLE_MS 10000
 #define OFFLINE_OVERLAY_MS    2000
 #define UPDATE_PROMPT_MS      8000
+// Server WS can flap when blocked/banned; require stable state before OLED toast / re-arm.
+#define SERVER_OFFLINE_DEBOUNCE_MS  2500
+#define SERVER_WS_STABLE_ARM_MS     3000
 // Must match network_task WIFI_RECONNECT_TIMEOUT_MS (AP portal starts after this)
 #define WIFI_AP_TIMEOUT_MS    15000
 #define WIFI_AP_PROGRESS_LEN  18
@@ -70,6 +73,8 @@ static bool          _offlineShown          = false;
 static unsigned long _offlineStartMs        = 0;
 static const char*   _offlineMsg            = nullptr;
 static bool          _serverOfflineNotified = false;
+static unsigned long _wsOfflineOverlayEarliestMs   = 0;  // show Server Offline only after this (debounced down)
+static unsigned long _wsClearOfflineNotifEarliestMs = 0;  // clear _serverOfflineNotified after stable reconnect
 
 // WiFi setup: QR vs text toggle; only show QR when AP portal is active
 static bool          _wifiSetupShowQR       = true;
@@ -529,14 +534,15 @@ void displayTask(void *param) {
                     break;
 
                 case NetworkEvent::WS_STATUS:
-                    if (!netEvt.connected && _state == GIF_PLAYBACK && !_serverOfflineNotified) {
-                        _serverOfflineNotified = true;
-                        _offlineShown = true;
-                        _offlineStartMs = now;
-                        _offlineMsg = "Server Offline";
-                        showText(_offlineMsg);
+                    // Debounce: ban/block often causes brief TCP/WS up then down; immediate connect clears
+                    // _serverOfflineNotified and re-shows overlay in a loop. Arm overlay only after stable
+                    // disconnect; re-arm only after stable reconnect (see GIF_PLAYBACK tick).
+                    if (!netEvt.connected && _state == GIF_PLAYBACK) {
+                        _wsOfflineOverlayEarliestMs = now + SERVER_OFFLINE_DEBOUNCE_MS;
+                        _wsClearOfflineNotifEarliestMs = 0;
                     } else if (netEvt.connected) {
-                        _serverOfflineNotified = false;
+                        _wsOfflineOverlayEarliestMs = 0;
+                        _wsClearOfflineNotifEarliestMs = now + SERVER_WS_STABLE_ARM_MS;
                     }
                     break;
 
@@ -1073,6 +1079,25 @@ void displayTask(void *param) {
                 if (_offlineShown && (now - _offlineStartMs >= OFFLINE_OVERLAY_MS)) {
                     _offlineShown = false;
                     _offlineMsg = nullptr;
+                }
+
+                // Debounced Server Offline (after stable disconnect) and re-arm (after stable reconnect)
+                if (_wsClearOfflineNotifEarliestMs != 0 && now >= _wsClearOfflineNotifEarliestMs) {
+                    _wsClearOfflineNotifEarliestMs = 0;
+                    if (xEventGroupGetBits(connectivityBits) & WS_CONNECTED_BIT) {
+                        _serverOfflineNotified = false;
+                    }
+                }
+                if (_wsOfflineOverlayEarliestMs != 0 && now >= _wsOfflineOverlayEarliestMs) {
+                    _wsOfflineOverlayEarliestMs = 0;
+                    if (!(xEventGroupGetBits(connectivityBits) & WS_CONNECTED_BIT) &&
+                        !_serverOfflineNotified && !_offlineShown) {
+                        _serverOfflineNotified = true;
+                        _offlineShown = true;
+                        _offlineStartMs = now;
+                        _offlineMsg = "Server Offline";
+                        showText(_offlineMsg);
+                    }
                 }
 
                 // Update available: OLED overlay for UPDATE_PROMPT_MS only; do not clear
