@@ -235,7 +235,7 @@ void saveSettings() {
     _prefs.putFloat("wtLat",     _weatherLat);
     _prefs.putFloat("wtLon",     _weatherLon);
     _prefs.putString("wtName",   _weatherDisplayName);
-    _prefs.putBool("wtMan",     _weatherManual);
+    _prefs.putBool("wtMan",      _weatherManual);
     xSemaphoreGive(_prefsMutex);
     Serial.println("Settings saved to NVS");
 }
