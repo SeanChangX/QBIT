@@ -12,8 +12,8 @@
 //    AQI:     http://air-quality-api.open-meteo.com
 //
 //  NOTE: We use plain http:// so WiFiClient (not WiFiClientSecure) is
-//  sufficient, keeping RAM usage low.  Open-Meteo's non-SSL endpoints are
-//  identical in data to the HTTPS ones for this use-case.
+//  sufficient, keeping RAM usage low.  HTTPClient follows redirects like the
+//  geocoding handler in web_dashboard.cpp.
 // ==========================================================================
 #include "weather_screen.h"
 #include "weather_icons.h"
@@ -117,6 +117,7 @@ static void drawAqiIcon(int x, int y, int16_t aqi) {
 // ==========================================================================
 static String httpGet(const char *url) {
     HTTPClient http;
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setTimeout(WEATHER_HTTP_TIMEOUT);
     http.begin(url);
     int code = http.GET();
@@ -190,7 +191,7 @@ static bool fetchWeatherData() {
 // ==========================================================================
 void weatherScreenDraw() {
     if (!_hasData) {
-        showText("[ Weather ]", "", "No data.", "Tap HOLD to retry");
+        showText("[ Weather ]", "", "No data.", "TAP = refresh  2x = menu");
         return;
     }
 
@@ -230,7 +231,7 @@ void weatherScreenDraw() {
     u8g2.drawXBM(rightX + 2, 41, 11, 16, WEATHER_HUMID_ICON);
 
     u8g2.setFont(u8g2_font_5x8_tr);
-    u8g2.drawStr(rightX + 18, 25, "AQI");
+    u8g2.drawStr(rightX + 14, 25, "EU AQI");
 
     char aqiBuf[8];
     if (_aqi >= 0)
@@ -238,15 +239,15 @@ void weatherScreenDraw() {
     else
         strlcpy(aqiBuf, "--", sizeof(aqiBuf));
     u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(rightX + 18, 35, aqiBuf);
+    u8g2.drawStr(rightX + 14, 35, aqiBuf);
 
     u8g2.setFont(u8g2_font_5x8_tr);
-    u8g2.drawStr(rightX + 18, 48, "Humidity");
+    u8g2.drawStr(rightX + 14, 48, "Humidity");
 
     char humBuf[8];
     snprintf(humBuf, sizeof(humBuf), "%u %%", (unsigned)_humidity);
     u8g2.setFont(u8g2_font_6x10_tr);
-    u8g2.drawStr(rightX + 18, 58, humBuf);
+    u8g2.drawStr(rightX + 14, 58, humBuf);
 
     int tempInt = (int)(_temperature + (_temperature >= 0 ? 0.5f : -0.5f));
     char tempNumBuf[8];
@@ -302,7 +303,7 @@ void weatherScreenEnter() {
     if (!ok) {
         // Keep stale data if we have it; otherwise show error
         if (!_hasData) {
-            showText("[ Weather ]", "", "Fetch failed.", "Check Wi-Fi");
+            showText("[ Weather ]", "", "Fetch failed.", "TAP = retry  2x = menu");
             return;
         }
         // Draw with stale data

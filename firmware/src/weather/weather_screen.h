@@ -18,7 +18,7 @@ void weatherScreenDraw();
 // Returns true if fresh data was fetched successfully.
 bool weatherScreenRefreshNow();
 
-// Invalidate the cache so the next weatherScreenEnter() forces a fresh fetch.
+// Drop cached readings (e.g. after setWeatherLocation from NVS).
 void weatherScreenInvalidateCache();
 
 #endif // WEATHER_SCREEN_H

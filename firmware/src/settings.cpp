@@ -3,6 +3,9 @@
 // ==========================================================================
 #include "settings.h"
 #include "gif_player.h"
+
+extern void weatherScreenInvalidateCache();
+
 #include <Preferences.h>
 #include <WiFi.h>
 #include <freertos/FreeRTOS.h>
@@ -58,11 +61,11 @@ static bool _negativeGif     = false;
 // Time format: true = 24h, false = 12h
 static bool _timeFormat24h   = true;
 
-// Weather location
-static String  _weatherCity        = "Pune";
-static float   _weatherLat         = 18.52f;
-static float   _weatherLon         = 73.85f;
-static String  _weatherDisplayName = "Pune, IN";
+// Weather location (neutral default for first boot; user sets via dashboard)
+static String  _weatherCity        = "London";
+static float   _weatherLat         = 51.5074f;
+static float   _weatherLon         = -0.1278f;
+static String  _weatherDisplayName = "London, GB";
 
 // ==========================================================================
 //  Time format (24h/12h)
@@ -170,12 +173,12 @@ void loadSettings() {
     _flappyHighScore = _prefs.getUInt("flappyHi",  0);
     _carHighScore    = _prefs.getUInt("carHi",     0);
 
-    // Weather location (defaults to Pune, IN)
-    _weatherCity        = _prefs.getString("wtCity", "Pune");
+    // Weather location (factory default London; override via dashboard / NVS)
+    _weatherCity        = _prefs.getString("wtCity", "London");
     if (_weatherCity.length() > WEATHER_CITY_MAX_LEN) _weatherCity = _weatherCity.substring(0, WEATHER_CITY_MAX_LEN);
-    _weatherLat         = _prefs.getFloat("wtLat",  18.52f);
-    _weatherLon         = _prefs.getFloat("wtLon",  73.85f);
-    _weatherDisplayName = _prefs.getString("wtName", "Pune, IN");
+    _weatherLat         = _prefs.getFloat("wtLat",  51.5074f);
+    _weatherLon         = _prefs.getFloat("wtLon",  -0.1278f);
+    _weatherDisplayName = _prefs.getString("wtName", "London, GB");
     if (_weatherDisplayName.length() > WEATHER_NAME_MAX_LEN) _weatherDisplayName = _weatherDisplayName.substring(0, WEATHER_NAME_MAX_LEN);
 
     xSemaphoreGive(_prefsMutex);
@@ -394,4 +397,5 @@ void setWeatherLocation(float lat, float lon,
         _prefs.putString("wtName", _weatherDisplayName);
         xSemaphoreGive(_prefsMutex);
     }
+    weatherScreenInvalidateCache();
 }

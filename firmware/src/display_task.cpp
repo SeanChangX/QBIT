@@ -756,7 +756,11 @@ void displayTask(void *param) {
 
                 case WEATHER_SCREEN:
                     _stateEntryMs = now;
-                    if (gesture.type == DOUBLE_TAP || gesture.type == LONG_PRESS) {
+                    if (gesture.type == SINGLE_TAP) {
+                        showText("[ Weather ]", "", "Updating...", "");
+                        weatherScreenRefreshNow();
+                        weatherScreenDraw();
+                    } else if (gesture.type == DOUBLE_TAP || gesture.type == LONG_PRESS) {
                         enterSettingsMenu();
                     }
                     break;
@@ -1208,11 +1212,7 @@ void displayTask(void *param) {
                 break;
 
             case WEATHER_SCREEN:
-                // No auto-timeout; redrawn only on enter or gesture.
-                // Re-draw at ~1 fps so updated cached data appears promptly.
-                if (elapsed % 1000 < 10) {
-                    weatherScreenDraw();
-                }
+                // Static screen: redraw only on enter, single-tap refresh, or web POST refresh.
                 break;
 
             case GAME_MENU:
