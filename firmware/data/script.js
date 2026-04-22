@@ -22,6 +22,17 @@ function fmtUptime(sec) {
   return parts.length ? parts.join(' ') : '< 1 min';
 }
 
+// Match OLED / C++: leading "v" only for semantic versions (e.g. 1.2.3); dev hashes stay as-is.
+function fmtFwVerLabel(ver) {
+  if (ver == null || ver === '') return '—';
+  var s = String(ver);
+  if (s === '—') return s;
+  var c0 = s.charAt(0);
+  if (c0 === 'v' || c0 === 'V') return s;
+  if (c0 >= '0' && c0 <= '9') return 'v' + s;
+  return s;
+}
+
 function setServerPill(el, connected) {
   el.classList.remove('pill-na');
   el.textContent = connected ? 'Connected' : 'Disconnected';
@@ -106,12 +117,12 @@ function setMqttPill(el, enabled, connected) {
     var srv = d.server_connected ? fmtUptime(d.server_uptime_s) : '—';
     devCombinedUptime.textContent = 'Boot: ' + boot + ' · Server: ' + srv;
 
-    devFirmwarePill.textContent = d.firmware || '—';
+    devFirmwarePill.textContent = fmtFwVerLabel(d.firmware);
     hasFwUpdate = !!(d.update_available && d.latest_version);
     if (hasFwUpdate) {
       devFwNotifyDot.hidden = false;
-      devFwPopoverCur.textContent = d.firmware || '—';
-      devFwPopoverLatest.textContent = d.latest_version;
+      devFwPopoverCur.textContent = fmtFwVerLabel(d.firmware);
+      devFwPopoverLatest.textContent = fmtFwVerLabel(d.latest_version);
       devFirmwarePill.classList.add('has-fw-update');
     } else {
       devFwNotifyDot.hidden = true;

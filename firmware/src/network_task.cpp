@@ -445,12 +445,9 @@ static void wsMessage(WebsocketsClient &client, WebsocketsMessage message) {
 // ==========================================================================
 #define VERSION_CHECK_URL "https://seanchangx.github.io/QBIT/latest.json"
 #define VERSION_CHECK_TIMEOUT_MS 45000  // HTTPClient uses ms (compare with millis())
+#define VERSION_RECHECK_INTERVAL_MS (6UL * 60UL * 60UL * 1000UL)  // periodic check while WiFi up
 
-static void checkFirmwareVersionOnce() {
-    static bool done = false;
-    if (done) return;
-    done = true;
-
+static void checkFirmwareVersion() {
     Serial.println("[Version] Checking...");
     WiFiClientSecure client;
     client.setInsecure();
@@ -488,6 +485,8 @@ static void checkFirmwareVersionOnce() {
         updateAvailableVersion[UPDATE_AVAILABLE_VERSION_LEN - 1] = '\0';
         Serial.printf("[Version] Update available: %s (current: %s)\n", remoteVer, kQbitVersion);
     } else {
+        updateAvailable        = false;
+        updateAvailableVersion[0] = '\0';
         Serial.printf("[Version] Up to date: %s\n", kQbitVersion);
     }
 }
@@ -889,10 +888,13 @@ void networkTask(void *param) {
             if (getTimezoneIANA().length() == 0 || !getWeatherManual())
                 timeManagerDetectTimezone();
         }
-        // --- Deferred version check (~15s after WiFi connect) ---
+        // --- Deferred version check (~15s after WiFi connect, then every 6h while STA up) ---
         if (_versionCheckAfterMs > 0 && millis() >= _versionCheckAfterMs) {
-            _versionCheckAfterMs = 0;
-            checkFirmwareVersionOnce();
+            checkFirmwareVersion();
+            if (_wifiConnected && WiFi.status() == WL_CONNECTED)
+                _versionCheckAfterMs = millis() + VERSION_RECHECK_INTERVAL_MS;
+            else
+                _versionCheckAfterMs = 0;
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));
