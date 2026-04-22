@@ -248,6 +248,26 @@ void gifPlayerSetIdleAnimation(const AnimatedGIF *idle) {
   _idleAnim = idle;
 }
 
+void gifPlayerStartIdleIfNoUserGifs() {
+  if (!_display || !_idleAnim) return;
+  if (gifPlayerHasFiles()) return;
+
+  if (gifPlayerMutex) xSemaphoreTake(gifPlayerMutex, portMAX_DELAY);
+  if (_file) {
+    _file.close();
+  }
+  _playing         = false;
+  _fileChanged     = false;
+  _requestedFile   = "";
+  _currentFile     = "";
+  _idlePlaying     = true;
+  _idleFrame       = 0;
+  _idleLoopCount   = 0;
+  _idleLoopTarget  = 1 + (esp_random() % 5);
+  _idleLastFrameMs = 0;
+  if (gifPlayerMutex) xSemaphoreGive(gifPlayerMutex);
+}
+
 void gifPlayerSetFile(const String &filename) {
   if (gifPlayerMutex) xSemaphoreTake(gifPlayerMutex, portMAX_DELAY);
   _requestedFile = filename;
@@ -300,13 +320,19 @@ void gifPlayerTick() {
         _idleFrame = 0;
         _idleLoopCount++;
         if (_idleLoopCount >= _idleLoopTarget) {
-          // Idle loops done -- switch to next GIF
+          // Idle loops done -- switch to next GIF (or keep idling if there are no .qgif files)
           _idlePlaying   = false;
           _idleLoopCount = 0;
           String next = gifPlayerNextShuffle();
           if (next.length() > 0) {
             _requestedFile = next;
             _fileChanged   = true;
+          } else if (_idleAnim) {
+            _idlePlaying     = true;
+            _idleFrame       = 0;
+            _idleLoopCount   = 0;
+            _idleLoopTarget  = 1 + (esp_random() % 5);
+            _idleLastFrameMs = 0;
           }
         }
       }

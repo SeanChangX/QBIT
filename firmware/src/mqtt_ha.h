@@ -15,5 +15,6 @@ void mqttPublishPokeEvent(const char *sender, const char *text);
 void mqttPublishMuteState(bool muted);
 void mqttPublishTouchEvent(GestureType type);
 void mqttPublishAnimationState(const String &filename);
+void mqttPublishServerConnectionState(bool connected);
 
 #endif // MQTT_HA_H

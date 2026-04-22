@@ -40,6 +40,24 @@ void mqttPublishHADiscovery(PubSubClient *client) {
         client->publish(topic.c_str(), payload.c_str(), true);
     }
 
+    // --- Binary sensor: cloud / backend WebSocket (device register WS) ---
+    {
+        String topic = "homeassistant/binary_sensor/qbit_" + idLow + "/server/config";
+        StaticJsonDocument<512> doc;
+        doc["name"]              = "Server";
+        doc["uniq_id"]           = "qbit_" + idLow + "_server";
+        doc["default_entity_id"] = "binary_sensor.qbit_" + idLow + "_server";
+        doc["stat_t"]            = prefix + "/" + id + "/server/status";
+        doc["pl_on"]             = "online";
+        doc["pl_off"]            = "offline";
+        doc["dev_cla"]           = "connectivity";
+        doc["icon"]              = "mdi:cloud-outline";
+        doc["dev"]               = devBlock;
+        String payload;
+        serializeJson(doc, payload);
+        client->publish(topic.c_str(), payload.c_str(), true);
+    }
+
     // --- Sensor: IP address ---
     {
         String topic = "homeassistant/sensor/qbit_" + idLow + "/ip/config";

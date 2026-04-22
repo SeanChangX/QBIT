@@ -82,6 +82,9 @@ void setup() {
     });
 
     NW.setStrategy(NetWizardStrategy::NON_BLOCKING);
+    // Default NetWizard portal idle timeout is 5 minutes (no station on Soft AP), which then
+    // tears down the AP and leaves the OLED stuck on "AP in 0s" until something reopens it.
+    NW.setPortalTimeout(60UL * 60UL * 1000UL);   // 1 hour (ms) for first-time / captive setup
     // Hostname sent to router via DHCP
     {
         String hostname = "qbit-" + getDeviceId();

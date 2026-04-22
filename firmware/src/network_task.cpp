@@ -40,6 +40,11 @@
 #define WS_RECONNECT_MS 5000
 #define WIFI_RECONNECT_TIMEOUT_MS 15000
 #define PORTAL_RETRY_INTERVAL_MS  30000    // while AP is up, retry saved WiFi in background every 30s
+// NetWizard stopPortal() forces WiFi.mode(STA)+reconnect; WL_CONNECTED can drop briefly. Skip
+// (or defer) the display "WiFi Offline" queue event right after stopPortal; still deliver if
+// the link stays down after this window.
+// Covers NetWizard /exit handler (NETWIZARD_EXIT_TIMEOUT 5s) + STA reconnect after stopPortal().
+#define WIFI_SUPPRESS_DISCONNECT_UI_MS  10000
 
 // Bitmap poke: 1bpp row-major, size = (height_pages) * width, height_pages <= 8
 #define POKE_BMP_MAX_WIDTH  512
@@ -78,10 +83,26 @@ static char _mqttHostStable[MQTT_HOST_MAX_LEN + 1] = {0};
 
 static bool          _wifiConnected = false;
 static unsigned long _wifiLostMs    = 0;
-static bool          _portalRestartedForReconnect = false;
-static unsigned long _portalRetryAfterMs = 0;   // when to stop portal and retry saved WiFi
-static unsigned long _versionCheckAfterMs = 0;  // run version check after this time
-static unsigned long _tzCheckAfterMs     = 0;  // run timezone detection after this time
+// True after STA has connected at least once this boot. Used with NW.isConfigured() so we
+// do not treat first-time captive setup (no saved creds, never STA) as "reconnect → stopPortal
+// before SUCCESS", while still allowing cold boot with saved creds but no router to open AP.
+static bool          _hadStaConnection                = false;
+static bool          _portalRestartedForReconnect     = false;
+static unsigned long _portalRetryAfterMs              = 0;  // when to stop portal and retry saved WiFi
+// After provisioning SUCCESS, delay stopPortal so the phone can poll /netwizard/status and
+// POST /netwizard/exit before HTTP/AP goes away (NetWizard uses NETWIZARD_EXIT_TIMEOUT).
+static unsigned long _portalProvisionStopAfterMs      = 0;
+static unsigned long _versionCheckAfterMs             = 0;  // run version check after this time
+static unsigned long _tzCheckAfterMs                  = 0;  // run timezone detection after this time
+static unsigned long _wifiSuppressDisconnectUiUntilMs = 0;
+static bool          _wifiDisconnectUiPending         = false;
+static bool          _nwPrevPortalSuccess            = false;
+// NetWizard closes the Soft AP after idle portal timeout (~5 min default). Re-open while still
+// unconfigured so the OLED is not stuck on "AP in 0s" with no AP (PORTAL_ACTIVE cleared).
+static unsigned long _reopenSetupPortalAfterMs = 0;
+// While portal is up, avoid calling NW.connect() faster than the STA stack can finish an attempt
+// (otherwise ESP logs: "sta is connecting, return error").
+static unsigned long _portalBgConnectEarliestMs = 0;
 
 // ==========================================================================
 //  WebSocket helpers
@@ -175,11 +196,19 @@ static void wsEvent(WebsocketsClient &client, WebsocketsEvent event, WSInterface
             xEventGroupSetBits(connectivityBits, WS_CONNECTED_BIT);
             Serial.println("[WS] Connected to backend");
             wsSendDeviceInfo();
+            mqttPublishServerConnectionState(true);
+            {
+                NetworkEvent evt = {};
+                evt.kind = NetworkEvent::WS_STATUS;
+                evt.connected = true;
+                xQueueSend(networkEventQueue, &evt, 0);
+            }
             break;
         case WebsocketsEvent::ConnectionClosed:
             _wsConnected = false;
             xEventGroupClearBits(connectivityBits, WS_CONNECTED_BIT);
             Serial.println("[WS] Disconnected");
+            mqttPublishServerConnectionState(false);
             {
                 NetworkEvent evt = {};
                 evt.kind = NetworkEvent::WS_STATUS;
@@ -576,6 +605,7 @@ static void mqttReconnect() {
 
         // Publish HA discovery
         mqttPublishHADiscovery(&_mqttClient);
+        mqttPublishServerConnectionState(_wsConnected);
     } else {
         Serial.printf("[MQTT] Connection failed (rc=%d)\n", _mqttClient.state());
     }
@@ -607,20 +637,92 @@ void networkTask(void *param) {
 
         // --- WiFi monitoring ---
         if (WiFi.status() != WL_CONNECTED) {
+            _portalProvisionStopAfterMs = 0;
+            // Display uses PORTAL_ACTIVE_BIT to switch from "waiting" to QR. That must track
+            // whether the setup Soft AP is actually up — not the "15s reconnect → startPortal"
+            // path (first-time provisioning never hits that path once _hadStaConnection gating exists).
+#if defined(ESP32)
+            {
+                wifi_mode_t wm = WiFi.getMode();
+                if (wm == WIFI_AP || wm == WIFI_AP_STA) {
+                    xEventGroupSetBits(connectivityBits, PORTAL_ACTIVE_BIT);
+                    _reopenSetupPortalAfterMs = 0;
+                } else {
+                    xEventGroupClearBits(connectivityBits, PORTAL_ACTIVE_BIT);
+                    if (!NW.isConfigured() && !_portalRestartedForReconnect) {
+                        unsigned long m = millis();
+                        if (_reopenSetupPortalAfterMs == 0) {
+                            _reopenSetupPortalAfterMs = m + 5000;
+                        } else if ((long)(m - _reopenSetupPortalAfterMs) >= 0) {
+                            _reopenSetupPortalAfterMs = m + 15000;
+                            NW.startPortal();
+                            wifiApplyApRfStabilityForPcbAntenna();
+                            Serial.println("[WiFi] Setup portal was down; restarting captive AP");
+                        }
+                    } else {
+                        _reopenSetupPortalAfterMs = 0;
+                    }
+                }
+            }
+#else
+            if (WiFi.getMode() == WIFI_AP || WiFi.getMode() == WIFI_AP_STA) {
+                xEventGroupSetBits(connectivityBits, PORTAL_ACTIVE_BIT);
+                _reopenSetupPortalAfterMs = 0;
+            } else {
+                xEventGroupClearBits(connectivityBits, PORTAL_ACTIVE_BIT);
+                if (!NW.isConfigured() && !_portalRestartedForReconnect) {
+                    unsigned long m = millis();
+                    if (_reopenSetupPortalAfterMs == 0) {
+                        _reopenSetupPortalAfterMs = m + 5000;
+                    } else if ((long)(m - _reopenSetupPortalAfterMs) >= 0) {
+                        _reopenSetupPortalAfterMs = m + 15000;
+                        NW.startPortal();
+                        wifiApplyApRfStabilityForPcbAntenna();
+                        Serial.println("[WiFi] Setup portal was down; restarting captive AP");
+                    }
+                } else {
+                    _reopenSetupPortalAfterMs = 0;
+                }
+            }
+#endif
             if (_wifiLostMs == 0) {
                 _wifiLostMs = millis();
                 if (_wifiLostMs == 0) _wifiLostMs = 1;
+                // Boot / first captive setup: STA has never been up — not a "disconnect", so do
+                // not enqueue WIFI_STATUS false (would be wrong for GIF_PLAYBACK) or log "lost".
+                const bool wasStaUp = _wifiConnected;
                 _wifiConnected = false;
                 _wsConnected = false;
                 xEventGroupClearBits(connectivityBits, WIFI_CONNECTED_BIT | WS_CONNECTED_BIT);
-                Serial.println("[WiFi] Connection lost");
-
+                if (wasStaUp) {
+                    Serial.println("[WiFi] Connection lost");
+                    const bool suppressUi = (_wifiSuppressDisconnectUiUntilMs != 0 &&
+                                             millis() < _wifiSuppressDisconnectUiUntilMs);
+                    if (!suppressUi) {
+                        NetworkEvent evt = {};
+                        evt.kind = NetworkEvent::WIFI_STATUS;
+                        evt.connected = false;
+                        xQueueSend(networkEventQueue, &evt, 0);
+                    } else {
+                        _wifiDisconnectUiPending = true;
+                    }
+                }
+            } else if (_wifiDisconnectUiPending &&
+                       (_wifiSuppressDisconnectUiUntilMs == 0 ||
+                        millis() >= _wifiSuppressDisconnectUiUntilMs)) {
+                _wifiDisconnectUiPending = false;
+                _wifiSuppressDisconnectUiUntilMs = 0;
                 NetworkEvent evt = {};
                 evt.kind = NetworkEvent::WIFI_STATUS;
                 evt.connected = false;
                 xQueueSend(networkEventQueue, &evt, 0);
             }
-            if (!_portalRestartedForReconnect &&
+            // Open AP + background retries when STA is unavailable, but not during first-time
+            // captive setup (no saved creds yet): there "not connected" is normal until the
+            // user submits SSID; isConfigured()==false avoids the old bug where stopPortal ran
+            // on first STA connect because this flag was set after 15s.
+            if ((NW.isConfigured() || _hadStaConnection) &&
+                !_portalRestartedForReconnect &&
                 (millis() - _wifiLostMs > WIFI_RECONNECT_TIMEOUT_MS)) {
                 _portalRestartedForReconnect = true;
                 _portalRetryAfterMs = millis() + PORTAL_RETRY_INTERVAL_MS;
@@ -632,16 +734,28 @@ void networkTask(void *param) {
             // While AP is up, periodically retry saved WiFi in background (AP stays up; e.g. router came back)
             if (_portalRestartedForReconnect && _portalRetryAfterMs > 0 && millis() >= _portalRetryAfterMs) {
                 _portalRetryAfterMs = millis() + PORTAL_RETRY_INTERVAL_MS;
-                NW.connect();   // use NetWizard's saved credentials (WiFi.reconnect() uses different storage)
-                Serial.println("[WiFi] Portal retry: reconnecting to saved WiFi in background");
+                const unsigned long m = millis();
+                if (m >= _portalBgConnectEarliestMs) {
+                    _portalBgConnectEarliestMs = m + 20000;   // min gap between connect attempts (ms)
+                    NW.connect();   // use NetWizard's saved credentials (WiFi.reconnect() uses different storage)
+                    Serial.println("[WiFi] Portal retry: reconnecting to saved WiFi in background");
+                } else {
+                    // STA may still be mid-connect from last attempt; try again soon without spamming esp_wifi.
+                    _portalRetryAfterMs = _portalBgConnectEarliestMs;
+                }
             }
         } else {
+            _reopenSetupPortalAfterMs = 0;
+            _portalBgConnectEarliestMs = 0;
+            // STA up: latch first-connect + clear loss timer (must not gate portal/stopPortal below).
             if (_wifiLostMs > 0 || !_wifiConnected) {
-                // WiFi just connected or reconnected
                 if (!_wifiConnected) {
                     _wifiConnected = true;
+                    _hadStaConnection = true;
                     wifiRestoreStaTxPower();
                     xEventGroupSetBits(connectivityBits, WIFI_CONNECTED_BIT);
+                    _wifiDisconnectUiPending         = false;
+                    _wifiSuppressDisconnectUiUntilMs = 0;
 
                     NetworkEvent evt = {};
                     evt.kind = NetworkEvent::WIFI_STATUS;
@@ -653,20 +767,47 @@ void networkTask(void *param) {
                         _tzCheckAfterMs = millis() + 5000;
                     _versionCheckAfterMs = millis() + 15000;
                 }
-                const bool portalSuccess = (NW.getPortalState() == NetWizardPortalState::SUCCESS);
-                if (_portalRestartedForReconnect || portalSuccess) {
-                    _portalRestartedForReconnect = false;
-                    _portalRetryAfterMs = 0;
-                    xEventGroupClearBits(connectivityBits, PORTAL_ACTIVE_BIT);
-                    NW.stopPortal();
-                    wifiRestoreStaTxPower();
-                    if (portalSuccess) {
-                        Serial.println("[WiFi] Provisioning success, stopping AP portal");
-                    } else {
-                        Serial.println("[WiFi] Reconnected, stopping AP portal");
-                    }
-                }
                 _wifiLostMs = 0;
+            }
+            // Run every tick while STA connected: deferred NW.stopPortal() after provisioning SUCCESS
+            // must not sit inside (_wifiLostMs > 0 || !_wifiConnected) — that is false after first connect.
+            const bool portalSuccess = (NW.getPortalState() == NetWizardPortalState::SUCCESS);
+            if (portalSuccess && !_nwPrevPortalSuccess) {
+                unsigned long u = millis() + WIFI_SUPPRESS_DISCONNECT_UI_MS;
+                if (u > _wifiSuppressDisconnectUiUntilMs) {
+                    _wifiSuppressDisconnectUiUntilMs = u;
+                }
+            }
+            _nwPrevPortalSuccess = portalSuccess;
+            // Reconnect path: tear down AP immediately. Provisioning SUCCESS: wait before
+            // stopPortal() so the captive UI can finish (see NetWizard NETWIZARD_EXIT_TIMEOUT).
+            bool stopPortalNow = false;
+            if (_portalRestartedForReconnect) {
+                stopPortalNow = true;
+            } else if (portalSuccess) {
+                if (_portalProvisionStopAfterMs == 0) {
+                    _portalProvisionStopAfterMs = millis() + 6000;
+                } else if (millis() >= _portalProvisionStopAfterMs) {
+                    stopPortalNow = true;
+                }
+            } else {
+                _portalProvisionStopAfterMs = 0;
+            }
+
+            if (stopPortalNow) {
+                _portalRestartedForReconnect = false;
+                _portalRetryAfterMs = 0;
+                _portalProvisionStopAfterMs = 0;
+                xEventGroupClearBits(connectivityBits, PORTAL_ACTIVE_BIT);
+                // Avoid OLED "WiFi Offline" when stopPortal() drops STA briefly then reconnects.
+                _wifiSuppressDisconnectUiUntilMs = millis() + WIFI_SUPPRESS_DISCONNECT_UI_MS;
+                NW.stopPortal();
+                wifiRestoreStaTxPower();
+                if (portalSuccess) {
+                    Serial.println("[WiFi] Provisioning success, stopping AP portal");
+                } else {
+                    Serial.println("[WiFi] Reconnected, stopping AP portal");
+                }
             }
         }
 
@@ -768,6 +909,12 @@ void mqttPublishAnimationState(const String &filename) {
     if (!getMqttEnabled() || !_mqttClient.connected()) return;
     String topic = getMqttPrefix() + "/" + getDeviceId() + "/animation/state";
     _mqttClient.publish(topic.c_str(), filename.c_str(), true);
+}
+
+void mqttPublishServerConnectionState(bool connected) {
+    if (!getMqttEnabled() || !_mqttClient.connected()) return;
+    String topic = getMqttPrefix() + "/" + getDeviceId() + "/server/status";
+    _mqttClient.publish(topic.c_str(), connected ? "online" : "offline", true);
 }
 
 // Apply AP RF settings for ESP32-C3 PCB antenna boards (fixes #2): lower TX power and HT20.

@@ -343,7 +343,7 @@ void weatherScreenEnter() {
     if (!ok) {
         // Keep stale data if we have it; otherwise show error
         if (!_hasData) {
-            showText("[ Weather ]", "", "Fetch failed.", "Re-enter to retry  2x = menu");
+            showText("[ Weather ]", "", "Fetch failed.", "Re-enter to retry");
             return;
         }
         // Draw with stale data

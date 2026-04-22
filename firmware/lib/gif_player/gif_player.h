@@ -51,6 +51,9 @@ uint16_t gifPlayerGetSpeed();
 // before the next GIF starts.  Pass nullptr to disable.
 void gifPlayerSetIdleAnimation(const AnimatedGIF *idle);
 
+// No .qgif on flash: start idle animation so GIF_PLAYBACK keeps updating after a text screen.
+void gifPlayerStartIdleIfNoUserGifs();
+
 // Non-blocking tick -- call from loop().
 // Renders the next frame when timing is due.
 void gifPlayerTick();

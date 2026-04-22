@@ -1061,6 +1061,9 @@ void displayTask(void *param) {
                         gifPlayerBuildShuffleBag();
                         gifPlayerSetAutoAdvance(1);
                         gifPlayerSetFile(gifPlayerNextShuffle());
+                    } else {
+                        // Without .qgif files, gifPlayerTick would not draw (_playing false, idle off).
+                        gifPlayerStartIdleIfNoUserGifs();
                     }
                 }
                 break;
