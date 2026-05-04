@@ -305,6 +305,20 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
     let deviceId: string | null = null;
     const publicIp = extractPublicIp(request);
 
+    // Per-socket heartbeat: each socket gets its own 30s timer starting from
+    // connection time. Terminate only after 2 consecutive missed pongs (~60s
+    // of silence) so a single delayed pong does not kill a healthy connection.
+    let missedPongs = 0;
+    const pingTimer = setInterval(() => {
+      if (missedPongs >= 2) {
+        clearInterval(pingTimer);
+        ws.terminate();
+        return;
+      }
+      missedPongs += 1;
+      try { ws.ping(); } catch { /* socket already gone */ }
+    }, 30_000);
+
     ws.on('message', (raw) => {
       const rawSize = (() => {
         if (typeof raw === 'string') return Buffer.byteLength(raw);
@@ -451,6 +465,7 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
     });
 
     ws.on('close', () => {
+      clearInterval(pingTimer);
       if (deviceId) {
         const registered = devices.get(deviceId);
         if (registered && registered.ws === ws) {
@@ -463,27 +478,10 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
       }
     });
 
-    // Heartbeat
     ws.on('pong', () => {
-      (ws as unknown as Record<string, unknown>).__alive = true;
+      missedPongs = 0;
     });
-    (ws as unknown as Record<string, unknown>).__alive = true;
   });
-
-  // Ping all device sockets every 30 seconds
-  const heartbeatInterval = setInterval(() => {
-    wss.clients.forEach((ws) => {
-      if ((ws as unknown as Record<string, unknown>).__alive === false) {
-        ws.terminate();
-        return;
-      }
-      (ws as unknown as Record<string, unknown>).__alive = false;
-      ws.ping();
-    });
-  }, 30_000);
-
-  // Store interval so graceful shutdown can clear it
-  (wss as unknown as Record<string, unknown>).__heartbeatInterval = heartbeatInterval;
 
   return wss;
 }
@@ -497,8 +495,7 @@ export function getWss(): WebSocketServer {
  */
 export function closeAll(): void {
   if (wss) {
-    const interval = (wss as unknown as Record<string, unknown>).__heartbeatInterval as ReturnType<typeof setInterval> | undefined;
-    if (interval) clearInterval(interval);
+    // Per-socket heartbeat timers are cleared by each socket's 'close' handler.
     wss.clients.forEach((ws) => ws.close());
     wss.close();
   }
