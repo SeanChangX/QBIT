@@ -76,16 +76,15 @@ function shutdown(signal: string): void {
     });
   }
 
-  // 4. Close SQLite database
-  try {
-    db.close();
-    logger.info('SQLite database closed');
-  } catch {
-    // already closed or error -- ignore
-  }
-
-  // Give a short window for pending responses, then exit
+  // 4. Defer SQLite close until after WS 'close' handlers have fired
+  //    (they synchronously write Device-offline rows; closing DB first crashes them).
   setTimeout(() => {
+    try {
+      db.close();
+      logger.info('SQLite database closed');
+    } catch {
+      // already closed or error -- ignore
+    }
     logger.info('Shutdown complete');
     process.exit(0);
   }, 3000);

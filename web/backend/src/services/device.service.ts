@@ -306,12 +306,14 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
     const publicIp = extractPublicIp(request);
 
     // Per-socket heartbeat: each socket gets its own 30s timer starting from
-    // connection time. Terminate only after 2 consecutive missed pongs (~60s
-    // of silence) so a single delayed pong does not kill a healthy connection.
+    // connection time. Terminate only after 3 consecutive missed pongs (~90s
+    // of silence) so transient pong delays through the Cloudflare Tunnel do
+    // not kill a healthy connection.
     let missedPongs = 0;
     const pingTimer = setInterval(() => {
-      if (missedPongs >= 2) {
+      if (missedPongs >= 3) {
         clearInterval(pingTimer);
+        logger.warn({ deviceId }, 'Device WS terminate: pong timeout');
         ws.terminate();
         return;
       }
