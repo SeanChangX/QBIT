@@ -81,14 +81,19 @@ QBIT is a retro robot-style desk companion that works like a personal BB call. O
 - Poke notifications support various languages: the bitmap is rendered on the web before being sent to the device, so any language can be displayed
 - Double-tap to show the clock; tap again to browse notification history
 
+**Weather Screen**
+- Shows current conditions and a short forecast on the OLED, fetched from a public weather API
+- Accessible from the top-level menu (long-press, then select **WEATHER**)
+
 **UI structure**
 
 Long press to open; tap to scroll, long press to enter. Double-tap at top level exits; 10 s idle auto-exits. SETTING changes apply only after **[ SAVE ]**.
 
 ```
 ROOT
+├── WEATHER        (current conditions and forecast pulled from Open-Meteo)
 ├── TIMER          (countdown: set H/M/S, start; alarm on expiry, tap dismiss / long-press back)
-├── GAMES
+├── GAME LIBRARY
 │   ├── T-Rex Runner   (Chrome dino game)
 │   ├── Flappy Bird    (tap-to-fly through pipes)
 │   └── Car Avoidance  (lane-dodge driving game)
@@ -399,6 +404,7 @@ cp .env.example .env
 | `FRONTEND_URL` | Full frontend URL for CORS, e.g. `https://yourdomain.com` |
 | `DEVICE_API_KEY` | Shared secret with ESP32 firmware. Must match `WS_API_KEY` in firmware. |
 | `MAX_DEVICE_CONNECTIONS` | Max device WebSocket connections (default: 100) |
+| `MAX_DEVICE_CONNECTIONS_PER_IP` | Max device WebSocket connections from a single IP (default: 10) |
 | `ADMIN_USERNAME` | Admin UI login (1–64 chars). Empty = no admin login. |
 | `ADMIN_PASSWORD` | Admin UI password (8–128 chars). |
 
@@ -491,7 +497,7 @@ pio run --target uploadfs       # upload LittleFS filesystem (animations, web da
 pio device monitor              # open serial monitor (115200 baud)
 ```
 
-The firmware connects to the backend WebSocket server using the `WS_HOST`, `WS_PORT`, and `WS_API_KEY` defines in `firmware/src/main.cpp`. For local development, the defaults point to `localhost:3001`. For production builds via GitHub Actions, these values are injected from repository secrets at compile time.
+The firmware connects to the backend WebSocket server using the `WS_HOST`, `WS_PORT`, and `WS_API_KEY` build flags. Override them in [`firmware/platformio.ini`](firmware/platformio.ini) under `build_flags` (commented examples are included). The fallback defaults `localhost:3001` with an empty API key are defined in [`firmware/src/network_task.cpp`](firmware/src/network_task.cpp). For production builds via GitHub Actions, these values are injected from repository secrets at compile time.
 
 Custom partition table ([`firmware/partitions.csv`](firmware/partitions.csv))
 
@@ -504,7 +510,9 @@ Custom partition table ([`firmware/partitions.csv`](firmware/partitions.csv))
 | `tools/gif2qbit.py` | Convert standard GIF animations to the .qgif format |
 | `tools/qgif2gif.py` | Convert .qgif files back to standard GIF animations |
 | `tools/qgif2header.py` | Convert .qgif files to C header files for PROGMEM embedding |
+| `tools/png2xbm.py` | Convert small PNG icons (≤16×16) to u8g2 XBM-style C arrays |
 | `tools/simulate-devices.py` | Simulate multiple QBIT devices connecting to the backend for testing |
+| `tools/qbit-ctl` | TUI for inspecting and managing the backend SQLite database and `/data` files |
 | `tools/flasher/` | Browser-based firmware flasher (deployed to GitHub Pages) |
 
 ---

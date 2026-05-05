@@ -81,14 +81,19 @@ QBIT 是一款復古機器人造型的桌面陪伴裝置，就像專屬的 BB Ca
 - 戳一下通知支援多國語言顯示：點陣圖在網頁端渲染後才傳至裝置，因此可顯示任意語言
 - 雙擊顯示時鐘；再單擊可瀏覽通知歷史記錄
 
+**天氣畫面**
+- 在 OLED 上顯示目前天氣狀況與簡短預報，資料來自公開的天氣 API
+- 可從最上層選單進入（長按進入選單後選擇 **WEATHER**）
+
 **介面結構**
 
 長按進入選單；單擊捲動、長按進入。最上層雙擊離開；10 秒無操作自動關閉。**SETTING** 底下的變更須選擇 **[ SAVE ]** 後才會生效。
 
 ```
 ROOT
+├── WEATHER        （目前天氣與簡短預報，來自 Open-Meteo）
 ├── TIMER          （倒數：設定時/分/秒、開始；時間到鬧鈴，單擊關閉／長按回設定）
-├── GAMES
+├── GAME LIBRARY
 │   ├── T-Rex Runner   （Chrome 小恐龍）
 │   ├── Flappy Bird    （點擊拍翅穿越管道）
 │   └── Car Avoidance  （切換車道躲車遊戲）
@@ -399,6 +404,7 @@ cp .env.example .env
 | `FRONTEND_URL` | 完整前端 URL（CORS 用），例如 `https://yourdomain.com` |
 | `DEVICE_API_KEY` | 與 ESP32 韌體共用密鑰，須與韌體內 `WS_API_KEY` 一致 |
 | `MAX_DEVICE_CONNECTIONS` | 最大裝置 WebSocket 連線數（預設：100） |
+| `MAX_DEVICE_CONNECTIONS_PER_IP` | 單一 IP 可同時建立的裝置 WebSocket 連線上限（預設：10） |
 | `ADMIN_USERNAME` | 管理介面登入帳號（1–64 字元）。留空則不啟用登入。 |
 | `ADMIN_PASSWORD` | 管理介面密碼（8–128 字元）。 |
 
@@ -492,7 +498,7 @@ pio run --target uploadfs       # 上傳 LittleFS 檔案系統（動畫、網頁
 pio device monitor              # 開啟序列埠監視器（115200 baud）
 ```
 
-韌體使用 `firmware/src/main.cpp` 中的 `WS_HOST`、`WS_PORT` 及 `WS_API_KEY` 定義連接至後端 WebSocket 伺服器。本機開發時預設指向 `localhost:3001`。透過 GitHub Actions 進行正式建置時，這些值會在編譯時從 Repository Secrets 注入。
+韌體使用 `WS_HOST`、`WS_PORT` 與 `WS_API_KEY` build flag 連接至後端 WebSocket 伺服器；請在 [`firmware/platformio.ini`](firmware/platformio.ini) 的 `build_flags` 區塊調整（檔案中已附註解範例）。後備預設值（`localhost:3001`、空字串 API key）定義於 [`firmware/src/network_task.cpp`](firmware/src/network_task.cpp)。透過 GitHub Actions 進行正式建置時，這些值會在編譯時從 Repository Secrets 注入。
 
 自訂分割表（[`firmware/partitions.csv`](firmware/partitions.csv)）
 
@@ -505,7 +511,9 @@ pio device monitor              # 開啟序列埠監視器（115200 baud）
 | `tools/gif2qbit.py` | 將標準 GIF 動畫轉換為 .qgif 格式 |
 | `tools/qgif2gif.py` | 將 .qgif 檔案轉換回標準 GIF 動畫 |
 | `tools/qgif2header.py` | 將 .qgif 檔案轉換為 C 標頭檔以嵌入 PROGMEM |
+| `tools/png2xbm.py` | 將小尺寸 PNG 圖示（≤16×16）轉換為 u8g2 XBM 格式 C 陣列 |
 | `tools/simulate-devices.py` | 模擬多台 QBIT 裝置連接至後端進行測試 |
+| `tools/qbit-ctl` | 管理後端 SQLite 資料庫與 `/data` 檔案的 TUI 工具 |
 | `tools/flasher/` | 瀏覽器版韌體燒錄器（部署至 GitHub Pages） |
 
 ---
