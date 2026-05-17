@@ -14,6 +14,7 @@
 #include "gif_player.h"
 #include "web_dashboard.h"
 #include "timer_ui.h"
+#include "pomodoro_ui.h"
 #include "games/game_menu.h"
 #include "weather/weather_screen.h"
 #include "games/trex_runner/trex_runner.h"
@@ -88,6 +89,9 @@ static bool          _melodyWasPlaying      = false;
 // Timer alarm: play even when muted; restore mute when melody ends
 static bool          _timerAlarmRestoreMute = false;
 static bool          _timerAlarmStarted     = false;
+// Pomodoro alarm: identical logic as timer
+static bool          _pomAlarmRestoreMute   = false;
+static bool          _pomAlarmStarted       = false;
 
 // Cam frame render buffer (owned by display task; gifRenderFrame inverts in-place)
 static uint8_t       _camRenderBuf[QGIF_FRAME_SIZE];
@@ -124,6 +128,13 @@ static void enterState(DisplayState newState) {
             _timerAlarmRestoreMute = false;
         }
     }
+    if (_state == POMODORO_RUNNING && newState != POMODORO_RUNNING) {
+        _pomAlarmStarted = false;
+        if (_pomAlarmRestoreMute) {
+            setBuzzerVolume(0);
+            _pomAlarmRestoreMute = false;
+        }
+    }
     _prevState = _state;
     _state = newState;
     _stateEntryMs = millis();
@@ -155,6 +166,13 @@ static const uint8_t icon_timer_bits[] PROGMEM = {
     0x83, 0x60, 0x41, 0x40, 0x22, 0x20, 0x12, 0x20,
     0x04, 0x10, 0x08, 0x08, 0xB4, 0x16, 0xC2, 0x21
 };
+// Focus-time / Pomodoro icon (16x16 clock-face with focus lines)
+static const uint8_t icon_focus_bits[] PROGMEM = {
+    0xC0, 0x03, 0x30, 0x0C, 0xC8, 0x13, 0xC4, 0x23,
+    0x02, 0x40, 0x02, 0x40, 0x01, 0x80, 0xE1, 0x87,
+    0x01, 0x80, 0x02, 0x40, 0x02, 0x40, 0x04, 0x20,
+    0x08, 0x10, 0x30, 0x0C, 0xC0, 0x03, 0x00, 0x00
+};
 static const uint8_t icon_game_bits[] PROGMEM = {
     0x00, 0x00, 0xFF, 0xFF, 0x01, 0x80, 0xFD, 0xBF,
     0x05, 0xA0, 0x05, 0xA0, 0x05, 0xA0, 0x05, 0xA0,
@@ -168,14 +186,17 @@ static const uint8_t icon_setting_bits[] PROGMEM = {
     0x02, 0x40, 0x34, 0x2C, 0x48, 0x12, 0xC0, 0x03
 };
 
+static const uint8_t SETTINGS_MENU_COUNT = 5;
+
 static void drawSettingsMenu() {
     if (_state == SETTINGS_MENU) {
-        // 4 items: WEATHER(0), TIMER(1), GAME LIBRARY(2), SETTING(3)
+        // 5 items: WEATHER(0), TIMER(1), FOCUS TIME(2), GAME LIBRARY(3), SETTING(4)
         // Display 3 rows at a time; scroll window follows cursor.
-        static const char *labels[4] = { "WEATHER", "TIMER", "GAME LIBRARY", "SETTING" };
-        static const uint8_t *icon_bits[4] = {
+        static const char *labels[5] = { "WEATHER", "TIMER", "FOCUS TIME", "GAME LIBRARY", "SETTING" };
+        static const uint8_t *icon_bits[5] = {
             icon_weather_bits,
             icon_timer_bits,
+            icon_focus_bits,
             icon_game_bits,
             icon_setting_bits
         };
@@ -185,7 +206,7 @@ static void drawSettingsMenu() {
         u8g2.setFont(u8g2_font_7x14B_tr);
         for (uint8_t row = 0; row < 3; row++) {
             uint8_t item = top + row;
-            if (item >= 4) break;
+            if (item >= SETTINGS_MENU_COUNT) break;
             uint8_t y = (row + 1) * SETTINGS_ROW_H;
             bool isSelected = (item == _settingsCursor);
             if (isSelected) {
@@ -731,7 +752,7 @@ void displayTask(void *param) {
                 case SETTINGS_MENU:
                     _stateEntryMs = now;
                     if (gesture.type == SINGLE_TAP) {
-                        _settingsCursor = (_settingsCursor + 1) % 4;
+                        _settingsCursor = (_settingsCursor + 1) % SETTINGS_MENU_COUNT;
                         drawSettingsMenu();
                     } else if (gesture.type == DOUBLE_TAP) {
                         enterState(GIF_PLAYBACK);
@@ -746,6 +767,11 @@ void displayTask(void *param) {
                             enterState(TIMER_SET);
                             timerUiDrawSet();
                         } else if (_settingsCursor == 2) {
+                            // FOCUS TIME (Pomodoro)
+                            pomUiEnterSelect();
+                            enterState(POMODORO_SELECT);
+                            pomUiDrawSelect();
+                        } else if (_settingsCursor == 3) {
                             // GAME LIBRARY
                             gameMenuEnter();
                             enterState(GAME_MENU);
@@ -867,6 +893,45 @@ void displayTask(void *param) {
                         gameMenuDraw();
                     }
                     break;
+
+                case POMODORO_SELECT: {
+                    PomGestureType pg = PomGestureType::None;
+                    if (gesture.type == SINGLE_TAP) pg = PomGestureType::SingleTap;
+                    else if (gesture.type == LONG_PRESS) pg = PomGestureType::LongPress;
+                    else if (gesture.type == DOUBLE_TAP) pg = PomGestureType::DoubleTap;
+                    PomAction pa = pomUiOnGestureSelect(pg);
+                    if (pa == PomAction::Redraw) pomUiDrawSelect();
+                    else if (pa == PomAction::Back) enterSettingsMenu();
+                    else if (pa == PomAction::Start) {
+                        updateAvailable = false;
+                        enterState(POMODORO_RUNNING);
+                        pomUiDrawRunning(pomUiGetRemainSec(), false);
+                    }
+                    break;
+                }
+
+                case POMODORO_RUNNING: {
+                    PomGestureType pg = PomGestureType::None;
+                    if (gesture.type == SINGLE_TAP) pg = PomGestureType::SingleTap;
+                    else if (gesture.type == LONG_PRESS) pg = PomGestureType::LongPress;
+                    else if (gesture.type == DOUBLE_TAP) pg = PomGestureType::DoubleTap;
+                    PomAction pa = pomUiOnGestureRunning(pg,
+                            pomUiGetDone(), pomUiGetStarted());
+                    if (pa == PomAction::Dismiss) {
+                        rtttl::stop();
+                        noTone(getPinBuzzer());
+                        enterState(GIF_PLAYBACK);
+                    } else if (pa == PomAction::Back) {
+                        pomUiEnterSelect();
+                        enterState(POMODORO_SELECT);
+                        pomUiDrawSelect();
+                    } else if (pa == PomAction::Redraw) {
+                        pomUiSetStarted(true);
+                        pomUiSetLastTickMs(now);
+                        pomUiDrawRunning(pomUiGetRemainSec(), true);
+                    }
+                    break;
+                }
 
                 default:
                     break;
@@ -1262,6 +1327,52 @@ void displayTask(void *param) {
 
             case TIMER_SET:
                 // Idle — redrawn only on gesture
+                break;
+
+            case POMODORO_SELECT:
+                // Idle — redrawn only on gesture
+                break;
+
+            case POMODORO_RUNNING:
+                if (pomUiGetDone()) {
+                    if (!rtttl::isPlaying()) {
+                        if (!_pomAlarmStarted) {
+                            if (getBuzzerVolume() == 0) {
+                                _pomAlarmRestoreMute = true;
+                                setBuzzerVolume(getSavedVolume() > 0 ? getSavedVolume() : 100);
+                            }
+                            noTone(getPinBuzzer());
+                            rtttl::begin(getPinBuzzer(), POMODORO_MELODY);
+                            _pomAlarmStarted = true;
+                        } else {
+                            noTone(getPinBuzzer());
+                            rtttl::begin(getPinBuzzer(), POMODORO_MELODY);
+                        }
+                    }
+                } else if (pomUiTick(now)) {
+                    if (pomUiGetDone()) {
+                        if (getBuzzerVolume() == 0) {
+                            _pomAlarmRestoreMute = true;
+                            setBuzzerVolume(getSavedVolume() > 0 ? getSavedVolume() : 100);
+                        }
+                        noTone(getPinBuzzer());
+                        rtttl::begin(getPinBuzzer(), POMODORO_MELODY);
+                        _pomAlarmStarted = true;
+                        // Show done message based on mode
+                        const char *doneTitle;
+                        const char *doneMsg;
+                        if (pomUiGetMode() == PomMode::Focus) {
+                            doneTitle = "[ Focus Done! ]";
+                            doneMsg   = "Take a break!";
+                        } else {
+                            doneTitle = "[ Break Over! ]";
+                            doneMsg   = "Ready to focus!";
+                        }
+                        showText(doneTitle, "", doneMsg, "TAP to dismiss");
+                    } else {
+                        pomUiDrawRunning(pomUiGetRemainSec(), true);
+                    }
+                }
                 break;
 
             case TIMER_RUNNING:
