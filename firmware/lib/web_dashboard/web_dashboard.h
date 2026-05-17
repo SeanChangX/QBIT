@@ -76,6 +76,24 @@ extern void weatherScreenInvalidateCache();
 extern bool weatherScreenRefreshNow();
 
 // ==========================================================================
+//  Health reminder settings (defined in reminder.cpp)
+// ==========================================================================
+struct ReminderIntervalCfg;
+struct ReminderFoodCfg;
+enum ReminderType : uint8_t;
+
+extern void                reminderLoadSettings();
+extern void                reminderSaveSettings();
+extern bool                reminderGetEnabled(ReminderType type);
+extern void                reminderSetEnabled(ReminderType type, bool enabled);
+extern ReminderIntervalCfg reminderGetWaterCfg();
+extern void                reminderSetWaterCfg(const ReminderIntervalCfg &cfg);
+extern ReminderFoodCfg     reminderGetFoodCfg();
+extern void                reminderSetFoodCfg(const ReminderFoodCfg &cfg);
+extern ReminderIntervalCfg reminderGetPillsCfg();
+extern void                reminderSetPillsCfg(const ReminderIntervalCfg &cfg);
+
+// ==========================================================================
 //  Web Cam streaming over WebSocket (/ws_cam)
 // ==========================================================================
 //

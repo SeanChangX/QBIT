@@ -41,7 +41,8 @@ enum DisplayState {
     CAR_OVER,
     CAM_VIEW,
     POMODORO_SELECT,
-    POMODORO_RUNNING
+    POMODORO_RUNNING,
+    REMINDER_DISPLAY
 };
 
 // ==========================================================================

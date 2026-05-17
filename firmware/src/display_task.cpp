@@ -15,6 +15,7 @@
 #include "web_dashboard.h"
 #include "timer_ui.h"
 #include "pomodoro_ui.h"
+#include "reminder.h"
 #include "games/game_menu.h"
 #include "weather/weather_screen.h"
 #include "games/trex_runner/trex_runner.h"
@@ -106,8 +107,16 @@ struct SettingsPending {
     bool negativeGif;
     bool flipMode;
     bool timeFormat24h;
+    bool waterReminder;
+    bool foodReminder;
+    bool pillsReminder;
 };
 static SettingsPending _settingsPending;
+#define SETTINGS_OPTS_COUNT 8
+
+// Active reminder type (set when entering REMINDER_DISPLAY)
+static ReminderType _activeReminderType = REM_COUNT;
+#define REMINDER_DISPLAY_MS  5000
 
 // Helper: whether current display state is any in-game view
 static bool isGameDisplayState(DisplayState s) {
@@ -231,16 +240,20 @@ static void drawSettingsMenu() {
         return;
     }
 
-    // SETTINGS_OPTIONS: 5 items (QBIT Sound, GIF Invert, Flip Mode, Clock Format, [ SAVE ]). DBL = back.
-    static const char *labels[5] = {
+    // SETTINGS_OPTIONS: 8 items (Sound, GIF Invert, Flip, Clock, Water, Food, Pills, [ SAVE ]).
+    static const char *labels[SETTINGS_OPTS_COUNT] = {
         "QBIT Sound", "GIF Invert", "Flip Mode", "Clock Format",
+        "Water Rmd", "Food Rmd", "Pills Rmd",
         "[ SAVE ]"
     };
-    bool vals[5] = {
+    bool vals[SETTINGS_OPTS_COUNT] = {
         _settingsPending.gifSound,
         _settingsPending.negativeGif,
         _settingsPending.flipMode,
         _settingsPending.timeFormat24h,
+        _settingsPending.waterReminder,
+        _settingsPending.foodReminder,
+        _settingsPending.pillsReminder,
         false
     };
 
@@ -252,11 +265,11 @@ static void drawSettingsMenu() {
 
     for (uint8_t row = 0; row < 4; row++) {
         uint8_t item = top + row;
-        if (item >= 5) break;
+        if (item >= SETTINGS_OPTS_COUNT) break;
 
         uint8_t y = (row + 1) * 15;
         bool isSelected = (item == _settingsCursor);
-        bool isActionRow = (item >= 4);
+        bool isActionRow = (item >= (SETTINGS_OPTS_COUNT - 1));
 
         if (isSelected) {
             u8g2.setDrawColor(1);
@@ -314,7 +327,10 @@ static void enterSettingsMenu() {
     _settingsPending    = { getBuzzerVolume() > 0,
                             getNegativeGif(),
                             getFlipMode(),
-                            getTimeFormat24h() };
+                            getTimeFormat24h(),
+                            reminderGetEnabled(REM_WATER),
+                            reminderGetEnabled(REM_FOOD),
+                            reminderGetEnabled(REM_PILLS) };
     enterState(SETTINGS_MENU);
     drawSettingsMenu();
 }
@@ -433,6 +449,7 @@ void displayTask(void *param) {
     (void)param;
 
     pokeHandlerInit();
+    reminderLoadSettings();
 
     // --- BOOT_ANIM state ---
     playBootAnimation();
@@ -806,6 +823,10 @@ void displayTask(void *param) {
                             setNegativeGif(_settingsPending.negativeGif);
                             setFlipMode(_settingsPending.flipMode);
                             setTimeFormat24h(_settingsPending.timeFormat24h);
+                            reminderSetEnabled(REM_WATER, _settingsPending.waterReminder);
+                            reminderSetEnabled(REM_FOOD,  _settingsPending.foodReminder);
+                            reminderSetEnabled(REM_PILLS, _settingsPending.pillsReminder);
+                            reminderSaveSettings();
                             saveSettings();
                             mqttPublishMuteState(getBuzzerVolume() == 0);
                             showText("[ Saved! ]", "", "Settings saved.", "");
@@ -822,6 +843,9 @@ void displayTask(void *param) {
                                 case 1: _settingsPending.negativeGif   = !_settingsPending.negativeGif;   break;
                                 case 2: _settingsPending.flipMode      = !_settingsPending.flipMode;      break;
                                 case 3: _settingsPending.timeFormat24h = !_settingsPending.timeFormat24h; break;
+                                case 4: _settingsPending.waterReminder = !_settingsPending.waterReminder; break;
+                                case 5: _settingsPending.foodReminder  = !_settingsPending.foodReminder;  break;
+                                case 6: _settingsPending.pillsReminder = !_settingsPending.pillsReminder; break;
                             }
                             drawSettingsMenu();
                         } else if (gesture.type == LONG_PRESS || gesture.type == DOUBLE_TAP) {
@@ -830,14 +854,14 @@ void displayTask(void *param) {
                         }
                     } else {
                         if (gesture.type == SINGLE_TAP) {
-                            _settingsCursor = (_settingsCursor + 1) % 5;
+                            _settingsCursor = (_settingsCursor + 1) % SETTINGS_OPTS_COUNT;
                             drawSettingsMenu();
                         } else if (gesture.type == DOUBLE_TAP) {
                             _settingsCursor = 0;
                             enterState(SETTINGS_MENU);
                             drawSettingsMenu();
                         } else if (gesture.type == LONG_PRESS) {
-                            if (_settingsCursor == 4) {
+                            if (_settingsCursor == (SETTINGS_OPTS_COUNT - 1)) {
                                 _settingsConfirming = true;
                                 showText("[ Save Settings? ]",
                                          "",
@@ -932,6 +956,15 @@ void displayTask(void *param) {
                     }
                     break;
                 }
+
+                case REMINDER_DISPLAY:
+                    if (gesture.type == SINGLE_TAP || gesture.type == DOUBLE_TAP ||
+                        gesture.type == LONG_PRESS) {
+                        rtttl::stop();
+                        noTone(getPinBuzzer());
+                        enterState(GIF_PLAYBACK);
+                    }
+                    break;
 
                 default:
                     break;
@@ -1192,7 +1225,19 @@ void displayTask(void *param) {
                             updatePromptStartMs = 0;
                         }
                     } else if (!_offlineShown) {
-                        gifPlayerTick();
+                        // --- Health reminder check (only when idle) ---
+                        ReminderType rt = reminderCheck();
+                        if (rt != REM_COUNT) {
+                            _activeReminderType = rt;
+                            enterState(REMINDER_DISPLAY);
+                            reminderDraw(rt);
+                            if (getBuzzerVolume() > 0) {
+                                noTone(getPinBuzzer());
+                                rtttl::begin(getPinBuzzer(), REMINDER_TICK_MELODY);
+                            }
+                        } else {
+                            gifPlayerTick();
+                        }
                     }
                 }
                 break;
@@ -1331,6 +1376,18 @@ void displayTask(void *param) {
 
             case POMODORO_SELECT:
                 // Idle — redrawn only on gesture
+                break;
+
+            case REMINDER_DISPLAY:
+                // Auto-dismiss after 5s; replay tick melody while showing
+                if (elapsed >= REMINDER_DISPLAY_MS) {
+                    rtttl::stop();
+                    noTone(getPinBuzzer());
+                    enterState(GIF_PLAYBACK);
+                } else if (!rtttl::isPlaying() && getBuzzerVolume() > 0) {
+                    noTone(getPinBuzzer());
+                    rtttl::begin(getPinBuzzer(), REMINDER_TICK_MELODY);
+                }
                 break;
 
             case POMODORO_RUNNING:
