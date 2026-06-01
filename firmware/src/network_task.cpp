@@ -443,7 +443,11 @@ static void wsMessage(WebsocketsClient &client, WebsocketsMessage message) {
 // ==========================================================================
 //  Firmware version check (HTTPS GET latest.json), deferred ~15s after WiFi
 // ==========================================================================
-#define VERSION_CHECK_URL "https://seanchangx.github.io/QBIT/latest.json"
+// Points at this fork's GitHub Pages so the device never contacts the upstream
+// source. Until a release is published here the GET 404s and the check no-ops
+// (no false "update available" badge); once the S3 CI publishes latest.json the
+// version comparison becomes accurate for this fork's own builds.
+#define VERSION_CHECK_URL "https://markgwharry.github.io/QBIT/latest.json"
 #define VERSION_CHECK_TIMEOUT_MS 45000  // HTTPClient uses ms (compare with millis())
 #define VERSION_RECHECK_INTERVAL_MS (6UL * 60UL * 60UL * 1000UL)  // periodic check while WiFi up
 
