@@ -6,7 +6,7 @@
 //    Left: 2x condition icon from y≈17; temperature baseline ~62 (fits 64 rows).
 //    Right: small icons ~x=58, text from x=75 (gap after icons; strings fit <128).
 //
-//  APIs used (plain HTTP, no HTTPS — avoids cert overhead on ESP32-C3):
+//  APIs used (plain HTTP, no HTTPS — avoids cert overhead on ESP32-S3):
 //    Weather: http://api.open-meteo.com  (redirects to HTTPS internally)
 //    AQI:     http://air-quality-api.open-meteo.com (European AQI index)
 //

@@ -50,21 +50,21 @@ jobs:
             echo "Injected WS_API_KEY (hidden)"
           fi
           export PLATFORMIO_BUILD_FLAGS="$FLAGS"
-          platformio run -e seeed_xiao_esp32c3
-          platformio run -e seeed_xiao_esp32c3 -t buildfs
+          platformio run -e esp32-s3-supermini
+          platformio run -e esp32-s3-supermini -t buildfs
       
       - name: Check build output
         run: |
           echo "Build directory contents:"
-          ls -lh firmware/.pio/build/seeed_xiao_esp32c3/
+          ls -lh firmware/.pio/build/esp32-s3-supermini/
       
       - name: Prepare artifacts
         run: |
           mkdir -p dist
           
           # Copy firmware.bin (always required)
-          if [ -f firmware/.pio/build/seeed_xiao_esp32c3/firmware.bin ]; then
-            cp firmware/.pio/build/seeed_xiao_esp32c3/firmware.bin dist/firmware.bin
+          if [ -f firmware/.pio/build/esp32-s3-supermini/firmware.bin ]; then
+            cp firmware/.pio/build/esp32-s3-supermini/firmware.bin dist/firmware.bin
             echo "✓ firmware.bin copied"
           else
             echo "✗ firmware.bin NOT found"
@@ -72,18 +72,18 @@ jobs:
           fi
           
           # Copy optional files if they exist
-          if [ -f firmware/.pio/build/seeed_xiao_esp32c3/littlefs.bin ]; then
-            cp firmware/.pio/build/seeed_xiao_esp32c3/littlefs.bin dist/littlefs.bin
+          if [ -f firmware/.pio/build/esp32-s3-supermini/littlefs.bin ]; then
+            cp firmware/.pio/build/esp32-s3-supermini/littlefs.bin dist/littlefs.bin
             echo "✓ littlefs.bin copied"
           fi
           
-          if [ -f firmware/.pio/build/seeed_xiao_esp32c3/bootloader.bin ]; then
-            cp firmware/.pio/build/seeed_xiao_esp32c3/bootloader.bin dist/bootloader.bin
+          if [ -f firmware/.pio/build/esp32-s3-supermini/bootloader.bin ]; then
+            cp firmware/.pio/build/esp32-s3-supermini/bootloader.bin dist/bootloader.bin
             echo "✓ bootloader.bin copied"
           fi
           
-          if [ -f firmware/.pio/build/seeed_xiao_esp32c3/partitions.bin ]; then
-            cp firmware/.pio/build/seeed_xiao_esp32c3/partitions.bin dist/partitions.bin
+          if [ -f firmware/.pio/build/esp32-s3-supermini/partitions.bin ]; then
+            cp firmware/.pio/build/esp32-s3-supermini/partitions.bin dist/partitions.bin
             echo "✓ partitions.bin copied"
           fi
           

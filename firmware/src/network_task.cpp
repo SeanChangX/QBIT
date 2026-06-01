@@ -998,7 +998,7 @@ void mqttPublishServerConnectionState(bool connected) {
     _mqttClient.publish(topic.c_str(), connected ? "online" : "offline", true);
 }
 
-// Apply AP RF settings for ESP32-C3 PCB antenna boards (fixes #2): lower TX power and HT20.
+// Apply AP RF settings for ESP32-S3 PCB antenna boards (fixes #2): lower TX power and HT20.
 // Call after NetWizard has started the portal (AP or AP_STA). Does not change WiFi mode.
 void wifiApplyApRfStabilityForPcbAntenna() {
 #if defined(ESP32)

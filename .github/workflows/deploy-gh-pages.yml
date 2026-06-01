@@ -88,7 +88,7 @@ jobs:
               "new_install_prompt_erase": True,
               "builds": [
                   {
-                      "chipFamily": "ESP32-C3",
+                      "chipFamily": "ESP32-S3",
                       "parts": parts,
                   }
               ]

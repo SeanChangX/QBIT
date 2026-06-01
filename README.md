@@ -4,11 +4,11 @@
 
 # QBIT
 
-**An open-source ESP32-C3 desktop companion robot and personal IoT avatar.**
+**An open-source ESP32-S3 desktop companion robot and personal IoT avatar.**
 
 [![GitHub stars](https://img.shields.io/github/stars/seanchangx/QBIT)](https://github.com/seanchangx/QBIT)
 [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-blue.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
-[![Platform](https://img.shields.io/badge/Platform-ESP32--C3-green.svg)](#hardware-requirements)
+[![Platform](https://img.shields.io/badge/Platform-ESP32--S3-green.svg)](#hardware-requirements)
 [![Web Platform](https://img.shields.io/badge/Web-qbit.labxcloud.com-purple.svg)](https://qbit.labxcloud.com)
 [![release](https://img.shields.io/github/v/release/seanchangx/QBIT)](https://github.com/seanchangx/QBIT/releases)
 
@@ -113,7 +113,7 @@ ROOT
 
 | Component | Specification | Notes |
 |---|---|---|
-| MCU | ESP32-C3 Super Mini (e.g. Seeed XIAO ESP32-C3) | Valid GPIOs: 0-10, 20, 21 |
+| MCU | ESP32-S3 Super Mini | Valid GPIOs: 0-13, 21 (GPIO 19/20 reserved for native USB) |
 | OLED Display | SSD1306 128x64, I2C, address 0x3C | SH1106-compatible clones also supported |
 | Touch Sensor | TTP223 capacitive touch module | Digital output (HIGH when touched) |
 | Buzzer | Passive buzzer | Driven via PWM (LEDC) |
@@ -126,14 +126,14 @@ Download the STL files for the QBIT enclosure from MakerWorld:
 
 ### Wiring
 
-Default pin assignments for the ESP32-C3 Super Mini. All pins can be reassigned through the web dashboard at `http://qbit.local` and are stored in NVS (persistent across reboots; changes require a reboot to take effect).
+Default pin assignments for the ESP32-S3 Super Mini. All pins can be reassigned through the web dashboard at `http://qbit.local` and are stored in NVS (persistent across reboots; changes require a reboot to take effect).
 
 | Function | Default GPIO | Direction | Connection |
 |---|---|---|---|
 | Touch Sensor (TTP223) | GPIO 1 | Input | TTP223 OUT -> GPIO 1 |
 | Buzzer | GPIO 2 | Output | GPIO 2 -> Buzzer +, Buzzer - -> GND |
-| OLED SDA | GPIO 20 | I2C Data | SSD1306 SDA -> GPIO 20 |
-| OLED SCL | GPIO 21 | I2C Clock | SSD1306 SCL -> GPIO 21 |
+| OLED SDA | GPIO 8 | I2C Data | SSD1306 SDA -> GPIO 8 |
+| OLED SCL | GPIO 9 | I2C Clock | SSD1306 SCL -> GPIO 9 |
 
 Power connections:
 

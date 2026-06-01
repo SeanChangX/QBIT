@@ -20,11 +20,14 @@ static SemaphoreHandle_t _prefsMutex = NULL;
 
 #define TZ_IANA_MAX_LEN 64
 
-// GPIO pin defaults (ESP32-C3 Super Mini)
+// GPIO pin defaults (ESP32-S3 Super Mini).
+// Note: GPIO19/20 are the native USB-C D-/D+ lines, so I2C must avoid them
+// (the C3 SuperMini used 20/21). 8/9 are free, broken out, and the
+// conventional ESP32-S3 default I2C pins.
 static uint8_t _pinTouch  = 1;
 static uint8_t _pinBuzzer = 2;
-static uint8_t _pinSDA    = 20;
-static uint8_t _pinSCL    = 21;
+static uint8_t _pinSDA    = 8;
+static uint8_t _pinSCL    = 9;
 
 // Display
 static uint8_t _brightness = 0x80;

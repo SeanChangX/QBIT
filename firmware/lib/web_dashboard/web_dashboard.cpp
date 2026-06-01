@@ -472,8 +472,10 @@ static void handlePostMqtt(AsyncWebServerRequest *request) {
 //  Handlers -- GPIO Pin Configuration API
 // ==========================================================================
 
-// Valid GPIOs for ESP32-C3 Super Mini
-static const uint8_t VALID_PINS[] = {0,1,2,3,4,5,6,7,8,9,10,20,21};
+// Valid GPIOs for ESP32-S3 Super Mini.
+// Excludes GPIO19/20 (native USB-C D-/D+). These are the low GPIOs broken out
+// on the SuperMini header that are free of strapping/flash/USB conflicts.
+static const uint8_t VALID_PINS[] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,21};
 static const uint8_t VALID_PINS_COUNT = sizeof(VALID_PINS) / sizeof(VALID_PINS[0]);
 
 static bool isValidPin(uint8_t pin) {
@@ -776,7 +778,7 @@ static void handleWeatherSearch(AsyncWebServerRequest *request) {
         request->send(400, "application/json", "{\"error\":\"q must be 1-64 chars\"}");
         return;
     }
-    // Build URL using plain HTTP to avoid cert overhead on ESP32-C3
+    // Build URL using plain HTTP to avoid cert overhead on ESP32-S3
     char url[256];
     String qEnc = urlEncodeParam(q);
     snprintf(url, sizeof(url),
