@@ -131,8 +131,8 @@ void settingsInit() {
     // Read GPIO pin config first (needed before hardware init)
     _pinTouch  = _prefs.getUChar("pinTouch",  1);
     _pinBuzzer = _prefs.getUChar("pinBuzzer", 2);
-    _pinSDA    = _prefs.getUChar("pinSDA",    20);
-    _pinSCL    = _prefs.getUChar("pinSCL",    21);
+    _pinSDA    = _prefs.getUChar("pinSDA",    8);
+    _pinSCL    = _prefs.getUChar("pinSCL",    9);
 
     Serial.printf("GPIO pins: touch=%u buzzer=%u sda=%u scl=%u\n",
                   _pinTouch, _pinBuzzer, _pinSDA, _pinSCL);
