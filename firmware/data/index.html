@@ -240,6 +240,79 @@
   </div>
 
   <div class="card collapsible collapsed">
+    <div class="card-title">Health Reminders</div>
+    
+    <!-- Water -->
+    <div class="setting" style="margin-top:12px; font-weight:600;">Drink Water</div>
+    <div class="setting">
+      <label class="setting-label">Enabled</label>
+      <button class="btn btn-mute" id="btnWaterRmd">ON</button>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Interval</label>
+      <select id="waterInt" class="input-select">
+        <option value="60">1 Hour</option>
+        <option value="90">1.5 Hours</option>
+        <option value="120">2 Hours</option>
+        <option value="180">3 Hours</option>
+      </select>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Time Window</label>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <select id="waterStart" class="input-select" style="min-width:60px;"></select>
+        <span>to</span>
+        <select id="waterEnd" class="input-select" style="min-width:60px;"></select>
+      </div>
+    </div>
+
+    <!-- Food -->
+    <div class="setting" style="margin-top:20px; font-weight:600;">Meals</div>
+    <div class="setting">
+      <label class="setting-label">Enabled</label>
+      <button class="btn btn-mute" id="btnFoodRmd">ON</button>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Breakfast</label>
+      <input type="time" id="foodB" class="input-text" style="width:120px;">
+    </div>
+    <div class="setting">
+      <label class="setting-label">Lunch</label>
+      <input type="time" id="foodL" class="input-text" style="width:120px;">
+    </div>
+    <div class="setting">
+      <label class="setting-label">Dinner</label>
+      <input type="time" id="foodD" class="input-text" style="width:120px;">
+    </div>
+
+    <!-- Pills -->
+    <div class="setting" style="margin-top:20px; font-weight:600;">Medicine / Pills</div>
+    <div class="setting">
+      <label class="setting-label">Enabled</label>
+      <button class="btn btn-mute" id="btnPillsRmd">OFF</button>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Interval</label>
+      <select id="pillsInt" class="input-select">
+        <option value="240">4 Hours</option>
+        <option value="360">6 Hours</option>
+        <option value="480">8 Hours</option>
+        <option value="720">12 Hours</option>
+      </select>
+    </div>
+    <div class="setting">
+      <label class="setting-label">Time Window</label>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <select id="pillsStart" class="input-select" style="min-width:60px;"></select>
+        <span>to</span>
+        <select id="pillsEnd" class="input-select" style="min-width:60px;"></select>
+      </div>
+    </div>
+
+    <button class="btn btn-save" id="btnRmdSave" style="margin-top:16px;">Save Reminders</button>
+  </div>
+
+  <div class="card collapsible collapsed">
     <div class="card-title">Timezone</div>
     <div class="setting">
       <label class="setting-label">Zone</label>

@@ -44,5 +44,12 @@ static const char CAR_NEAR_MELODY[] =
 // Car Avoidance: crash sound (descending tones)
 static const char CAR_CRASH_MELODY[] =
     "carcrash:d=8,o=5,b=120:a,f,c";
+// Pomodoro session done — gentle ascending bell chime
+static const char POMODORO_MELODY[] =
+    "pomodoro:d=8,o=5,b=160:e6,g6,4b6,2p,e6,g6,4b6";
+
+// Reminder tick-tick (repeating short beeps)
+static const char REMINDER_TICK_MELODY[] =
+    "remtick:d=16,o=6,b=120:c,16p,c,16p,c,16p,c,16p,c,16p,c,16p,c,16p,c,16p,c,16p,c";
 
 #endif // MELODIES_H
