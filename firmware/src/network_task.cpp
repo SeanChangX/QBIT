@@ -47,6 +47,12 @@
 // the link stays down after this window.
 // Covers NetWizard /exit handler (NETWIZARD_EXIT_TIMEOUT 5s) + STA reconnect after stopPortal().
 #define WIFI_SUPPRESS_DISCONNECT_UI_MS  10000
+// WiFi TX power (#29): one fixed level for AP and STA, applied whenever an interface starts.
+// 13dBm is what the setup portal has used since #2; ESP32-C3 SuperMini boards fail to associate
+// at 19.5dBm. Override via build flags, e.g. -DQBIT_WIFI_TX_POWER=WIFI_POWER_19_5dBm
+#ifndef QBIT_WIFI_TX_POWER
+#define QBIT_WIFI_TX_POWER      WIFI_POWER_13dBm
+#endif
 
 // Bitmap poke: 1bpp row-major, size = (height_pages) * width, height_pages <= 8
 #define POKE_BMP_MAX_WIDTH  512
@@ -802,7 +808,6 @@ void networkTask(void *param) {
                 if (!_wifiConnected) {
                     _wifiConnected = true;
                     _hadStaConnection = true;
-                    wifiRestoreStaTxPower();
                     xEventGroupSetBits(connectivityBits, WIFI_CONNECTED_BIT);
                     _wifiDisconnectUiPending         = false;
                     _wifiSuppressDisconnectUiUntilMs = 0;
@@ -852,7 +857,6 @@ void networkTask(void *param) {
                 // Avoid OLED "WiFi Offline" when stopPortal() drops STA briefly then reconnects.
                 _wifiSuppressDisconnectUiUntilMs = millis() + WIFI_SUPPRESS_DISCONNECT_UI_MS;
                 NW.stopPortal();
-                wifiRestoreStaTxPower();
                 if (portalSuccess) {
                     Serial.println("[WiFi] Provisioning success, stopping AP portal");
                 } else {
@@ -998,22 +1002,34 @@ void mqttPublishServerConnectionState(bool connected) {
     _mqttClient.publish(topic.c_str(), connected ? "online" : "offline", true);
 }
 
-// Apply AP RF settings for ESP32-C3 PCB antenna boards (fixes #2): lower TX power and HT20.
+// Apply AP RF settings for ESP32-C3 PCB antenna boards (fixes #2): TX power and HT20.
 // Call after NetWizard has started the portal (AP or AP_STA). Does not change WiFi mode.
 void wifiApplyApRfStabilityForPcbAntenna() {
 #if defined(ESP32)
     wifi_mode_t m = WiFi.getMode();
     if (m == WIFI_AP || m == WIFI_AP_STA) {
-        WiFi.setTxPower(WIFI_POWER_13dBm);
+        wifiApplyTxPower();
         esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
     }
 #endif
 }
 
-// Restore default TX power for STA. setTxPower() is global; 13dBm from AP fix would otherwise persist and weaken STA/MQTT/dashboard.
-void wifiRestoreStaTxPower() {
+// Set the fixed TX power (QBIT_WIFI_TX_POWER). setTxPower() is global to AP and STA and needs
+// the radio started; the level carries over mode switches such as stopPortal() (AP_STA -> STA).
+void wifiApplyTxPower() {
 #if defined(ESP32)
-    if (WiFi.getMode() == WIFI_STA)
-        WiFi.setTxPower(WIFI_POWER_19_5dBm);
+    if (WiFi.getMode() != WIFI_OFF)
+        WiFi.setTxPower(QBIT_WIFI_TX_POWER);
+#endif
+}
+
+// Register before NW.autoConnect(): setTxPower() only works once the radio has started, so
+// apply on every STA/AP start (boot connect, portal start, radio off/on) instead of the default.
+void wifiTxPowerInit() {
+#if defined(ESP32)
+    WiFi.onEvent([](arduino_event_id_t, arduino_event_info_t) { wifiApplyTxPower(); },
+                 ARDUINO_EVENT_WIFI_STA_START);
+    WiFi.onEvent([](arduino_event_id_t, arduino_event_info_t) { wifiApplyTxPower(); },
+                 ARDUINO_EVENT_WIFI_AP_START);
 #endif
 }
