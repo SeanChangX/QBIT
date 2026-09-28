@@ -81,6 +81,9 @@ void setup() {
         }
     });
 
+    // Fixed TX power on every STA/AP start, including the boot connect below (#29)
+    wifiTxPowerInit();
+
     NW.setStrategy(NetWizardStrategy::NON_BLOCKING);
     // Default NetWizard portal idle timeout is 5 minutes (no station on Soft AP), which then
     // tears down the AP and leaves the OLED stuck on "AP in 0s" until something reopens it.
