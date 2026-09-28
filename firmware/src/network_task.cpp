@@ -42,9 +42,10 @@
 #define WS_RECONNECT_MS 5000
 #define WIFI_RECONNECT_TIMEOUT_MS 15000
 #define PORTAL_RETRY_INTERVAL_MS  30000    // while AP is up, retry saved WiFi in background every 30s
-// NetWizard stopPortal() forces WiFi.mode(STA)+reconnect; WL_CONNECTED can drop briefly. Skip
-// (or defer) the display "WiFi Offline" queue event right after stopPortal; still deliver if
-// the link stays down after this window.
+// NetWizard stopPortal() switches to WiFi.mode(STA) and reconnects if STA is down (unpatched
+// NetWizard always reconnected, see scripts/patch_netwizard.py); WL_CONNECTED can drop briefly.
+// Skip (or defer) the display "WiFi Offline" queue event right after stopPortal; still deliver
+// if the link stays down after this window.
 // Covers NetWizard /exit handler (NETWIZARD_EXIT_TIMEOUT 5s) + STA reconnect after stopPortal().
 #define WIFI_SUPPRESS_DISCONNECT_UI_MS  10000
 // WiFi TX power (#29): one fixed level for AP and STA, applied whenever an interface starts.
