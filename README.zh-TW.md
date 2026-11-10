@@ -11,6 +11,9 @@
 [![Platform](https://img.shields.io/badge/Platform-ESP32--C3-green.svg)](#硬體需求)
 [![Web Platform](https://img.shields.io/badge/Web-qbit.labxcloud.com-purple.svg)](https://qbit.labxcloud.com)
 [![release](https://img.shields.io/github/v/release/seanchangx/QBIT)](https://github.com/seanchangx/QBIT/releases)
+[![MakerWorld collects](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FSeanChangX%2FQBIT%2Fmain%2Fdocs%2Fshowcase.json&query=%24.makerworld.collects&label=MakerWorld&color=00ae42)](https://makerworld.com/en/models/2400803-qbit-your-iot-desk-robot-esp32-c3)
+<!-- Other counters in docs/showcase.json: $.makerworld.downloads / likes / prints / comments.
+[![MakerWorld downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FSeanChangX%2FQBIT%2Fmain%2Fdocs%2Fshowcase.json&query=%24.makerworld.downloads&label=MakerWorld&color=00ae42)](https://makerworld.com/en/models/2400803-qbit-your-iot-desk-robot-esp32-c3) -->
 
 <br>
 
@@ -44,6 +47,18 @@
 </td>
 </tr>
 </table>
+
+<br>
+
+<div align="center" id="in-the-wild">
+
+<!-- showcase:start (generated together with docs/showcase.json; do not edit by hand) -->
+<img src="docs/images/showcase.png" alt="QBIT 裝置世界分布圖：40 個國家共 269 台裝置、270 位使用者；MakerWorld：2,405 收藏、1,073 下載、854 讚、444 次列印" width="100%">
+
+<sub>資料日期 2026-11-10 · 裝置數來自 <a href="https://qbit.labxcloud.com">QBIT Network</a>（不含模擬裝置）· 外殼數據來自 <a href="https://makerworld.com/en/models/2400803-qbit-your-iot-desk-robot-esp32-c3">MakerWorld</a> · 原始數據見 <a href="docs/showcase.json">docs/showcase.json</a></sub>
+<!-- showcase:end -->
+
+</div>
 
 <br>
 

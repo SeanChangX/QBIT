@@ -11,6 +11,9 @@
 [![Platform](https://img.shields.io/badge/Platform-ESP32--C3-green.svg)](#hardware-requirements)
 [![Web Platform](https://img.shields.io/badge/Web-qbit.labxcloud.com-purple.svg)](https://qbit.labxcloud.com)
 [![release](https://img.shields.io/github/v/release/seanchangx/QBIT)](https://github.com/seanchangx/QBIT/releases)
+[![MakerWorld collects](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FSeanChangX%2FQBIT%2Fmain%2Fdocs%2Fshowcase.json&query=%24.makerworld.collects&label=MakerWorld&color=00ae42)](https://makerworld.com/en/models/2400803-qbit-your-iot-desk-robot-esp32-c3)
+<!-- Other counters in docs/showcase.json: $.makerworld.downloads / likes / prints / comments.
+[![MakerWorld downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FSeanChangX%2FQBIT%2Fmain%2Fdocs%2Fshowcase.json&query=%24.makerworld.downloads&label=MakerWorld&color=00ae42)](https://makerworld.com/en/models/2400803-qbit-your-iot-desk-robot-esp32-c3) -->
 
 <br>
 
@@ -44,6 +47,18 @@
 </td>
 </tr>
 </table>
+
+<br>
+
+<div align="center" id="in-the-wild">
+
+<!-- showcase:start (generated together with docs/showcase.json; do not edit by hand) -->
+<img src="docs/images/showcase.png" alt="World map of QBIT devices by country: 269 devices in 40 countries, 270 users; MakerWorld: 2,405 collects, 1,073 downloads, 854 likes, 444 prints" width="100%">
+
+<sub>As of 2026-11-10 · fleet from the <a href="https://qbit.labxcloud.com">QBIT Network</a> (simulated devices excluded) · enclosure stats from <a href="https://makerworld.com/en/models/2400803-qbit-your-iot-desk-robot-esp32-c3">MakerWorld</a> · raw numbers in <a href="docs/showcase.json">docs/showcase.json</a></sub>
+<!-- showcase:end -->
+
+</div>
 
 <br>
 
