@@ -4,8 +4,8 @@
 FROM node:20.18-alpine3.21 AS backend-build
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
-COPY backend/package.json backend/package-lock.json* ./
-RUN npm install
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci
 COPY backend/tsconfig.json ./
 COPY backend/src/ ./src/
 RUN npx tsc
@@ -13,8 +13,8 @@ RUN npx tsc
 # Stage 2: admin UI build (outputs to /backend/static/admin from vite config)
 FROM node:20.18-alpine3.21 AS admin-build
 WORKDIR /admin
-COPY admin/package.json admin/package-lock.json* ./
-RUN npm install
+COPY admin/package.json admin/package-lock.json ./
+RUN npm ci
 COPY admin/ ./
 RUN npm run build
 
@@ -24,8 +24,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 # better-sqlite3 requires native compilation on Alpine
 RUN apk add --no-cache python3 make g++
-COPY backend/package.json backend/package-lock.json* ./
-RUN npm install --omit=dev && apk del python3 make g++
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci --omit=dev && apk del python3 make g++
 COPY --from=backend-build /app/dist/ ./dist/
 COPY --from=admin-build /backend/static/admin ./static/admin/
 EXPOSE 3001
