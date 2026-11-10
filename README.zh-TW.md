@@ -407,6 +407,7 @@ cp .env.example .env
 | `MAX_DEVICE_CONNECTIONS_PER_IP` | 單一 IP 可同時建立的裝置 WebSocket 連線上限（預設：10） |
 | `ADMIN_USERNAME` | 管理介面登入帳號（1–64 字元）。留空則不啟用登入。 |
 | `ADMIN_PASSWORD` | 管理介面密碼（8–128 字元）。 |
+| `TRUST_PROXY` | 信任哪些反向代理設定的 `X-Forwarded-For`（用於流量限制、IP 封鎖與日誌）。預設：`loopback, linklocal, uniquelocal`。詳見[反向代理與客戶端 IP](#反向代理與客戶端-ip)。 |
 
 可選（未設定時會自動產生並寫入 `/data/secrets.json`）：`SESSION_SECRET`、`ADMIN_SESSION_SECRET`、`HEALTH_SECRET`。
 
@@ -419,6 +420,24 @@ openssl rand -hex 32
 **密碼含特殊字元時：** 請用 `.env` 檔，並用雙引號包住值；內容中的 `\` 與 `"` 需跳脫（例如 `ADMIN_PASSWORD="my\"pass"`）。
 
 使用 GitHub Actions CI 時，請設定 Repository Secret `QBIT_WS_API_KEY` 與 `.env` 的 `DEVICE_API_KEY` 相同，建置時會注入韌體。
+
+#### 反向代理與客戶端 IP
+
+後端從 `X-Forwarded-For` 由右往左讀取，略過受信任的代理，第一個不受信任的位址就是客戶端 IP。訪客自己在標頭裡加的內容不會被採用，因此無法藉此躲過流量限制或 IP 封鎖。`TRUST_PROXY` 用來指定信任哪些代理：
+
+| 部署方式 | `TRUST_PROXY` |
+|---|---|
+| Cloudflare Tunnel（`cloudflared`）在同一台主機或同一個 Docker 網路 | 預設（留空） |
+| 反向代理（Caddy、Traefik、nginx 等）在同一台主機、區網或 Docker 網路 | 預設（留空） |
+| 前端連接埠直接對外開放（IPv4） | 預設（留空），請見下方說明 |
+| 代理以**公網**位址連到伺服器，例如 Cloudflare 代理 DNS（橘色雲朵）直連源站，或使用公網 IP 的雲端負載平衡器 | 預設範圍**再加上**該代理的 IP 範圍，例如 `loopback, linklocal, uniquelocal, 173.245.48.0/20, ...`（[Cloudflare IP 範圍](https://www.cloudflare.com/ips/)） |
+| 後端前面固定有 N 層代理 | 層數，例如 `2` |
+
+**只有本機代理會連線時，請將對外連接埠綁定在 loopback。** 經由 Docker userland proxy 抵達對外連接埠的連線（IPv4-only 的 Docker 網路上的 IPv6 用戶端，或來自主機本身的連線），nginx 看到的是 Docker 閘道，而預設會信任它，因此該用戶端可以自行填寫 `X-Forwarded-For`。使用 Cloudflare Tunnel 或同主機的反向代理時，請將連接埠設為 `127.0.0.1:3000:80` 與 `127.0.0.1:3002:3002`，只讓代理連得到。
+
+可接受的值：以逗號分隔的 IP、CIDR 與 `loopback`、`linklocal`、`uniquelocal` 名稱；層數；或 `false`（不採用 `X-Forwarded-For`）。避免使用 `true`：它會信任每一層，客戶端可偽造 IP。設定值無效時後端會在啟動時直接停止。啟動時會記錄目前的信任設定（`Reverse proxy trust policy`）。
+
+加入此設定之前的版本，行為等同 `TRUST_PROXY=1`。要維持舊行為可設定此值，但請注意：後端前面同時有 Tunnel 與內建 nginx 時，這個值會取得 nginx／Docker 閘道的位址，而不是訪客。
 
 ### 本機開發
 

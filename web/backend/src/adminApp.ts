@@ -12,6 +12,7 @@ import {
   ADMIN_USERNAME,
   ADMIN_PASSWORD,
   IS_LOCAL_DEV,
+  TRUST_PROXY_FN,
 } from './config';
 import { SQLiteSessionStore } from './db';
 import { helmetMiddleware, permissionsPolicyMiddleware, csrfOriginCheckSameOrigin } from './middleware/security';
@@ -25,7 +26,7 @@ const adminApp = express();
 //  Core middleware
 // ---------------------------------------------------------------------------
 
-adminApp.set('trust proxy', 1);
+adminApp.set('trust proxy', TRUST_PROXY_FN);
 adminApp.use(helmetMiddleware);
 adminApp.use(permissionsPolicyMiddleware);
 adminApp.use(express.json());
