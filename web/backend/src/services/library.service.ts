@@ -169,6 +169,7 @@ setImmediate(runBackfillChunk);
  */
 export function sanitizeFilename(raw: string): { ascii: string; encoded: string } {
   // Remove control chars, quotes, backslashes, path separators
+  // eslint-disable-next-line no-control-regex -- matching control characters is the point here
   const safe = raw.replace(/[\x00-\x1f"\\/:*?<>|]/g, '_');
   // ASCII-only fallback (replace non-ASCII with _)
   const ascii = safe.replace(/[^\x20-\x7e]/g, '_');
