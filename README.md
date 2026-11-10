@@ -429,9 +429,11 @@ The backend takes the client IP from `X-Forwarded-For`, walking it from right to
 |---|---|
 | Cloudflare Tunnel (`cloudflared`) on the same host or Docker network | default (leave empty) |
 | Reverse proxy (Caddy, Traefik, nginx, ...) on the same host, LAN or Docker network | default (leave empty) |
-| Frontend port exposed directly to the internet | default (leave empty) |
+| Frontend port exposed directly to the internet (IPv4) | default (leave empty), see the note below |
 | A proxy that reaches the server from a **public** address, e.g. Cloudflare proxied DNS (orange cloud) straight to the origin, or a cloud load balancer with public IPs | default ranges **plus** that proxy's ranges, e.g. `loopback, linklocal, uniquelocal, 173.245.48.0/20, ...` ([Cloudflare IP ranges](https://www.cloudflare.com/ips/)) |
 | Fixed number of proxies in front of the backend | a hop count, e.g. `2` |
+
+**Bind published ports to loopback when only a local proxy uses them.** When a connection reaches a published port through Docker's userland proxy (IPv6 clients on an IPv4-only Docker network, or connections from the host itself), nginx sees the Docker gateway, which the default trusts, so that client could set its own `X-Forwarded-For`. With Cloudflare Tunnel or a reverse proxy on the same host, publish the ports as `127.0.0.1:3000:80` and `127.0.0.1:3002:3002` so only the proxy can reach them.
 
 Accepted values: a comma-separated list of IPs, CIDRs and the names `loopback`, `linklocal`, `uniquelocal`; a hop count; or `false` (ignore `X-Forwarded-For`). Avoid `true`: it trusts every hop, so clients can spoof their IP. An invalid value stops the backend at startup. The active policy is logged at startup (`Reverse proxy trust policy`).
 

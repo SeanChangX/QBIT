@@ -429,9 +429,11 @@ openssl rand -hex 32
 |---|---|
 | Cloudflare Tunnel（`cloudflared`）在同一台主機或同一個 Docker 網路 | 預設（留空） |
 | 反向代理（Caddy、Traefik、nginx 等）在同一台主機、區網或 Docker 網路 | 預設（留空） |
-| 前端連接埠直接對外開放 | 預設（留空） |
+| 前端連接埠直接對外開放（IPv4） | 預設（留空），請見下方說明 |
 | 代理以**公網**位址連到伺服器，例如 Cloudflare 代理 DNS（橘色雲朵）直連源站，或使用公網 IP 的雲端負載平衡器 | 預設範圍**再加上**該代理的 IP 範圍，例如 `loopback, linklocal, uniquelocal, 173.245.48.0/20, ...`（[Cloudflare IP 範圍](https://www.cloudflare.com/ips/)） |
 | 後端前面固定有 N 層代理 | 層數，例如 `2` |
+
+**只有本機代理會連線時，請將對外連接埠綁定在 loopback。** 經由 Docker userland proxy 抵達對外連接埠的連線（IPv4-only 的 Docker 網路上的 IPv6 用戶端，或來自主機本身的連線），nginx 看到的是 Docker 閘道，而預設會信任它，因此該用戶端可以自行填寫 `X-Forwarded-For`。使用 Cloudflare Tunnel 或同主機的反向代理時，請將連接埠設為 `127.0.0.1:3000:80` 與 `127.0.0.1:3002:3002`，只讓代理連得到。
 
 可接受的值：以逗號分隔的 IP、CIDR 與 `loopback`、`linklocal`、`uniquelocal` 名稱；層數；或 `false`（不採用 `X-Forwarded-For`）。避免使用 `true`：它會信任每一層，客戶端可偽造 IP。設定值無效時後端會在啟動時直接停止。啟動時會記錄目前的信任設定（`Reverse proxy trust policy`）。
 
