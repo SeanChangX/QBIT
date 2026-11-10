@@ -3,13 +3,13 @@
 // ---------------------------------------------------------------------------
 
 import { Request, Response, NextFunction } from 'express';
-import { ZodSchema, ZodError } from 'zod';
+import { ZodType, ZodError } from 'zod';
 
 /**
  * Returns Express middleware that validates `req.body` against the given
  * Zod schema.  On failure, responds with 400 and structured error details.
  */
-export function validate(schema: ZodSchema) {
+export function validate(schema: ZodType) {
   return (req: Request, res: Response, next: NextFunction): void => {
     try {
       req.body = schema.parse(req.body);
@@ -18,7 +18,7 @@ export function validate(schema: ZodSchema) {
       if (err instanceof ZodError) {
         res.status(400).json({
           error: 'Validation failed',
-          details: err.errors.map((e) => ({
+          details: err.issues.map((e) => ({
             path: e.path.join('.'),
             message: e.message,
           })),
@@ -34,7 +34,7 @@ export function validate(schema: ZodSchema) {
  * Returns Express middleware that validates `req.params` against the given
  * Zod schema (e.g. { userId: z.string()... }). On failure, responds with 400.
  */
-export function validateParams(schema: ZodSchema) {
+export function validateParams(schema: ZodType) {
   return (req: Request, res: Response, next: NextFunction): void => {
     try {
       req.params = schema.parse(req.params) as Record<string, string>;
@@ -43,7 +43,7 @@ export function validateParams(schema: ZodSchema) {
       if (err instanceof ZodError) {
         res.status(400).json({
           error: 'Invalid path parameter',
-          details: err.errors.map((e) => ({
+          details: err.issues.map((e) => ({
             path: e.path.join('.'),
             message: e.message,
           })),
