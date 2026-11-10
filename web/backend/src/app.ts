@@ -13,6 +13,7 @@ import {
   IS_LOCAL_DEV,
   SESSION_MAX_AGE,
   API_RATE_LIMIT,
+  TRUST_PROXY_FN,
 } from './config';
 import { SQLiteSessionStore } from './db';
 import { setupAuth } from './auth';
@@ -31,7 +32,8 @@ const app = express();
 //  Core middleware
 // ---------------------------------------------------------------------------
 
-app.set('trust proxy', 1); // trust Cloudflare / reverse proxy
+// req.ip = real client behind nginx / cloudflared / other proxies (TRUST_PROXY)
+app.set('trust proxy', TRUST_PROXY_FN);
 
 // Security headers (helmet)
 app.use(helmetMiddleware);

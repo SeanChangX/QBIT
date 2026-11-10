@@ -82,7 +82,7 @@ router.post('/admin/login', adminLoginLimiter, validate(adminLoginSchema), (req,
   const validPass = timingSafeCompare(password, ADMIN_PASSWORD);
 
   if (!validUser || !validPass) {
-    logger.warn({ username }, 'Failed admin login attempt');
+    logger.warn({ username, ip: req.ip }, 'Failed admin login attempt');
     setTimeout(() => {
       res.status(401).json({ error: 'Invalid username or password' });
     }, FAILED_LOGIN_DELAY_MS);

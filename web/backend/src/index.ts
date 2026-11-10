@@ -7,7 +7,7 @@
 // ==========================================================================
 
 import { createServer } from 'http';
-import { PORT, ADMIN_PORT, ADMIN_HOST } from './config';
+import { PORT, ADMIN_PORT, ADMIN_HOST, TRUST_PROXY } from './config';
 import app, { sessionMiddleware } from './app';
 import adminApp from './adminApp';
 import * as deviceService from './services/device.service';
@@ -37,6 +37,11 @@ socketService.setupSocketIo(httpServer, sessionMiddleware);
 // ---------------------------------------------------------------------------
 //  Start servers
 // ---------------------------------------------------------------------------
+
+logger.info({ trustProxy: TRUST_PROXY }, 'Reverse proxy trust policy (TRUST_PROXY)');
+if (TRUST_PROXY === true) {
+  logger.warn('TRUST_PROXY=true trusts every hop -- clients can spoof X-Forwarded-For. Set proxy addresses/CIDRs instead.');
+}
 
 httpServer.listen(PORT, () => {
   logger.info({ port: PORT }, 'QBIT backend listening');

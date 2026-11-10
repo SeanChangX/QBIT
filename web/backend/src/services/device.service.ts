@@ -6,7 +6,8 @@ import crypto from 'crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import { Server as HttpServer } from 'http';
-import { DEVICE_API_KEY, MAX_DEVICE_CONNECTIONS, MAX_DEVICE_CONNECTIONS_PER_IP } from '../config';
+import { DEVICE_API_KEY, MAX_DEVICE_CONNECTIONS, MAX_DEVICE_CONNECTIONS_PER_IP, TRUST_PROXY_FN } from '../config';
+import { resolveClientIp } from '../clientIp';
 import { isBannedDevice, isBanned } from './ban.service';
 import * as claimService from './claim.service';
 import * as friendService from './friend.service';
@@ -244,15 +245,10 @@ export function clearPendingFriendRequest(deviceId: string): PendingFriendReques
 //  Extract public IP from request
 // ---------------------------------------------------------------------------
 
+// Same trust policy as Express req.ip (see clientIp.ts). The left-most
+// X-Forwarded-For entry is client-controlled and must not be used.
 export function extractPublicIp(request: IncomingMessage): string {
-  const xff = request.headers['x-forwarded-for'];
-  if (xff) {
-    const first = (Array.isArray(xff) ? xff[0] : xff).split(',')[0].trim();
-    if (first) return first;
-  }
-  const cfIp = request.headers['cf-connecting-ip'];
-  if (cfIp) return Array.isArray(cfIp) ? cfIp[0] : cfIp;
-  return request.socket.remoteAddress || '';
+  return resolveClientIp(request, TRUST_PROXY_FN);
 }
 
 // ---------------------------------------------------------------------------
@@ -279,7 +275,7 @@ export function setupWebSocketServer(httpServer: HttpServer): WebSocketServer {
       const key = authHeader.replace(/^Bearer\s+/i, '').trim();
       
       if (!DEVICE_API_KEY || key !== DEVICE_API_KEY) {
-        logger.warn({ ip: request.socket.remoteAddress }, 'Device WS rejected: invalid or missing API key');
+        logger.warn({ ip: extractPublicIp(request) }, 'Device WS rejected: invalid or missing API key');
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
         socket.destroy();
         return;

@@ -407,6 +407,7 @@ cp .env.example .env
 | `MAX_DEVICE_CONNECTIONS_PER_IP` | Max device WebSocket connections from a single IP (default: 10) |
 | `ADMIN_USERNAME` | Admin UI login (1–64 chars). Empty = no admin login. |
 | `ADMIN_PASSWORD` | Admin UI password (8–128 chars). |
+| `TRUST_PROXY` | Which reverse proxies may set `X-Forwarded-For` (used for rate limits, IP bans and logs). Default: `loopback, linklocal, uniquelocal`. See [Reverse proxies and client IP](#reverse-proxies-and-client-ip). |
 
 Optional (auto-generated and stored in `/data/secrets.json` if not set): `SESSION_SECRET`, `ADMIN_SESSION_SECRET`, `HEALTH_SECRET`.
 
@@ -419,6 +420,22 @@ openssl rand -hex 32
 **Passwords with special characters:** Use the `.env` file and wrap values in double quotes. Escape `\` and `"` inside (e.g. `ADMIN_PASSWORD="my\"pass"`).
 
 For CI builds, set the `QBIT_WS_API_KEY` repository secret to the same value as `DEVICE_API_KEY`; it is injected into the firmware at build time.
+
+#### Reverse proxies and client IP
+
+The backend takes the client IP from `X-Forwarded-For`, walking it from right to left and skipping the proxies it trusts. Entries a visitor adds to the header themselves are never used, so they cannot dodge rate limits or IP bans. `TRUST_PROXY` controls which proxies are trusted:
+
+| Deployment | `TRUST_PROXY` |
+|---|---|
+| Cloudflare Tunnel (`cloudflared`) on the same host or Docker network | default (leave empty) |
+| Reverse proxy (Caddy, Traefik, nginx, ...) on the same host, LAN or Docker network | default (leave empty) |
+| Frontend port exposed directly to the internet | default (leave empty) |
+| A proxy that reaches the server from a **public** address, e.g. Cloudflare proxied DNS (orange cloud) straight to the origin, or a cloud load balancer with public IPs | default ranges **plus** that proxy's ranges, e.g. `loopback, linklocal, uniquelocal, 173.245.48.0/20, ...` ([Cloudflare IP ranges](https://www.cloudflare.com/ips/)) |
+| Fixed number of proxies in front of the backend | a hop count, e.g. `2` |
+
+Accepted values: a comma-separated list of IPs, CIDRs and the names `loopback`, `linklocal`, `uniquelocal`; a hop count; or `false` (ignore `X-Forwarded-For`). Avoid `true`: it trusts every hop, so clients can spoof their IP. An invalid value stops the backend at startup. The active policy is logged at startup (`Reverse proxy trust policy`).
+
+Versions before this setting behaved like `TRUST_PROXY=1`. Set that to keep the old behaviour, but note that it returns the nginx/Docker gateway address instead of the visitor when both a tunnel and the bundled nginx are in front of the backend.
 
 ### Local Development
 

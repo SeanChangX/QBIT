@@ -5,6 +5,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { parseTrustProxy, compileTrust } from './clientIp';
 
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const isProduction = NODE_ENV === 'production';
@@ -13,6 +14,11 @@ const isProduction = NODE_ENV === 'production';
 export const PORT = parseInt(process.env.PORT || '3001', 10);
 export const ADMIN_PORT = parseInt(process.env.ADMIN_PORT || '3002', 10);
 export const ADMIN_HOST = process.env.ADMIN_HOST || '127.0.0.1';
+
+// ---- Reverse proxy trust (client IP for rate limits, bans, logs) ----
+// See clientIp.ts. Default trusts loopback + private ranges only.
+export const TRUST_PROXY = parseTrustProxy(process.env.TRUST_PROXY);
+export const TRUST_PROXY_FN = compileTrust(TRUST_PROXY);
 
 export const FRONTEND_URL = process.env.FRONTEND_URL || 'https://qbit.labxcloud.com';
 export const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || '.labxcloud.com';
