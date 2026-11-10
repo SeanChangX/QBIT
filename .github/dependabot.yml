@@ -1,0 +1,50 @@
+version: 2
+
+# Security updates are raised as soon as an advisory is published.
+# Version updates wait out a cooldown so a freshly published (possibly
+# compromised) release is never pulled in the day it appears.
+
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /web/backend
+      - /web/frontend
+      - /web/admin
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build(deps)
+      prefix-development: build(deps-dev)
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directories:
+      - /web/backend
+      - /web/frontend
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: build(docker)
+    # Major bumps (Node LTS lines, nginx stable branches) are done by hand:
+    # odd Node majors and odd nginx minors are never LTS / stable.
+    ignore:
+      - dependency-name: node
+        update-types: [version-update:semver-major]
+      - dependency-name: nginx
+        update-types: [version-update:semver-major, version-update:semver-minor]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
