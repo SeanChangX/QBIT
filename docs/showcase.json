@@ -1,0 +1,64 @@
+{
+  "as_of": "2026-11-10",
+  "fleet": {
+    "devices": 269,
+    "countries": 40,
+    "networks": 243,
+    "users": 270,
+    "top_countries": [
+      {
+        "code": "RU",
+        "name": "Russia",
+        "devices": 31
+      },
+      {
+        "code": "IN",
+        "name": "India",
+        "devices": 29
+      },
+      {
+        "code": "CN",
+        "name": "China",
+        "devices": 26
+      },
+      {
+        "code": "US",
+        "name": "United States",
+        "devices": 26
+      },
+      {
+        "code": "BR",
+        "name": "Brazil",
+        "devices": 19
+      },
+      {
+        "code": "DE",
+        "name": "Germany",
+        "devices": 17
+      },
+      {
+        "code": "ID",
+        "name": "Indonesia",
+        "devices": 12
+      },
+      {
+        "code": "TR",
+        "name": "Turkey",
+        "devices": 11
+      }
+    ]
+  },
+  "makerworld": {
+    "url": "https://makerworld.com/en/models/2400803-qbit-your-iot-desk-robot-esp32-c3",
+    "collects": 2405,
+    "downloads": 1073,
+    "likes": 854,
+    "prints": 444,
+    "comments": 57
+  },
+  "github": {
+    "stars": 162,
+    "forks": 21
+  },
+  "notes": "Fleet: connected QBIT hardware, simulated devices excluded; country from device public IP. MakerWorld and GitHub counters as of the same date."
+}
