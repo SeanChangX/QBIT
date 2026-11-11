@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   base: '/',
   build: {
-    outDir: path.join(__dirname, '../backend/static/admin'),
+    outDir: path.join(import.meta.dirname, '../backend/static/admin'),
     emptyOutDir: true,
   },
   server: {
