@@ -14,7 +14,7 @@
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
-    "express-rate-limit": "^7.4.0",
+    "express-rate-limit": "^8.7.3",
     "express-session": "^1.18.1",
     "helmet": "^8.0.0",
     "multer": "^2.1.1",
