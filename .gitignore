@@ -1,2 +1,17 @@
 **/venv/
 tools/backups/
+
+# Secrets: keep only the templates
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+*.tsbuildinfo
+
+# Web build output
+web/frontend/dist/
+web/admin/dist/
+web/backend/dist/
+web/backend/static/admin/
