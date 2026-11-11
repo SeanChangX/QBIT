@@ -24,6 +24,7 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
+      workflows: ${{ steps.filter.outputs.workflows }}
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
       admin: ${{ steps.filter.outputs.admin }}
@@ -38,6 +39,9 @@ jobs:
           filters: |
             ci: &ci
               - .github/workflows/ci.yml
+            workflows:
+              - .github/workflows/**
+              - .github/actionlint.yaml
             backend:
               - *ci
               - web/backend/**
@@ -50,6 +54,21 @@ jobs:
             firmware:
               - *ci
               - firmware/**
+
+  workflows:
+    name: Workflows (actionlint)
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      # Checks syntax, expressions, action inputs (incl. after Dependabot
+      # bumps) and runs shellcheck on every `run:` script
+      # Pinned version, not :latest, so new rules never fail CI unannounced.
+      # Dependabot does not see images inside `run:`; bump this by hand.
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
 
   backend:
     name: Backend (typecheck, lint, test)
@@ -139,7 +158,7 @@ jobs:
 
   ci:
     name: ci
-    needs: [changes, backend, frontend, admin, firmware]
+    needs: [changes, workflows, backend, frontend, admin, firmware]
     if: always()
     runs-on: ubuntu-latest
     steps:
