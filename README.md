@@ -553,7 +553,7 @@ Custom partition table ([`firmware/partitions.csv`](firmware/partitions.csv))
 | `tools/qgif2header.py` | Convert .qgif files to C header files for PROGMEM embedding |
 | `tools/png2xbm.py` | Convert small PNG icons (≤16×16) to u8g2 XBM-style C arrays |
 | `tools/simulate-devices.py` | Simulate multiple QBIT devices connecting to the backend for testing |
-| `tools/qbit-ctl` | TUI for inspecting and managing the backend SQLite database and `/data` files |
+| `tools/qbit-ctl` | Server console for the backend data volume: status, consistent backups, restore, database browser and library cleanup (Python 3.10+, no dependencies; run `tools/qbit-ctl --help`) |
 | `tools/flasher/` | Browser-based firmware flasher (deployed to GitHub Pages) |
 
 ---

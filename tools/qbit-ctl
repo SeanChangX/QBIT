@@ -1,1059 +1,1755 @@
-#!/usr/bin/env bash
-# ---------------------------------------------------------------------------
-#  qbit-ctl -- QBIT data and database control (TUI)
-#  Backup/restore/list/edit volume; view SQLite DB (predefined queries).
-#  Uses whiptail. Run from repo root or set QBIT_REPO_ROOT.
-# ---------------------------------------------------------------------------
-set -euo pipefail
+#!/usr/bin/env python3
+"""qbit-ctl: operate the QBIT backend data volume from the host.
 
-readonly QBIT_CTL_VERSION="2026-03-16"
-readonly BACKTITLE="QBIT Control v${QBIT_CTL_VERSION}"
-readonly DB_PATH_IN_CONTAINER="/data/qbit.db"
-readonly DATA_MOUNT_PATH="/data"
-readonly BACKUP_FILE_GLOB='qbit-data-backup-*.tar.gz'
+Full-screen console for the production server, plus a few plain commands for scripts and cron.
+Standard library only (Python 3.10+, curses); everything that touches the data runs inside Docker.
 
-if ! command -v docker &>/dev/null; then
-  echo "ERROR: docker command not found." >&2
-  exit 1
-fi
+    qbit-ctl                      interactive console
+    qbit-ctl status               backend, volume, database and latest backup
+    qbit-ctl backup [--dir DIR]   consistent backup without stopping the backend
+    qbit-ctl backups [--dir DIR]  list backup archives
 
-# ---------------------------------------------------------------------------
-#  TUI: whiptail
-# ---------------------------------------------------------------------------
-if ! command -v whiptail &>/dev/null; then
-  echo "ERROR: Install 'whiptail' (e.g. apt install whiptail)." >&2
-  exit 1
-fi
+Backup directory, first match wins: --dir, $QBIT_CTL_BACKUP_DIR, `dir` under [backups] in
+$XDG_CONFIG_HOME/qbit-ctl/config.ini (~/.config/...; the console's `c` key can write it), ~/qbit_backups.
 
-# ---------------------------------------------------------------------------
-#  UI helpers (whiptail)
-# ---------------------------------------------------------------------------
-_ui_msg() {
-  local title="$1" msg="$2" h="${3:-8}" w="${4:-60}"
-  whiptail --backtitle "$BACKTITLE" --title "$title" --msgbox "$msg" "$h" "$w"
-}
+Design notes
+- The database is read and written by the backend image itself (node + better-sqlite3), through
+  `docker exec` while the backend runs and a throwaway container from the same image when it is
+  stopped. No sqlite3 CLI is installed at run time, results come back as JSON (NULLs, `|`, tabs
+  and CJK survive), and the SQLite version always matches the one the backend uses.
+- Backups snapshot the database with VACUUM INTO (one read transaction), so they are consistent
+  while the backend keeps serving. The archive layout is unchanged: qbit.db, secrets.json, files/.
+- Restore validates the archive first (extract + integrity_check in a scratch container without the
+  live volume), stops the backend, saves a safety backup of the current data, empties the volume,
+  extracts, and starts the backend again. If the extract fails, the safety backup is put back.
+  There is no "restore while running" path, and Ctrl-C / a dropped ssh session cannot interrupt it.
+"""
 
-_ui_scroll_msg() {
-  local title="$1" msg="$2" h="${3:-22}" w="${4:-78}"
-  whiptail --backtitle "$BACKTITLE" --title "$title" --scrolltext --msgbox "$msg" "$h" "$w"
-}
+import argparse
+import configparser
+import curses
+import datetime as dt
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import threading
+import time
+import unicodedata
 
-_ui_infobox() {
-  local title="$1" msg="$2" h="${3:-5}" w="${4:-55}"
-  whiptail --backtitle "$BACKTITLE" --title "$title" --infobox "$msg" "$h" "$w"
-}
+VERSION = "2.0.0"
+PROG = "qbit-ctl"
 
-_ui_loading() {
-  local title="$1" msg="$2" seconds="${3:-1}"
-  {
-    echo 10
-    sleep 0.1
-    echo 50
-    sleep "$seconds"
-    echo 100
-  } | whiptail --backtitle "$BACKTITLE" --title "$title" --gauge "$msg" 7 56 0
-}
+E = os.environ
+CONTAINERS = [c for c in E.get("QBIT_CTL_CONTAINER", "qbit-backend,qbit-backend-dev").split(",") if c]
+DEFAULT_BACKUP_DIR = "~/qbit_backups"
+CONFIG_FILE = os.path.join(E.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "qbit-ctl", "config.ini")
+BACKUP_PREFIX = "qbit-data-backup-"
+BACKUP_SUFFIX = ".tar.gz"
+DATA = "/data"
+DB = DATA + "/qbit.db"
+HEALTH_WAIT = 90  # seconds to wait for the backend health check after a start
 
-_ui_yesno() {
-  local title="$1" msg="$2" h="${3:-10}" w="${4:-60}"
-  local yes_label="${5:-Yes}" no_label="${6:-No}"
-  whiptail --backtitle "$BACKTITLE" --title "$title" --yes-button "$yes_label" --no-button "$no_label" --yesno "$msg" "$h" "$w"
-}
+# --------------------------------------------------------------------------- text helpers
 
-_ui_menu() {
-  local title="$1" prompt="$2" h="$3" w="$4" menu_h="$5"
-  local out status
-  shift 5
-  if out=$(whiptail --backtitle "$BACKTITLE" --title "$title" --menu "$prompt" "$h" "$w" "$menu_h" "$@" 3>&1 1>&2 2>&3); then
-    status=0
-  else
-    status=$?
-  fi
-  printf '%s' "${out//$'\r'/}"
-  return $status
-}
 
-_ui_checklist() {
-  local title="$1" prompt="$2" h="$3" w="$4" list_h="$5"
-  local out status
-  shift 5
-  if out=$(whiptail --backtitle "$BACKTITLE" --title "$title" --checklist "$prompt" "$h" "$w" "$list_h" "$@" 3>&1 1>&2 2>&3); then
-    status=0
-  else
-    status=$?
-  fi
-  printf '%s' "${out//$'\r'/}"
-  return $status
-}
+def dw(s):
+    """Display width in terminal columns (East Asian wide = 2, combining = 0)."""
+    n = 0
+    for c in s:
+        if unicodedata.combining(c):
+            continue
+        n += 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
+    return n
 
-_ui_input() {
-  local title="$1" prompt="$2" h="$3" w="$4" default_val="${5:-}"
-  local out status
-  if out=$(whiptail --backtitle "$BACKTITLE" --title "$title" --inputbox "$prompt" "$h" "$w" "$default_val" 3>&1 1>&2 2>&3); then
-    status=0
-  else
-    status=$?
-  fi
-  printf '%s' "${out//$'\r'/}"
-  return $status
-}
 
-# ---------------------------------------------------------------------------
-#  Path / repo helpers
-# ---------------------------------------------------------------------------
-_repo_root() {
-  local root="${QBIT_REPO_ROOT:-}"
-  if [[ -n "$root" && -d "$root" ]]; then
-    echo "$root"
-    return
-  fi
+def clip(s, width):
+    if width <= 0:
+        return ""
+    s = s.replace("\n", " ").replace("\t", " ")
+    if dw(s) <= width:
+        return s
+    out, n = [], 0
+    for c in s:
+        cw = 0 if unicodedata.combining(c) else (2 if unicodedata.east_asian_width(c) in ("W", "F") else 1)
+        if n + cw > width - 1:
+            break
+        out.append(c)
+        n += cw
+    return "".join(out) + "…"
 
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  if [[ -f "${script_dir}/../web/docker-compose.yml" ]]; then
-    echo "$(cd "$script_dir/.." && pwd)"
-    return
-  fi
 
-  echo "$(pwd)"
-}
+def pad(s, width, right=False):
+    s = clip(s, width)
+    fill = " " * max(0, width - dw(s))
+    return fill + s if right else s + fill
 
-_backup_dir() {
-  echo "$(_path_start)/qbit_backups"
-}
 
-_ensure_dir() {
-  local dir="$1" title="${2:-Directory Error}"
-  if mkdir -p "$dir" 2>/dev/null; then
-    return 0
-  fi
-  _ui_msg "$title" "Could not create directory:\n$dir" 7 66
-  return 1
-}
+def human(n):
+    if n is None:
+        return "-"
+    n = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return ("%d %s" % (n, unit)) if unit == "B" else ("%.1f %s" % (n, unit))
+        n /= 1024
+    return "-"
 
-_path_start() {
-  if [[ -n "${HOME:-}" ]]; then
-    echo "$HOME"
-  elif id -un &>/dev/null; then
-    echo "/home/$(id -un)"
-  else
-    echo "/tmp"
-  fi
-}
 
-_pick_directory() {
-  local start_path="${1:-$(_path_start)}"
-  _ui_input "Choose Directory" "Enter directory path (e.g. /home/user):" 8 70 "$start_path"
-}
+def ago(ts):
+    if not ts:
+        return "-"
+    s = max(0, int(time.time() - ts))
+    for size, unit in ((86400, "d"), (3600, "h"), (60, "m")):
+        if s >= size:
+            return "%d%s ago" % (s // size, unit)
+    return "just now"
 
-_pick_path() {
-  local start_path="${1:-$(_path_start)}"
-  _ui_input "Choose File or Directory" "Enter a .tar.gz file path or a directory path:" 8 70 "$start_path"
-}
 
-_collect_backup_archives() {
-  local dir="$1"
-  local row file
+def stamp(ts):
+    return dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "-"
 
-  BACKUP_ARCHIVES=()
-  while IFS= read -r -d '' row; do
-    file="${row#* }"
-    [[ -f "$file" ]] && BACKUP_ARCHIVES+=("$file" "$(basename "$file")")
-  done < <(
-    find "$dir" -maxdepth 1 -type f -name "$BACKUP_FILE_GLOB" -printf '%T@ %p\0' 2>/dev/null | sort -zrn
-  )
-}
 
-_format_bytes() {
-  local bytes="$1"
-  local -a units=("B" "KB" "MB" "GB" "TB")
-  local unit_idx=0
+ISO_TS = re.compile(r"^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$")
 
-  [[ "$bytes" =~ ^[0-9]+$ ]] || {
-    echo "?"
-    return
-  }
 
-  while (( bytes >= 1024 && unit_idx < ${#units[@]} - 1 )); do
-    bytes=$((bytes / 1024))
-    unit_idx=$((unit_idx + 1))
-  done
+def cell(v):
+    """Table cell text: NULL as ∅, ISO timestamps shortened to minutes."""
+    if v is None:
+        return "∅"
+    s = str(v)
+    m = ISO_TS.match(s)
+    return "%s %s" % (m.group(1), m.group(2)) if m else s
 
-  echo "${bytes}${units[$unit_idx]}"
-}
 
-_short_backup_name() {
-  local name="$1"
-  local max_len="${2:-34}"
-  local keep_head=22
-  local keep_tail=9
-  if (( ${#name} <= max_len )); then
-    echo "$name"
-    return
-  fi
-  echo "${name:0:$keep_head}...${name: -$keep_tail}"
-}
+def plural(n, word):
+    return "%d %s%s" % (n, word, "" if n == 1 else "s")
 
-_pick_backup_archive() {
-  local backup_dir="$1" title="$2" prompt="$3"
-  local idx i list_h box_h choice
-  local path base short_base size_bytes size_human modified_at
-  local -a menu_items=() path_map=()
 
-  _ui_loading "$title" "Loading backup files..." 1
-  _collect_backup_archives "$backup_dir"
-  if [[ ${#BACKUP_ARCHIVES[@]} -eq 0 ]]; then
-    _ui_msg "$title" "No backup files found in:\n$backup_dir\n\nExpected pattern: $BACKUP_FILE_GLOB" 9 72
-    return 1
-  fi
+def tilde(path):
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
 
-  idx=0
-  for (( i = 0; i < ${#BACKUP_ARCHIVES[@]}; i += 2 )); do
-    path="${BACKUP_ARCHIVES[$i]}"
-    base="$(basename "$path")"
-    short_base="$(_short_backup_name "$base" 34)"
-    size_bytes="$(stat -c '%s' "$path" 2>/dev/null || echo "")"
-    size_human="$(_format_bytes "$size_bytes")"
-    modified_at="$(stat -c '%y' "$path" 2>/dev/null | cut -d'.' -f1)"
-    [[ -z "$modified_at" ]] && modified_at="-"
 
-    idx=$((idx + 1))
-    path_map+=("$path")
-    menu_items+=("$idx" "$(printf '%-34s %7s %-19s' "$short_base" "$size_human" "${modified_at:0:19}")")
-  done
+# --------------------------------------------------------------------------- configuration
 
-  list_h=$((idx + 1))
-  [[ $list_h -gt 14 ]] && list_h=14
-  box_h=$((list_h + 8))
 
-  while true; do
-    if ! choice=$(_ui_menu "$title" "$prompt\n\nDirectory: $backup_dir\nColumns: #  Filename  Size  Modified" "$box_h" 92 "$list_h" \
-      "${menu_items[@]}" \
-      "back" "Back"); then
-      return 1
-    fi
+def norm_dir(path):
+    return os.path.abspath(os.path.expanduser(path.strip()))
 
-    [[ -z "$choice" || "$choice" == "back" ]] && return 1
-    [[ "$choice" =~ ^[0-9]+$ ]] || continue
-    (( choice >= 1 && choice <= ${#path_map[@]} )) || continue
 
-    PICKED_BACKUP_ROW="$choice"
-    PICKED_BACKUP_PATH="${path_map[$((choice - 1))]}"
-    return 0
-  done
-}
+def read_config():
+    cp = configparser.ConfigParser(interpolation=None)  # paths may contain %
+    try:
+        cp.read(CONFIG_FILE, encoding="utf-8")
+    except (configparser.Error, UnicodeDecodeError, OSError):
+        cp = configparser.ConfigParser(interpolation=None)  # a broken file must not lock the operator out
+    return cp
 
-# ---------------------------------------------------------------------------
-#  Docker: resolve backend container and data volume
-# ---------------------------------------------------------------------------
-_backend_container() {
-  local c
-  for c in qbit-backend qbit-backend-dev; do
-    if docker inspect "$c" &>/dev/null; then
-      echo "$c"
-      return
-    fi
-  done
-  echo ""
-}
 
-_volume_name() {
-  local container="$1"
-  docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' "$container" 2>/dev/null || true
-}
+def resolve_backup_dir():
+    """(directory, where it came from): environment, config file, or the default."""
+    if E.get("QBIT_CTL_BACKUP_DIR"):
+        return norm_dir(E["QBIT_CTL_BACKUP_DIR"]), "QBIT_CTL_BACKUP_DIR"
+    d = read_config().get("backups", "dir", fallback="").strip()
+    if d:
+        return norm_dir(d), tilde(CONFIG_FILE)
+    return norm_dir(DEFAULT_BACKUP_DIR), "default"
 
-# Resolve volume when backend is stopped (e.g. for backup/restore)
-_volume_name_fallback() {
-  docker volume ls -q 2>/dev/null | awk '/^(.+_)?qbit-data$/{print; exit}'
-}
 
-# _ensure_backend [silent]
-# - success: sets BACKEND_CONTAINER (empty if stopped) and VOLUME_NAME
-# - failure: return 1
-_ensure_backend() {
-  local mode="${1:-}"
-  local c
+def save_backup_dir(path):
+    """Write [backups] dir to the config file, keeping any other settings in it."""
+    cp = read_config()
+    if not cp.has_section("backups"):
+        cp.add_section("backups")
+    cp.set("backups", "dir", tilde(path))
+    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+    tmp = CONFIG_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("# qbit-ctl settings. Precedence: --dir, $QBIT_CTL_BACKUP_DIR, this file, ~/qbit_backups.\n")
+        cp.write(f)
+    os.replace(tmp, CONFIG_FILE)
 
-  c="$(_backend_container)"
-  if [[ -z "$c" ]]; then
-    BACKEND_CONTAINER=""
-    VOLUME_NAME="$(_volume_name_fallback)"
-    if [[ -z "$VOLUME_NAME" ]]; then
-      [[ "$mode" == "silent" ]] || _ui_msg "Environment Error" "No running backend container and no qbit-data volume found.\n\nExpected backend names:\n- qbit-backend\n- qbit-backend-dev" 11 64
-      return 1
-    fi
-    return 0
-  fi
 
-  BACKEND_CONTAINER="$c"
-  VOLUME_NAME="$(_volume_name "$BACKEND_CONTAINER")"
-  [[ -z "$VOLUME_NAME" ]] && VOLUME_NAME="$(_volume_name_fallback)"
-
-  if [[ -z "$VOLUME_NAME" ]]; then
-    [[ "$mode" == "silent" ]] || _ui_msg "Environment Error" "Could not resolve data volume for backend: $BACKEND_CONTAINER" 7 60
-    return 1
-  fi
-
-  return 0
-}
-
-# ---------------------------------------------------------------------------
-#  Volume: backup
-# ---------------------------------------------------------------------------
-_volume_backup() {
-  local volume_name backup_dir archive_path choice chosen_dir host_uid host_gid
-
-  if ! _ensure_backend; then
-    return
-  fi
-
-  volume_name="$VOLUME_NAME"
-  backup_dir="$(_backup_dir)"
-
-  if ! choice=$(_ui_menu "Backup Destination" "Where should the backup be saved?" 11 66 4 \
-    "default" "Use default directory: $backup_dir" \
-    "choose" "Choose another directory"); then
-    return
-  fi
-
-  if [[ "$choice" == "choose" ]]; then
-    if ! chosen_dir=$(_pick_directory "$(_path_start)"); then
-      return
-    fi
-    [[ -z "$chosen_dir" ]] && return
-    backup_dir="$chosen_dir"
-  fi
-
-  if ! _ensure_dir "$backup_dir" "Backup Failed"; then
-    return
-  fi
-  if [[ ! -w "$backup_dir" ]]; then
-    _ui_msg "Backup Failed" "Directory is not writable by current user:\n$backup_dir\n\nChoose another directory to avoid permission issues when deleting backups." 10 72
-    return
-  fi
-
-  archive_path="${backup_dir}/qbit-data-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
-  host_uid="$(id -u)"
-  host_gid="$(id -g)"
-
-  _ui_loading "Backup" "Creating backup archive..." 1
-  if docker run --rm -v "${volume_name}:${DATA_MOUNT_PATH}" -v "${backup_dir}:/backup" alpine \
-    sh -ec "tar czf '/backup/$(basename "$archive_path")' -C '$DATA_MOUNT_PATH' . && { chown '$host_uid:$host_gid' '/backup/$(basename "$archive_path")' || true; }"; then
-    _ui_scroll_msg "Backup Complete" "Success: backup created.\n\nVolume: $volume_name\nSaved to:\n$archive_path" 12 72
-  else
-    _ui_msg "Backup Failed" "Backup failed. Please verify Docker is running and the volume is accessible." 8 68
-  fi
-}
-
-# ---------------------------------------------------------------------------
-#  Volume: restore (pick file then overwrite volume)
-# ---------------------------------------------------------------------------
-_volume_restore() {
-  local backup_dir choice selected_path archive_choice
-
-  if ! _ensure_backend; then
-    return
-  fi
-
-  backup_dir="$(_backup_dir)"
-  if ! _ensure_dir "$backup_dir" "Restore"; then
-    return
-  fi
-
-  if ! choice=$(_ui_menu "Restore Source" "Where is the backup archive?" 11 68 4 \
-    "default" "Browse default directory: $backup_dir" \
-    "choose" "Choose file or directory manually"); then
-    return
-  fi
-
-  if [[ "$choice" == "choose" ]]; then
-    if ! selected_path=$(_pick_path "$(_path_start)"); then
-      return
-    fi
-    [[ -z "$selected_path" ]] && return
-
-    if [[ -d "$selected_path" ]]; then
-      backup_dir="$selected_path"
-      if [[ ! -r "$backup_dir" || ! -x "$backup_dir" ]]; then
-        _ui_msg "Restore" "Directory is not readable or not searchable (cannot enter):\n$backup_dir" 7 66
+def clear_backup_dir():
+    """Remove the saved directory; delete the file when nothing else is left in it."""
+    cp = read_config()
+    if cp.has_section("backups"):
+        cp.remove_option("backups", "dir")
+        if not cp.items("backups"):
+            cp.remove_section("backups")
+    if not cp.sections():
+        try:
+            os.remove(CONFIG_FILE)
+        except FileNotFoundError:
+            pass
         return
-      fi
-    elif [[ -f "$selected_path" ]]; then
-      _volume_restore_do "$selected_path"
-      return
-    else
-      _ui_msg "Restore" "Path does not exist:\n$selected_path" 6 66
-      return
-    fi
-  fi
-
-  if ! _pick_backup_archive "$backup_dir" "Choose Backup" "Select archive to restore.\nWarning: restore overwrites current volume data."; then
-    return
-  fi
-  archive_choice="${PICKED_BACKUP_PATH:-}"
-  archive_choice="${archive_choice//$'\r'/}"
-  [[ -z "$archive_choice" ]] && return
-
-  _volume_restore_do "$archive_choice"
-}
-
-# Shared restore steps after path_archive is set (backend prompt, confirm, extract)
-_volume_restore_do() {
-  local path_archive="$1"
-  local running_container volume_name did_stop stop_choice
-
-  [[ -z "$path_archive" || ! -f "$path_archive" ]] && return
-  if ! _ensure_backend; then
-    return
-  fi
-
-  volume_name="$VOLUME_NAME"
-  did_stop=""
-  running_container="$(_backend_container)"
-
-  if [[ -n "$running_container" ]]; then
-    if ! stop_choice=$(_ui_menu "Backend Running" "Backend ($running_container) is running. Restoring while running may corrupt DB files.\n\nChoose an action:" 15 74 5 \
-      "stop" "Stop backend first (recommended)" \
-      "continue" "Continue anyway (risky)" \
-      "cancel" "Cancel restore"); then
-      return
-    fi
-
-    case "$stop_choice" in
-      cancel|"") return ;;
-      stop)
-        _ui_infobox "Restore" "Stopping $running_container ..." 5 50
-        docker stop "$running_container" &>/dev/null || true
-        did_stop=1
-        ;;
-      continue) ;;
-    esac
-  fi
-
-  if ! _ui_yesno "Confirm Restore" "Restore from:\n$path_archive\n\nThis will OVERWRITE all current data in $VOLUME_NAME. Continue?" 11 72 "Restore" "Cancel"; then
-    if [[ -n "$did_stop" && -n "$running_container" ]]; then
-      _ui_loading "Restore Cancelled" "Starting backend: $running_container" 1
-      if docker start "$running_container" &>/dev/null; then
-        _ui_msg "Restore Cancelled" "Restore cancelled. Backend restarted.\n\nContainer: $running_container" 8 68
-      else
-        _ui_msg "Restore Cancelled" "Restore cancelled.\n\nFailed to restart backend.\nContainer: $running_container\nRun manually:\ndocker start $running_container" 11 72
-      fi
-    fi
-    return
-  fi
-
-  _ui_loading "Restore" "Restoring backup archive..." 1
-  local restore_dir backup_basename
-  restore_dir="$(dirname "$path_archive")"
-  backup_basename="$(basename "$path_archive")"
-  if docker run --rm -i -v "${volume_name}:${DATA_MOUNT_PATH}" -v "${restore_dir}:/backup:ro" alpine \
-    sh -ec 'read -r b; tar xzf "/backup/$b" -C "'"$DATA_MOUNT_PATH"'"' <<< "$backup_basename"; then
-    if [[ -n "$did_stop" && -n "$running_container" ]]; then
-      if _ui_yesno "Restore Complete" "Restore completed successfully.\n\nStart backend now?" 7 54 "Start" "Later"; then
-        _ui_loading "Restore Complete" "Starting backend: $running_container" 1
-        if docker start "$running_container" &>/dev/null; then
-          _ui_msg "Restore Complete" "Backend started successfully.\n\nContainer: $running_container" 7 62
-        else
-          _ui_msg "Restore Complete" "Restore completed, but failed to start backend.\n\nContainer: $running_container\nRun manually:\ndocker start $running_container" 10 72
-        fi
-      fi
-    else
-      _ui_msg "Restore Complete" "Restore completed successfully." 5 44
-    fi
-  else
-    if [[ -n "$did_stop" && -n "$running_container" ]]; then
-      _ui_msg "Restore Failed" "Restore failed.\n\nYou can start backend manually:\ndocker start $running_container" 8 70
-    else
-      _ui_msg "Restore Failed" "Restore failed." 5 40
-    fi
-  fi
-}
-
-# ---------------------------------------------------------------------------
-#  Volume: list contents
-# ---------------------------------------------------------------------------
-_volume_list() {
-  local volume_name choice data_out files_out
-
-  if ! _ensure_backend; then
-    return
-  fi
-
-  volume_name="$VOLUME_NAME"
-  _ui_loading "Volume Contents" "Reading volume directories..." 1
-  if ! data_out=$(docker run --rm -v "${volume_name}:${DATA_MOUNT_PATH}" alpine sh -ec "ls -la '$DATA_MOUNT_PATH'" 2>&1); then
-    _ui_scroll_msg "Volume Contents" "$data_out" 16 88
-    return
-  fi
-  files_out=$(docker run --rm -v "${volume_name}:${DATA_MOUNT_PATH}" alpine sh -ec "ls -la '$DATA_MOUNT_PATH/files' 2>/dev/null || echo '(none or missing files directory)'" 2>&1)
-
-  while true; do
-    if ! choice=$(_ui_menu "Volume Contents" "Volume: $volume_name\nSelect a section to view." 12 72 5 \
-      "data" "/data" \
-      "files" "/data/files (.qgif)" \
-      "back" "Back"); then
-      return
-    fi
-    [[ -z "$choice" || "$choice" == "back" ]] && return
-    case "$choice" in
-      data) _ui_scroll_msg "Volume Contents: /data" "$data_out" 22 90 ;;
-      files) _ui_scroll_msg "Volume Contents: /data/files" "$files_out" 22 90 ;;
-    esac
-  done
-}
-
-# ---------------------------------------------------------------------------
-#  Volume: open shell in temporary container with volume mounted
-# ---------------------------------------------------------------------------
-_volume_shell() {
-  local volume_name
-
-  if ! _ensure_backend; then
-    return
-  fi
-
-  volume_name="$VOLUME_NAME"
-  _ui_msg "Volume Shell" "Opening interactive shell.\n\nVolume is mounted at $DATA_MOUNT_PATH\nType 'exit' to return to qbit-ctl." 8 70
-
-  clear
-  local docker_tty
-  [[ -t 0 && -t 1 ]] && docker_tty="-it" || docker_tty="-i"
-  if ! docker run --rm $docker_tty -v "${volume_name}:${DATA_MOUNT_PATH}" alpine sh; then
-    _ui_msg "Volume Shell" "Shell exited with an error." 5 44
-  fi
-}
-
-# ---------------------------------------------------------------------------
-#  Volume: delete a backup file (local file only)
-# ---------------------------------------------------------------------------
-_volume_delete_backup() {
-  local backup_dir selected_archive
-  local selected_dir err_file rm_err dir_perm owner_info
-  local selected_size selected_mtime selected_base
-  local host_rc msg
-
-  backup_dir="$(_backup_dir)"
-  if ! _ensure_dir "$backup_dir" "Delete Backup"; then
-    return
-  fi
-  if ! _pick_backup_archive "$backup_dir" "Delete Backup File" "Select archive to permanently delete from disk."; then
-    return
-  fi
-  selected_archive="${PICKED_BACKUP_PATH:-}"
-  selected_archive="${selected_archive//$'\r'/}"
-  [[ -z "$selected_archive" ]] && return
-
-  if [[ ! -f "$selected_archive" ]]; then
-    _ui_msg "Delete Backup" "File not found:\n$selected_archive" 6 64
-    return
-  fi
-  selected_base="$(basename "$selected_archive")"
-  selected_size="$(_format_bytes "$(stat -c '%s' "$selected_archive" 2>/dev/null || echo "")")"
-  selected_mtime="$(stat -c '%y' "$selected_archive" 2>/dev/null | cut -d'.' -f1)"
-
-  if ! _ui_yesno "Confirm Delete" "Delete this backup file?\n\nRow: ${PICKED_BACKUP_ROW:-?}\nName: $selected_base\nSize: $selected_size\nModified: ${selected_mtime:-unknown}\n\nFull path:\n$selected_archive" 16 96 "Delete" "Cancel"; then
-    return
-  fi
-
-  _ui_loading "Delete Backup" "Deleting selected backup file..." 1
-  host_rc=0
-  err_file="$(mktemp)"
-
-  if ! rm -f -- "$selected_archive" 2>"$err_file"; then
-    host_rc=$?
-  fi
-  rm_err="$(cat "$err_file" 2>/dev/null || true)"
-  rm -f "$err_file"
-
-  if [[ ! -e "$selected_archive" ]]; then
-    _ui_msg "Delete Backup" "Delete result: success\n\nName: $selected_base\nRow: ${PICKED_BACKUP_ROW:-?}" 9 78
-    return
-  fi
-
-  if [[ "$host_rc" -eq 0 && -z "$rm_err" ]]; then
-    rm_err="host rm returned 0 but file still exists"
-  fi
-  selected_dir="$(dirname "$selected_archive")"
-  dir_perm="$(stat -c '%A %a' "$selected_dir" 2>/dev/null || echo '?')"
-  owner_info="$(stat -c '%U:%G' "$selected_archive" 2>/dev/null || echo '?')"
-  printf -v msg 'Delete result: failed\n\nName: %s\nRow: %s\nFile: %s\nOwner: %s\nDir perm: %s\nHost rm rc: %s\nExists after delete: yes\n\nHost rm error:\n%s' \
-    "$selected_base" "${PICKED_BACKUP_ROW:-?}" "$selected_archive" "$owner_info" "$dir_perm" "$host_rc" "${rm_err:-unknown error}"
-  _ui_scroll_msg "Delete Backup Failed" "$msg" 18 92
-}
+    tmp = CONFIG_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        cp.write(f)
+    os.replace(tmp, CONFIG_FILE)
 
 
-# ---------------------------------------------------------------------------
-#  DB: run sqlite3 (one-off container with volume mount)
-# ---------------------------------------------------------------------------
-_run_sqlite_script() {
-  local sql_file="$1"
+BACKUP_DIR, BACKUP_DIR_FROM = resolve_backup_dir()
 
-  docker run --rm -v "${VOLUME_NAME}:${DATA_MOUNT_PATH}" -v "${sql_file}:/q.sql:ro" alpine \
-    sh -ec "
-      if ! command -v sqlite3 >/dev/null 2>&1; then
-        apk add --no-cache sqlite >/dev/null 2>&1 || {
-          echo 'ERROR: Unable to install sqlite3 in helper container.'
-          echo 'Check network access for apk, or use an image with sqlite preinstalled.'
-          exit 1
+
+# --------------------------------------------------------------------------- docker layer
+
+# One helper script, run by node inside the backend image. Reads a JSON request on stdin and
+# writes one JSON object to stdout. better-sqlite3 resolves from /app/node_modules (the image's
+# WORKDIR), which is why every node call below runs with -w /app.
+NODE = r"""
+const fs = require('fs'), path = require('path');
+let input = '';
+process.stdin.on('data', d => input += d).on('end', async () => {
+  const req = JSON.parse(input || '{}');
+  const out = r => process.stdout.write(JSON.stringify(r));
+  try {
+    const Database = require('better-sqlite3');
+    const open = (file, ro) => { const db = new Database(file, { readonly: ro, fileMustExist: true, timeout: 5000 }); return db; };
+    if (req.op === 'query') {
+      const db = open(req.db, true);
+      const st = db.prepare(req.sql).raw(true);
+      out({ cols: st.columns().map(c => c.name), rows: st.all(...(req.params || [])) });
+    } else if (req.op === 'stats') {
+      const r = { tables: {}, files: { count: 0, bytes: 0 }, db: {} };
+      for (const f of ['qbit.db', 'qbit.db-wal', 'qbit.db-shm']) {
+        try { r.db[f] = fs.statSync(path.join(req.dir, f)).size; } catch (e) {}
+      }
+      try {
+        for (const f of fs.readdirSync(path.join(req.dir, 'files'))) {
+          const s = fs.statSync(path.join(req.dir, 'files', f));
+          if (s.isFile()) { r.files.count++; r.files.bytes += s.size; }
         }
-      fi
-      sqlite3 '${DB_PATH_IN_CONTAINER}' < /q.sql
-    " 2>&1
-}
-
-_db_exec() {
-  local sql="$1"
-  local tmp out status
-
-  tmp=$(mktemp)
-  printf '%s\n' "$sql" > "$tmp"
-
-  if out=$(_run_sqlite_script "$tmp"); then
-    status=0
-  else
-    status=$?
-  fi
-
-  rm -f "$tmp"
-  printf '%s' "$out"
-  return "$status"
-}
-
-# Display width for terminal: ASCII=1, other (e.g. CJK)=2.
-_cell_display_width() {
-  local s="$1" i=0 n=0 c codepoint
-  for (( i = 0; i < ${#s}; i++ )); do
-    c="${s:$i:1}"
-    codepoint=$(printf '%d' "'$c" 2>/dev/null)
-    [[ "${codepoint:-0}" -gt 127 ]] && n=$((n + 2)) || n=$((n + 1))
-  done
-  echo "$n"
-}
-
-# Pad or truncate cell to target display width (for column alignment with CJK).
-_pad_cell() {
-  local s="$1" target="${2:-16}" width i
-  s="${s//$'\n'/ }"
-  width=$(_cell_display_width "$s")
-
-  if [[ "$width" -gt "$target" ]]; then
-    while [[ "$width" -gt "$target" && ${#s} -gt 0 ]]; do
-      s="${s:0:-1}"
-      width=$(_cell_display_width "$s")
-    done
-    printf '%s' "$s"
-    return
-  fi
-
-  printf '%s' "$s"
-  for (( i = width; i < target; i++ )); do
-    printf ' '
-  done
-}
-
-# Run SQL with column-aligned output (tab mode + display-width truncate/pad, one line per row).
-_db_exec_column() {
-  local sql="$1"
-  local widths="${2:-20 24 22 24}"
-  local tmp raw line parts i j w
-  local -a width_arr
-
-  tmp=$(mktemp)
-  {
-    echo ".mode tab"
-    echo ".headers on"
-    echo "$sql"
-  } > "$tmp"
-
-  if ! raw=$(_run_sqlite_script "$tmp"); then
-    rm -f "$tmp"
-    printf '%s' "$raw"
-    return 1
-  fi
-  rm -f "$tmp"
-
-  for w in $widths; do
-    width_arr+=("$w")
-  done
-
-  local first=1
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    IFS=$'\t' read -r -a parts <<< "$line"
-
-    local out=""
-    for (( i = 0; i < ${#parts[@]}; i++ )); do
-      w=${width_arr[$i]:-16}
-      out+="$(_pad_cell "${parts[$i]}" "$w")"
-      [[ $i -lt $(( ${#parts[@]} - 1 )) ]] && out+=" "
-    done
-    printf '%s\n' "$out"
-
-    if [[ "$first" -eq 1 ]]; then
-      local sep=""
-      for (( i = 0; i < ${#parts[@]}; i++ )); do
-        w=${width_arr[$i]:-16}
-        for (( j = 0; j < w; j++ )); do
-          sep+="-"
-        done
-        [[ $i -lt $(( ${#parts[@]} - 1 )) ]] && sep+=" "
-      done
-      printf '%s\n' "$sep"
-      first=0
-    fi
-  done <<< "$raw"
-}
-
-# Escape single quote for SQL ('' in SQLite)
-_sql_escape() {
-  sed "s/'/''/g" <<< "$1"
-}
-
-# ---------------------------------------------------------------------------
-#  DB: view (predefined queries only)
-# ---------------------------------------------------------------------------
-_db_view_menu() {
-  local choice sql out col_widths query_title
-
-  while true; do
-    if ! choice=$(_ui_menu "DB Viewer" "Choose a read-only query:" 16 62 9 \
-      "users" "Users (latest lastSeen first)" \
-      "claims" "Device claims" \
-      "library" "Library items" \
-      "friends" "Friend pairs" \
-      "bans" "Bans" \
-      "sessions" "Active session count" \
-      "back" "Back"); then
-      return
-    fi
-
-    [[ -z "$choice" || "$choice" == "back" ]] && return
-
-    case "$choice" in
-      users)
-        query_title="Users"
-        sql="SELECT substr(userId,1,12) AS userId, substr(displayName,1,18) AS displayName, substr(email,1,28) AS email, substr(lastSeen,1,19) AS lastSeen FROM users ORDER BY lastSeen DESC;"
-        col_widths="12 18 28 19"
-        ;;
-      claims)
-        query_title="Claims"
-        sql="SELECT substr(deviceId,1,12) AS deviceId, substr(userId,1,12) AS userId, substr(userName,1,18) AS userName, substr(claimedAt,1,19) AS claimedAt FROM claims;"
-        col_widths="12 12 18 19"
-        ;;
-      library)
-        query_title="Library"
-        sql="SELECT substr(id,1,12) AS id, substr(filename,1,24) AS filename, substr(uploaderId,1,12) AS uploaderId, size, frameCount, substr(uploadedAt,1,19) AS uploadedAt FROM library ORDER BY uploadedAt DESC;"
-        col_widths="12 24 12 7 6 19"
-        ;;
-      friends)
-        query_title="Friends"
-        sql="SELECT substr(userId,1,12) AS userId, substr(friendId,1,12) AS friendId FROM friends ORDER BY userId;"
-        col_widths="12 12"
-        ;;
-      bans)
-        query_title="Bans"
-        sql="SELECT substr(type,1,10) AS type, substr(value,1,58) AS value FROM bans;"
-        col_widths="10 58"
-        ;;
-      sessions)
-        query_title="Active Sessions"
-        sql="SELECT COUNT(*) AS session_count FROM sessions WHERE expired > $(date +%s)000;"
-        col_widths=""
-        ;;
-      *)
-        continue
-        ;;
-    esac
-
-    _ui_loading "DB Viewer" "Running query: $query_title" 1
-    if [[ -n "$col_widths" ]]; then
-      if ! out=$(_db_exec_column "$sql" "$col_widths"); then
-        _ui_scroll_msg "Query Failed" "$out" 16 86
-        continue
-      fi
-    else
-      if ! out=$(_db_exec "$sql"); then
-        _ui_scroll_msg "Query Failed" "$out" 16 86
-        continue
-      fi
-    fi
-
-    [[ -z "$out" ]] && out="(no rows)"
-    [[ "$out" != "(no rows)" ]] && out="[Preview mode: long values are trimmed for readability]\n\n$out"
-    _ui_scroll_msg "Query Result: $query_title" "$out" 22 90
-  done
-}
-
-# ---------------------------------------------------------------------------
-#  Library: list and multi-delete (DB + files). Backend cache refreshes on restart.
-# ---------------------------------------------------------------------------
-_library_list() {
-  local raw line choice idx
-  local id fname uploader uploaded_at size frame_count download_count short_id
-  local header_cols
-  local -a menu_items=() row_lines=()
-
-  if ! _ensure_backend; then
-    return
-  fi
-
-  _ui_loading "Library Items" "Loading library list..." 1
-
-  if ! raw=$(_db_exec "SELECT id, filename, uploader, uploadedAt, size, frameCount, downloadCount FROM library ORDER BY uploadedAt DESC;"); then
-    _ui_scroll_msg "Library Items" "$raw" 16 88
-    return
-  fi
-
-  [[ -z "$raw" ]] && {
-    _ui_msg "Library Items" "No library items found." 5 44
-    return
+      } catch (e) {}
+      const db = open(req.db, true);
+      const names = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").pluck().all());
+      for (const t of req.tables) if (names.has(t)) r.tables[t] = db.prepare('SELECT COUNT(*) FROM "' + t + '"').pluck().get();
+      if (names.has('sessions')) r.sessions = db.prepare('SELECT COUNT(*) FROM sessions WHERE expired > ?').pluck().get(Date.now());
+      if (names.has('device_records')) r.online = db.prepare("SELECT COUNT(*) FROM device_records WHERE status = 'online'").pluck().get();
+      r.sqlite = db.prepare('SELECT sqlite_version()').pluck().get();
+      out(r);
+    } else if (req.op === 'check') {
+      const db = open(req.db, false);
+      out({ result: db.pragma('integrity_check', { simple: true }) });
+    } else if (req.op === 'snapshot') {
+      const db = open(req.db, true);
+      db.exec("VACUUM INTO '" + req.dest.replace(/'/g, "''") + "'");
+      db.close();
+      const chk = new Database(req.dest);
+      const result = chk.pragma('integrity_check', { simple: true });
+      chk.close();
+      out({ result });
+    } else if (req.op === 'delete-library') {
+      const db = open(req.db, false);
+      const ids = req.ids.filter(id => /^[A-Za-z0-9._-]+$/.test(id));
+      const tx = db.transaction(list => {
+        let n = 0;
+        for (const id of list) {
+          db.prepare('DELETE FROM library_stars WHERE libraryId = ?').run(id);
+          n += db.prepare('DELETE FROM library WHERE id = ?').run(id).changes;
+        }
+        return n;
+      });
+      const rows = tx(ids);
+      let files = 0;
+      for (const id of ids) {
+        try { fs.unlinkSync(path.join(req.dir, 'files', id + '.qgif')); files++; } catch (e) {}
+      }
+      out({ rows, files });
+    } else if (req.op === 'ls') {
+      const list = d => {
+        try {
+          return fs.readdirSync(d, { withFileTypes: true }).map(e => {
+            const s = fs.lstatSync(path.join(d, e.name));
+            return [e.name + (e.isDirectory() ? '/' : ''), e.isDirectory() ? null : s.size, Math.floor(s.mtimeMs / 1000)];
+          }).sort((a, b) => a[0].localeCompare(b[0]));
+        } catch (e) { return null; }
+      };
+      out({ data: list(req.dir), files: list(path.join(req.dir, 'files')) });
+    } else {
+      out({ error: 'unknown op ' + req.op });
+    }
+  } catch (e) {
+    out({ error: String(e && e.message || e) });
   }
+});
+"""
 
-  idx=0
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    IFS='|' read -r id fname uploader uploaded_at size frame_count download_count <<< "$line"
-    [[ -z "$id" ]] && continue
 
-    idx=$((idx + 1))
-    row_lines+=("$line")
-    short_id="${id:0:10}"
-    menu_items+=(
-      "$idx"
-      "$(printf '%-10s %-24s %-14s %8s %6s %6s' \
-        "$short_id" "${fname:0:24}" "${uploader:0:14}" "${size:-0}" "${frame_count:-0}" "${download_count:-0}")"
+class DockerError(Exception):
+    pass
+
+
+_seq = [0]
+
+
+def run_name():
+    """Unique name for a throwaway container, so a timed-out one can be removed."""
+    _seq[0] += 1
+    return "qbit-ctl-%d-%d" % (os.getpid(), _seq[0])
+
+
+def docker(*args, input=None, timeout=120, check=True):
+    name = args[args.index("--name") + 1] if args and args[0] == "run" and "--name" in args else None
+    try:
+        p = subprocess.run(["docker"] + list(args), input=input, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        raise DockerError("docker is not installed or not on PATH")
+    except subprocess.TimeoutExpired:
+        if name:  # killing the client does not stop the container; make sure it is gone
+            subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=60)
+        raise DockerError("docker %s timed out after %ds" % (args[0], timeout))
+    if check and p.returncode != 0:
+        msg = (p.stderr or p.stdout).strip().splitlines()
+        raise DockerError(msg[-1] if msg else "docker %s failed (exit %d)" % (args[0], p.returncode))
+    return p
+
+
+class Env:
+    """Where the backend lives: container, its image, the data volume. Re-read on every refresh."""
+
+    def __init__(self):
+        self.container = None
+        self.running = False
+        self.health = None
+        self.image = None
+        self.image_name = None
+        self.started = None
+        self.volume = None
+        self.error = None
+
+    def refresh(self):
+        self.__init__()
+        try:
+            for name in CONTAINERS:
+                p = docker("inspect", "--format", "{{json .}}", name, check=False, timeout=20)
+                if p.returncode == 0:
+                    info = json.loads(p.stdout)
+                    st = info.get("State", {})
+                    self.container = name
+                    self.running = bool(st.get("Running"))
+                    self.health = (st.get("Health") or {}).get("Status")
+                    self.image = info.get("Image")
+                    self.image_name = info.get("Config", {}).get("Image")
+                    self.started = _parse_time(st.get("StartedAt")) if self.running else None
+                    for m in info.get("Mounts", []):
+                        if m.get("Destination") == DATA and m.get("Type") == "volume":
+                            self.volume = m.get("Name")
+                    break
+            if not self.volume:
+                names = docker("volume", "ls", "-q", timeout=20).stdout.split()
+                self.volume = next((v for v in names if re.fullmatch(r"(.+_)?qbit-data", v)), None)
+            if not self.image:
+                self.image = E.get("QBIT_CTL_IMAGE") or None
+        except DockerError as e:
+            self.error = str(e)
+        return self
+
+    @property
+    def state(self):
+        if not self.container:
+            return "missing"
+        if not self.running:
+            return "stopped"
+        return self.health or "running"
+
+    def need(self, image=True):
+        if self.error:
+            raise DockerError(self.error)
+        if not self.volume:
+            raise DockerError("no QBIT data volume found (looked for *qbit-data)")
+        if image and not self.image:
+            raise DockerError("backend image unknown: no %s container (set QBIT_CTL_IMAGE)" % CONTAINERS[0])
+
+    # -- node helper ------------------------------------------------------------
+
+    def node(self, req, mounts=(), timeout=120, prefer_exec=True):
+        """Run the helper script. Uses the live backend when possible, else a throwaway container."""
+        self.need()
+        req = dict(req)
+        req.setdefault("dir", DATA)
+        req.setdefault("db", DB)
+        if prefer_exec and self.running and not mounts:
+            args = ["exec", "-i", "-w", "/app", self.container, "node", "-e", NODE]
+        else:
+            args = ["run", "--rm", "-i", "--name", run_name(), "--network", "none", "-w", "/app",
+                    "-v", "%s:%s" % (self.volume, DATA)]
+            for m in mounts:
+                args += ["-v", m]
+            args += ["--entrypoint", "node", self.image, "-e", NODE]
+        p = docker(*args, input=json.dumps(req), timeout=timeout, check=False)
+        try:
+            res = json.loads(p.stdout or "{}")
+        except ValueError:
+            res = {"error": (p.stderr or p.stdout).strip().splitlines()[-1:] or ["no output"]}
+            res["error"] = res["error"][0]
+        if p.returncode != 0 and "error" not in res:
+            res["error"] = (p.stderr or "").strip().splitlines()[-1:] or ["exit %d" % p.returncode]
+            res["error"] = res["error"][0] if isinstance(res["error"], list) else res["error"]
+        if "error" in res:
+            raise DockerError(res["error"])
+        return res
+
+    # -- operations ---------------------------------------------------------------
+
+    def query(self, sql, params=()):
+        return self.node({"op": "query", "sql": sql, "params": list(params)})
+
+    def stats(self):
+        return self.node({"op": "stats", "tables": [t for t, _ in COUNT_TABLES]})
+
+    def listing(self):
+        return self.node({"op": "ls"})
+
+    def delete_library(self, ids):
+        return self.node({"op": "delete-library", "ids": list(ids)}, prefer_exec=True)
+
+    def backup(self, directory, label=""):
+        """Consistent snapshot of the volume into directory; returns the archive path."""
+        self.need()
+        directory = os.path.abspath(os.path.expanduser(directory))
+        os.makedirs(directory, exist_ok=True)
+        if not os.access(directory, os.W_OK):
+            raise DockerError("backup directory is not writable: %s" % directory)
+        base = BACKUP_PREFIX + dt.datetime.now().strftime("%Y%m%d-%H%M%S") + (("-" + label) if label else "")
+        name, n = base + BACKUP_SUFFIX, 1
+        while os.path.exists(os.path.join(directory, name)):
+            n += 1
+            name = "%s-%d%s" % (base, n, BACKUP_SUFFIX)
+        req = json.dumps({"op": "snapshot", "db": DB, "dest": "/tmp/stage/qbit.db"})
+        # The database is snapshotted before files/ is copied: the backend writes a .qgif before
+        # inserting its row, so this order never archives a row whose file is missing.
+        script = (
+            "trap 'rm -f /backup/%(name)s.partial' EXIT\n"
+            "mkdir -p /tmp/stage\n"
+            "if [ -f %(data)s/qbit.db ]; then\n"
+            "  res=$(printf '%%s' '%(req)s' | node -e \"$NODE_HELPER\")\n"
+            "  case \"$res\" in *'\"result\":\"ok\"'*) ;; *) echo \"snapshot failed: $res\" >&2; exit 1;; esac\n"
+            "fi\n"
+            "(cd %(data)s && tar cf - --exclude=./qbit.db --exclude=./qbit.db-wal --exclude=./qbit.db-shm . ) | tar xf - -C /tmp/stage\n"
+            "rm -f /tmp/stage/qbit.db-wal /tmp/stage/qbit.db-shm\n"
+            "tar czf /backup/%(name)s.partial -C /tmp/stage .\n"
+            "chown %(uid)d:%(gid)d /backup/%(name)s.partial\n"
+            "mv /backup/%(name)s.partial /backup/%(name)s\n"
+        ) % {"data": DATA, "req": req, "name": name, "uid": os.getuid(), "gid": os.getgid()}
+        self._sh_node(script, ["%s:/backup" % directory])
+        return os.path.join(directory, name)
+
+    def _sh_node(self, script, mounts, timeout=900, volume=True):
+        self.need()
+        args = ["run", "--rm", "-i", "--name", run_name(), "--network", "none", "-w", "/app",
+                "-e", "NODE_HELPER=" + NODE]
+        if volume:
+            args += ["-v", "%s:%s" % (self.volume, DATA)]
+        for m in mounts:
+            args += ["-v", m]
+        args += ["--entrypoint", "sh", self.image, "-ec", script]
+        return docker(*args, timeout=timeout)
+
+    def verify_archive(self, archive):
+        """Extract into a scratch container and run integrity_check. Returns a short summary."""
+        d, base = os.path.split(os.path.abspath(archive))
+        req = json.dumps({"op": "check", "db": "/tmp/r/qbit.db"})
+        script = (
+            "mkdir -p /tmp/r\n"
+            "tar xzf '/backup/%(base)s' -C /tmp/r\n"
+            "test -f /tmp/r/qbit.db || { echo 'archive has no qbit.db' >&2; exit 1; }\n"
+            "res=$(printf '%%s' '%(req)s' | node -e \"$NODE_HELPER\")\n"
+            "case \"$res\" in *'\"result\":\"ok\"'*) ;; *) echo \"integrity check failed: $res\" >&2; exit 1;; esac\n"
+            "n=$(find /tmp/r/files -type f 2>/dev/null | wc -l)\n"
+            "echo \"ok $n\"\n"
+        ) % {"base": base.replace("'", ""), "req": req}
+        # no live volume in this container: a crafted archive cannot reach the production data
+        out = self._sh_node(script, ["%s:/backup:ro" % d], volume=False).stdout.strip().split()
+        return int(out[-1]) if out and out[-1].isdigit() else 0
+
+    def replace_volume(self, archive):
+        d, base = os.path.split(os.path.abspath(archive))
+        script = (
+            "find %(data)s -mindepth 1 -delete\n"
+            "tar xzf '/backup/%(base)s' -C %(data)s\n"
+        ) % {"data": DATA, "base": base.replace("'", "")}
+        self._sh_node(script, ["%s:/backup:ro" % d])
+
+    def stop(self):
+        docker("stop", self.container, timeout=120)
+
+    def _wait_healthy(self):
+        """Poll the health check (or plain running state) until it settles."""
+        fmt = "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}"
+        t0 = time.time()
+        while time.time() - t0 < HEALTH_WAIT:
+            s = docker("inspect", "--format", fmt, self.container, timeout=20).stdout.strip()
+            if s in ("healthy", "running"):
+                return s
+            if s in ("exited", "dead", "unhealthy"):
+                raise DockerError("backend is %s after start; check: docker logs %s" % (s, self.container))
+            time.sleep(1)
+        raise DockerError("backend not healthy after %ds; check: docker logs %s" % (HEALTH_WAIT, self.container))
+
+    def start(self):
+        docker("start", self.container, timeout=60)
+        return self._wait_healthy()
+
+    def restart(self):
+        docker("restart", self.container, timeout=120)
+        return self._wait_healthy()
+
+
+def _parse_time(s):
+    if not s or s.startswith("0001"):
+        return None
+    try:
+        return dt.datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def backups(directory=None):
+    """[(path, size, mtime)] newest first."""
+    directory = directory or BACKUP_DIR
+    out = []
+    try:
+        for name in os.listdir(directory):
+            if name.startswith(BACKUP_PREFIX) and name.endswith(BACKUP_SUFFIX):
+                p = os.path.join(directory, name)
+                try:
+                    s = os.stat(p)
+                except OSError:
+                    continue
+                out.append((p, s.st_size, s.st_mtime))
+    except OSError:
+        pass
+    return sorted(out, key=lambda r: r[2], reverse=True)
+
+
+# --------------------------------------------------------------------------- data views
+
+COUNT_TABLES = [("users", "Users"), ("device_records", "Devices"), ("claims", "Claims"),
+                ("library", "Library"), ("library_stars", "Stars"), ("friends", "Friend links"),
+                ("reports", "Reports"), ("bans", "Bans")]
+
+# (key, title, sql, column headers). Simulated devices (deviceId SIM…, tools/simulate-devices.py)
+# are left out of the firmware summary so it counts real hardware only.
+NOW_MS = "CAST(strftime('%s','now') AS INTEGER) * 1000"
+QUERIES = [
+    ("users", "Users", "SELECT userId, displayName, email, firstSeen, lastSeen FROM users ORDER BY lastSeen DESC",
+     ["User ID", "Name", "Email", "First seen", "Last seen"]),
+    ("devices", "Devices", "SELECT deviceId, name, version, status, lastSeen, ip, publicIp FROM device_records "
+     "ORDER BY lastSeen DESC", ["Device ID", "Name", "Firmware", "Status", "Last seen", "LAN IP", "Public IP"]),
+    ("firmware", "Firmware", "SELECT COALESCE(version, '-'), COUNT(*), SUM(status = 'online'), MAX(lastSeen) "
+     "FROM device_records WHERE deviceId NOT LIKE 'SIM%' GROUP BY version ORDER BY COUNT(*) DESC",
+     ["Version", "Devices", "Online", "Last seen"]),
+    ("claims", "Claims", "SELECT c.deviceId, d.name, c.userName, c.claimedAt FROM claims c "
+     "LEFT JOIN device_records d ON d.deviceId = c.deviceId ORDER BY c.claimedAt DESC",
+     ["Device ID", "Device", "Owner", "Claimed"]),
+    ("library", "Library", "SELECT filename, uploader, size, frameCount, downloadCount, uploadedAt, id FROM library "
+     "ORDER BY uploadedAt DESC", ["File", "Uploader", "Size", "Frames", "Downloads", "Uploaded", "ID"]),
+    ("top", "Top library", "SELECT l.filename, l.uploader, l.downloadCount, COUNT(s.userId), l.uploadedAt "
+     "FROM library l LEFT JOIN library_stars s ON s.libraryId = l.id GROUP BY l.id "
+     "ORDER BY l.downloadCount DESC, COUNT(s.userId) DESC LIMIT 100",
+     ["File", "Uploader", "Downloads", "Stars", "Uploaded"]),
+    ("friends", "Friends", "SELECT a.displayName, b.displayName, f.userId, f.friendId FROM friends f "
+     "LEFT JOIN users a ON a.userId = f.userId LEFT JOIN users b ON b.userId = f.friendId "
+     "WHERE f.userId < f.friendId ORDER BY a.displayName", ["User", "Friend", "User ID", "Friend ID"]),
+    ("privacy", "Privacy", "SELECT u.displayName, CASE s.onlyFriendsCanPoke WHEN 1 THEN 'yes' ELSE 'no' END, "
+     "CASE s.publicFriends WHEN 1 THEN 'yes' ELSE 'no' END, s.userId FROM user_settings s "
+     "LEFT JOIN users u ON u.userId = s.userId ORDER BY u.displayName",
+     ["User", "Friends-only pokes", "Public friends", "User ID"]),
+    ("sessions", "Sessions", "SELECT CASE WHEN expired > " + NOW_MS + " THEN 'active' ELSE 'expired' END AS state, "
+     "COUNT(*), strftime('%Y-%m-%dT%H:%M:%SZ', MIN(expired) / 1000, 'unixepoch'), "
+     "strftime('%Y-%m-%dT%H:%M:%SZ', MAX(expired) / 1000, 'unixepoch') FROM sessions GROUP BY state",
+     ["State", "Sessions", "First expiry", "Last expiry"]),
+    ("reports", "Reports", "SELECT createdAt, reporterName, reportedUserName, description FROM reports ORDER BY createdAt DESC",
+     ["Created", "Reporter", "Reported user", "Description"]),
+    ("bans", "Bans", "SELECT type, value FROM bans ORDER BY type, value", ["Type", "Value"]),
+]
+# Shown instead of "No rows." where an empty result has a specific meaning.
+EMPTY_HINT = {
+    "privacy": "No user has changed the privacy settings on the website. Everyone uses the defaults: "
+               "anyone can poke their QBIT, and their friend list is public on the graph.",
+    "reports": "No user reports.",
+    "bans": "No bans.",
+}
+
+
+# --------------------------------------------------------------------------- plain CLI output
+
+COLOR_OUT = sys.stdout.isatty() and not E.get("NO_COLOR")
+
+
+def sgr(code, text, on=None):
+    on = COLOR_OUT if on is None else on
+    return "\033[%sm%s\033[0m" % (code, text) if on else text
+
+
+def bold(t):
+    return sgr("1", t)
+
+
+def dim(t):
+    return sgr("38;5;245", t)
+
+
+def red(t):
+    return sgr("38;5;203", t)
+
+
+def green(t):
+    return sgr("38;5;114", t)
+
+
+def amber(t):
+    return sgr("38;5;179", t)
+
+
+def fail(msg, code=1):
+    sys.stderr.write("%s %s\n" % (sgr("1;38;5;203", "error:", COLOR_OUT and sys.stderr.isatty()), msg))
+    sys.exit(code)
+
+
+def state_text(env):
+    s = env.state
+    paint = green if s in ("healthy", "running") else amber if s in ("starting", "stopped") else red
+    return paint(s)
+
+
+def cmd_status(args):
+    env = Env().refresh()
+    if env.error:
+        fail(env.error)
+    rows = [("Backend", "%s  %s" % (env.container or "-", state_text(env))),
+            ("Image", ("%s  %s" % (env.image_name, dim((env.image or "")[7:19]))) if env.image_name else "-"),
+            ("Volume", env.volume or red("not found"))]
+    if env.started:
+        rows.append(("Up since", "%s  %s" % (stamp(env.started), dim(ago(env.started)))))
+    st = None
+    if env.volume and env.image:
+        try:
+            st = env.stats()
+        except DockerError as e:
+            rows.append(("Database", red(str(e))))
+    if st:
+        rows.append(("Database", "%s  %s" % (human(st["db"].get("qbit.db")),
+                                              dim("WAL %s · SQLite %s" % (human(st["db"].get("qbit.db-wal", 0)), st.get("sqlite"))))))
+        rows.append(("Files", "%d .qgif  %s" % (st["files"]["count"], dim(human(st["files"]["bytes"])))))
+    b = backups(args.dir)
+    rows.append(("Backup dir", "%s  %s" % (tilde(args.dir), dim("from " + args.dir_from))))
+    rows.append(("Latest backup", ("%s  %s" % (os.path.basename(b[0][0]), dim(ago(b[0][2])))) if b else amber("none in " + args.dir)))
+    w = max(len(k) for k, _ in rows) + 2
+    print(bold(PROG) + "  " + dim("v%s  ·  QBIT data control" % VERSION))
+    print()
+    for k, v in rows:
+        print("  " + dim(k.ljust(w)) + v)
+    if st:
+        print()
+        line = []
+        for t, label in COUNT_TABLES:
+            if t in st["tables"]:
+                line.append("%s %s" % (bold(str(st["tables"][t])), dim(label.lower())))
+        if "sessions" in st:
+            line.append("%s %s" % (bold(str(st["sessions"])), dim("active sessions")))
+        print("  " + dim(" · ").join(line))
+    return 0 if env.volume else 1
+
+
+def cmd_backup(args):
+    env = Env().refresh()
+    try:
+        env.need()
+        sys.stderr.write(dim("Creating snapshot of %s …\n" % env.volume))
+        path = env.backup(args.dir)
+    except DockerError as e:
+        fail(str(e))
+    print(path)
+    sys.stderr.write("%s %s  %s\n" % (green("✓"), "Backup created", dim(human(os.path.getsize(path)))))
+    return 0
+
+
+def cmd_backups(args):
+    rows = backups(args.dir)
+    if not rows:
+        print(dim("No backups in %s" % args.dir))
+        return 0
+    for p, size, mt in rows:
+        print("%s  %s  %s" % (pad(os.path.basename(p), 44), pad(human(size), 9, True), dim(stamp(mt) + "  " + ago(mt))))
+    return 0
+
+
+# --------------------------------------------------------------------------- console (curses)
+
+MIN_W, MIN_H = 72, 20
+SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+STATUS_HOLD = 8.0
+RESET = object()  # prompt() result for "reset to default"
+TABS = [("overview", "Overview"), ("backups", "Backups"), ("database", "Database"),
+        ("library", "Library"), ("volume", "Volume")]
+
+# QBIT web palette (web/frontend/src/App.css) mapped to xterm-256:
+#   --red-light #ff4d4d → 203   --red #d32f2f → 160   --text-muted #888 → 245
+#   --border #333 → 237          --text-secondary #e0e0e0 → 254
+PALETTE = {"accent": (203, curses.COLOR_RED), "deep": (160, curses.COLOR_RED), "dim": (245, -1),
+           "rule": (237, -1), "text": (254, -1), "ok": (114, curses.COLOR_GREEN),
+           "warn": (179, curses.COLOR_YELLOW), "err": (203, curses.COLOR_RED)}
+
+
+def colours():
+    C = {"norm": curses.A_NORMAL, "bold": curses.A_BOLD}
+    plain = bool(E.get("NO_COLOR")) or not curses.has_colors()
+    if not plain:
+        try:
+            curses.use_default_colors()
+        except curses.error:
+            pass
+    rich = not plain and curses.COLORS >= 256
+    n = 1
+    for k, (c256, c8) in PALETTE.items():
+        attr = curses.A_DIM if k in ("dim", "rule") else curses.A_NORMAL
+        if not plain and (rich or c8 >= 0):
+            try:
+                curses.init_pair(n, c256 if rich else c8, -1)
+                attr = curses.color_pair(n)
+            except (curses.error, ValueError):
+                pass
+            n += 1
+        C[k] = attr
+    # inverse chips: dark text on a coloured background
+    # chip: white on --red (#d32f2f → 160), like the site's buttons
+    for k, (c256, c8) in (("chip", (160, curses.COLOR_RED)), ("chipok", (114, curses.COLOR_GREEN)),
+                          ("chipwarn", (179, curses.COLOR_YELLOW)), ("sel", (237, curses.COLOR_WHITE))):
+        attr = curses.A_REVERSE
+        if not plain:
+            try:
+                fg = (255 if k in ("chip", "sel") else 16) if rich else (
+                    curses.COLOR_WHITE if k == "chip" else curses.COLOR_BLACK)
+                curses.init_pair(n, fg, c256 if rich else c8)
+                attr = curses.color_pair(n)
+            except (curses.error, ValueError):
+                pass
+            n += 1
+        C[k] = attr
+    return C
+
+
+def put(win, y, x, s, attr=0, maxw=None):
+    h, w = win.getmaxyx()
+    if y < 0 or y >= h or x >= w - 1 or x < 0:
+        return 0
+    room = w - x - 1 if maxw is None else min(maxw, w - x - 1)
+    s = clip(s, room)
+    try:
+        win.addstr(y, x, s, attr)
+    except curses.error:
+        pass
+    return dw(s)
+
+
+def segs(win, y, x, parts, maxw=None):
+    """Write [(text, attr)] left to right; returns the end column."""
+    end = x + (maxw if maxw is not None else 10 ** 6)
+    for t, a in parts:
+        if x >= end:
+            break
+        x += put(win, y, x, t, a, end - x)
+    return x
+
+
+def seg_width(parts):
+    return sum(dw(t) for t, _ in parts)
+
+
+def box(win, y, x, h, w, C, title="", right=None, focus=True):
+    b = C["dim"] if focus else C["rule"]
+    if h < 2 or w < 4:
+        return
+    put(win, y, x, "╭" + "─" * (w - 2) + "╮", b)
+    for i in range(1, h - 1):
+        put(win, y + i, x, "│", b)
+        put(win, y + i, x + w - 1, "│", b)
+    put(win, y + h - 1, x, "╰" + "─" * (w - 2) + "╯", b)
+    if title:
+        segs(win, y, x + 2, [(" ", b), (title, C["bold"] if focus else C["dim"]), (" ", b)], w - 4)
+    if right:
+        rw = seg_width(right) + 2
+        if rw < w - 6 - dw(title):
+            segs(win, y, x + w - 2 - rw, [(" ", b)] + right + [(" ", b)])
+
+
+_CSI = {"A": curses.KEY_UP, "B": curses.KEY_DOWN, "C": curses.KEY_RIGHT, "D": curses.KEY_LEFT,
+        "H": curses.KEY_HOME, "F": curses.KEY_END, "Z": curses.KEY_BTAB}
+_TILDE = {"1": curses.KEY_HOME, "7": curses.KEY_HOME, "4": curses.KEY_END, "8": curses.KEY_END,
+          "5": curses.KEY_PPAGE, "6": curses.KEY_NPAGE, "3": curses.KEY_DC}
+
+
+def getkey(scr, wait=-1):
+    """One key as an int (curses.KEY_* or a code point); -1 when wait (ms) runs out.
+
+    keypad() only decodes the sequences terminfo lists (ESC O B for xterm), while tmux and many
+    ssh clients send ESC [ B. Decode both here so arrows never arrive as a bare Esc (= quit)."""
+    scr.timeout(wait)
+    try:
+        k = scr.get_wch()
+    except curses.error:
+        return -1
+    k = ord(k) if isinstance(k, str) else k
+    if k != 27:
+        return k
+    scr.timeout(30)
+    seq = ""
+    try:
+        while len(seq) < 6:
+            try:
+                c = scr.get_wch()
+            except curses.error:
+                break
+            if not isinstance(c, str):
+                break
+            seq += c
+            if seq[0] not in "[O" or (len(seq) > 1 and (c.isalpha() or c == "~")):
+                break
+    finally:
+        scr.timeout(wait)
+    if not seq:
+        return 27
+    if seq[0] in "[O" and seq[-1] in _CSI:
+        return _CSI[seq[-1]]
+    if seq[0] == "[" and seq.endswith("~") and seq[1:-1] in _TILDE:
+        return _TILDE[seq[1:-1]]
+    return -1  # unknown sequence: ignore rather than treat as Esc
+
+
+class Table:
+    """A scrollable, optionally multi-select table with display-width aware columns."""
+
+    def __init__(self, cols, rows, aligns=None, keys=None):
+        self.cols = cols
+        self.rows = rows
+        self.aligns = aligns or [False] * len(cols)
+        self.keys = keys
+        self.cur = 0
+        self.top = 0
+        self.marked = set()
+
+    def widths(self, room):
+        sample = self.rows[:500]
+        natural = [max([dw(c)] + [dw(cell(r[i])) for r in sample]) for i, c in enumerate(self.cols)]
+        gap = 2 * (len(self.cols) - 1)
+        if sum(natural) + gap <= room:
+            return natural  # everything fits: never truncate
+        # too wide: cap outliers (long descriptions, emails) first, then shrink the widest
+        # columns, never below the header or 6 columns
+        ws = [min(n, 48) for n in natural]
+        while sum(ws) + gap > room:
+            i = max(range(len(ws)), key=lambda k: ws[k] - max(6, min(dw(self.cols[k]), 12)))
+            floor = max(6, min(dw(self.cols[i]), 12))
+            if ws[i] <= floor:
+                break
+            ws[i] -= 1
+        spare = room - gap - sum(ws)
+        for i in sorted(range(len(ws)), key=lambda k: natural[k] - ws[k], reverse=True):
+            if spare <= 0:
+                break
+            give = min(spare, natural[i] - ws[i])
+            ws[i] += give
+            spare -= give
+        return ws
+
+    def move(self, d, page=1):
+        if not self.rows:
+            return
+        self.cur = max(0, min(len(self.rows) - 1, self.cur + d))
+
+    def draw(self, win, y, x, h, w, C, multi=False, focus=True):
+        if not self.rows:
+            put(win, y + 1, x + 2, "No rows.", C["dim"])
+            return
+        lead = 6 if multi else 2
+        ws = self.widths(w - lead)
+        hdr = [("  " if not multi else "      ", 0)]
+        for i, c in enumerate(self.cols):
+            hdr.append((pad(c, ws[i], self.aligns[i]) + ("  " if i < len(ws) - 1 else ""), C["dim"] | curses.A_BOLD))
+        segs(win, y, x, hdr, w)
+        body = h - 1
+        if self.cur < self.top:
+            self.top = self.cur
+        elif self.cur >= self.top + body:
+            self.top = self.cur - body + 1
+        for j, r in enumerate(self.rows[self.top:self.top + body]):
+            i = self.top + j
+            on = i == self.cur and focus
+            base = C["sel"] if on else C["norm"]
+            line = [("▌ " if on else "  ", C["accent"] if on else 0)]
+            if multi:
+                on_mark = i in self.marked
+                line.append(("[x] " if on_mark else "[ ] ", (C["accent"] | curses.A_BOLD) if on_mark else C["dim"]))
+            for k, v in enumerate(r):
+                a = base
+                if v is None and not on:
+                    a = C["rule"]
+                line.append((pad(cell(v), ws[k], self.aligns[k]) + ("  " if k < len(ws) - 1 else ""), a))
+            end = segs(win, y + 1 + j, x, line, w)
+            if on and end < x + w:
+                put(win, y + 1 + j, end, " " * (x + w - end), base)
+        if len(self.rows) > body:
+            pos = "%d/%d" % (self.cur + 1, len(self.rows))
+            put(win, y + h, x + w - dw(pos) - 1, pos, C["dim"])
+
+
+class Job:
+    """Run fn in a thread; the UI keeps drawing a spinner until it is done."""
+
+    def __init__(self, title, fn):
+        self.title = title
+        self.note = ""
+        self.result = None
+        self.error = None
+        self.done = False
+        self.t0 = time.time()
+
+        def run():
+            try:
+                self.result = fn(self)
+            except Exception as e:  # noqa: BLE001 - shown to the operator verbatim
+                self.error = str(e) or e.__class__.__name__
+            self.done = True
+
+        threading.Thread(target=run, daemon=True).start()
+
+
+class App:
+    def __init__(self, scr):
+        self.scr = scr
+        self.C = colours()
+        self.env = Env()
+        self.tab = 0
+        self.status = ("", 0, 0.0)
+        self.stats = None
+        self.stats_err = None
+        self.backups = []
+        self.backup_tbl = Table(["Archive", "Size", "Created", "Age"], [], [False, True, False, False])
+        self.query_idx = 0
+        self.query_focus = False
+        self.query_tbl = None
+        self.query_err = None
+        self.lib_tbl = None
+        self.lib_err = None
+        self.ls = None
+        self.ls_err = None
+        self.vol_tbl = None
+        self.loaded = set()
+
+    # -- status line --------------------------------------------------------------
+
+    def say(self, msg, kind="ok"):
+        self.status = (msg, kind, time.time())
+
+    # -- data loading ---------------------------------------------------------------
+
+    def refresh(self, what=None):
+        self.env.refresh()
+        what = what or TABS[self.tab][0]
+        if what in ("overview", "all"):
+            self.stats, self.stats_err = None, None
+            try:
+                self.stats = self.env.stats()
+            except DockerError as e:
+                self.stats_err = str(e)
+        if what in ("overview", "backups", "all"):
+            self.backups = backups()
+            self.backup_tbl.rows = [[os.path.basename(p), human(s), stamp(m), ago(m)] for p, s, m in self.backups]
+            self.backup_tbl.cur = min(self.backup_tbl.cur, max(0, len(self.backups) - 1))
+        if what == "database":
+            self.run_query()
+        if what == "library":
+            self.lib_err = None
+            try:
+                r = self.env.query("SELECT filename, uploader, size, frameCount, downloadCount, uploadedAt, id "
+                                   "FROM library ORDER BY uploadedAt DESC")
+                self.lib_tbl = Table(["File", "Uploader", "Size", "Frames", "Downloads", "Uploaded", "ID"],
+                                     [[a, b, human(c), d, e, f, g] for a, b, c, d, e, f, g in r["rows"]],
+                                     [False, False, True, True, True, False, False])
+            except DockerError as e:
+                self.lib_err, self.lib_tbl = str(e), None
+        if what == "volume":
+            self.ls_err = None
+            try:
+                self.ls = self.env.listing()
+                rows = [["/data/" + n, human(s) if s is not None else "", stamp(m)] for n, s, m in (self.ls.get("data") or [])]
+                files = self.ls.get("files") or []
+                rows += [["/data/files/" + n, human(s) if s is not None else "", stamp(m)] for n, s, m in files[:2000]]
+                self.vol_tbl = Table(["Path", "Size", "Modified"], rows, [False, True, False])
+            except DockerError as e:
+                self.ls_err, self.vol_tbl = str(e), None
+        self.loaded.add(what)
+
+    def run_query(self):
+        key, title, sql, cols = QUERIES[self.query_idx]
+        self.query_err = None
+        try:
+            r = self.env.query(sql)
+            rows = r["rows"]
+            if key == "library":
+                rows = [[a, b, human(c), d, e, f, g] for a, b, c, d, e, f, g in rows]
+            aligns = [isinstance(v, (int, float)) for v in (rows[0] if rows else [])] or None
+            if key == "library":
+                aligns = [False, False, True, True, True, False, False]
+            self.query_tbl = Table(cols, rows, aligns)
+        except DockerError as e:
+            self.query_err, self.query_tbl = str(e), None
+
+    def busy(self, title, fn, replay=False, protect=False):
+        """Run fn in a Job with a spinner modal; returns (result, error).
+
+        replay: keys typed meanwhile are replayed afterwards (loads only; for actions they could
+        answer the next dialog, so they are discarded). protect: ignore Ctrl-C, SIGHUP and SIGTERM
+        until the job ends, so a dropped ssh session cannot stop a restore halfway. Ignored signals
+        stay ignored in the docker clients started meanwhile, which keeps their containers running."""
+        saved = {}
+        if protect:
+            for sig in (signal.SIGINT, signal.SIGHUP, signal.SIGTERM):
+                saved[sig] = signal.signal(sig, signal.SIG_IGN)
+        job = Job(title, fn)
+        typed = []
+        while not job.done:
+            self.draw()
+            el = time.time() - job.t0
+            if el > 0.3:  # quick loads finish without a flash of the dialog
+                lines = [[(SPIN[int(el * 10) % len(SPIN)] + " ", self.C["accent"]),
+                          (job.note or "Working", self.C["norm"]), ("  %ds" % el, self.C["dim"])]]
+                self.modal(title, lines, width=60)
+            curses.doupdate()
+            k = getkey(self.scr, 100)
+            if k not in (-1, curses.KEY_RESIZE) and len(typed) < 8:
+                typed.append(k)
+        for sig, handler in saved.items():
+            signal.signal(sig, handler)
+        if replay:
+            for k in reversed(typed):
+                curses.ungetch(k)
+        else:
+            curses.flushinp()
+        return job.result, job.error
+
+    # -- drawing ----------------------------------------------------------------------
+
+    def frame(self):
+        h, w = self.scr.getmaxyx()
+        return h, w, w  # full width, like k9s / lazydocker
+
+    def draw(self):
+        C, scr = self.C, self.scr
+        scr.erase()
+        h, w, width = self.frame()
+        if h < MIN_H or w < MIN_W:
+            put(scr, h // 2 - 1, 2, "Terminal too small: need %d×%d, have %d×%d" % (MIN_W, MIN_H, w, h), C["warn"])
+            put(scr, h // 2, 2, "Enlarge the window, or press q to quit.", C["dim"])
+            scr.noutrefresh()
+            return
+        env = self.env
+        # one blank row above the header when there is room (< 24 rows: give it to the body)
+        t0 = 1 if h >= 24 else 0
+        # name + state chip on the right
+        segs(scr, t0, 2, [(PROG, C["bold"]), ("  v" + VERSION + "  ·  QBIT data control", C["dim"])])
+        st = env.state
+        chip = {"healthy": "chipok", "running": "chipok", "starting": "chipwarn", "stopped": "chipwarn"}.get(st, "chip")
+        label = " %s " % ("backend " + st)
+        put(scr, t0, width - dw(label) - 2, label, C[chip] | curses.A_BOLD)
+        # facts joined with ·
+        facts = [env.container or "no backend container", env.volume or "no volume"]
+        if env.image_name:
+            facts.append(env.image_name + (" @" + env.image[7:19] if env.image else ""))
+        if env.started:
+            facts.append("up " + ago(env.started).replace(" ago", ""))
+        put(scr, t0 + 1, 2, "  ·  ".join(facts), C["dim"], width - 4)
+        # tabs
+        x = 2
+        for i, (_, name) in enumerate(TABS):
+            t = " %d %s " % (i + 1, name)
+            if i == self.tab:
+                put(scr, t0 + 3, x, t, C["chip"] | curses.A_BOLD)
+            else:
+                segs(scr, t0 + 3, x, [(" %d " % (i + 1), C["dim"]), (name + " ", C["norm"])])
+            x += dw(t) + 1
+        put(scr, t0 + 4, 1, "─" * (width - 2), C["rule"])
+        # body
+        top, bottom = t0 + 5, h - 3
+        getattr(self, "draw_" + TABS[self.tab][0])(top, 1, bottom - top, width - 2)
+        # footer: keys + status
+        put(scr, h - 3, 1, "─" * (width - 2), C["rule"])
+        keys = self.keys()
+        line = []
+        for i, (k, d) in enumerate(keys):
+            if i:
+                line.append(("   ", 0))
+            line += [(k, C["accent"] | curses.A_BOLD), (" " + d, C["dim"])]
+        segs(scr, h - 2, 2, line, width - 4)
+        msg, kind, t = self.status
+        if msg and time.time() - t < STATUS_HOLD:
+            put(scr, h - 1, 2, msg, {"ok": C["ok"], "warn": C["warn"], "err": C["err"]}[kind], width - 4)
+        scr.noutrefresh()
+
+    def keys(self):
+        name = TABS[self.tab][0]
+        common = [("R", "refresh"), ("?", "help"), ("q", "quit")]
+        per = {
+            "overview": [("b", "backup now"), ("s", "restart backend")],
+            "backups": [("↑↓", "select"), ("b", "new"), ("⏎", "restore"), ("d", "delete"), ("c", "directory")],
+            "database": [("↑↓", "query" if not self.query_focus else "rows"), ("⏎", "open" if not self.query_focus else "back")],
+            "library": [("↑↓", "select"), ("space", "mark"), ("a", "all"), ("d", "delete marked")],
+            "volume": [("↑↓", "scroll"), ("o", "open shell")],
+        }[name]
+        return per + common
+
+    def draw_overview(self, y, x, h, w):
+        C, scr, env = self.C, self.scr, self.env
+        lw = (w - 1) // 2
+        rw = w - lw - 1
+        box(scr, y, x, h, lw, C, "Backend")
+        rows = [("Container", env.container or "-"),
+                ("State", None),
+                ("Image", env.image_name or "-"),
+                ("Image ID", (env.image or "-")[7:19] if env.image else "-"),
+                ("Volume", env.volume or "not found"),
+                ("Up since", (stamp(env.started) + "  " + ago(env.started)) if env.started else "-")]
+        for i, (k, v) in enumerate(rows):
+            yy = y + 1 + i
+            put(scr, yy, x + 2, pad(k, 12), C["dim"])
+            if v is None:
+                st = env.state
+                a = C["ok"] if st in ("healthy", "running") else C["warn"] if st in ("starting", "stopped") else C["err"]
+                put(scr, yy, x + 14, "● " + st, a | curses.A_BOLD)
+            else:
+                put(scr, yy, x + 14, v, C["norm"], lw - 16)
+        yy = y + 2 + len(rows)
+        put(scr, yy, x + 2, "Latest backup", C["bold"])
+        if self.backups:
+            p, s, m = self.backups[0]
+            stale = time.time() - m > 7 * 86400
+            put(scr, yy + 1, x + 2, os.path.basename(p), C["norm"], lw - 4)
+            put(scr, yy + 2, x + 2, "%s · %s" % (human(s), ago(m)), C["warn"] if stale else C["dim"], lw - 4)
+            if stale:
+                put(scr, yy + 3, x + 2, "Older than 7 days. Press b to back up now.", C["warn"], lw - 4)
+        else:
+            put(scr, yy + 1, x + 2, "None in " + tilde(BACKUP_DIR), C["warn"], lw - 4)
+        yy += 5
+        if yy + 3 < y + h - 1:
+            put(scr, yy, x + 2, "Backups", C["bold"])
+            total = sum(s for _, s, _ in self.backups)
+            for i, (k, v) in enumerate((("Directory", tilde(BACKUP_DIR)), ("Set by", BACKUP_DIR_FROM),
+                                        ("Archives", str(len(self.backups))),
+                                        ("Total size", human(total)))):
+                put(scr, yy + 1 + i, x + 2, pad(k, 12), C["dim"])
+                put(scr, yy + 1 + i, x + 14, v, C["norm"], lw - 16)
+        if env.error:
+            put(scr, y + h - 2, x + 2, env.error, C["err"], lw - 4)
+
+        rx = x + lw + 1
+        box(scr, y, rx, h, rw, C, "Data")
+        if self.stats_err:
+            put(scr, y + 1, rx + 2, self.stats_err, C["err"], rw - 4)
+            return
+        st = self.stats
+        if not st:
+            put(scr, y + 1, rx + 2, "Loading…", C["dim"])
+            return
+        lines = [("Database", "%s" % human(st["db"].get("qbit.db"))),
+                 ("WAL", human(st["db"].get("qbit.db-wal", 0))),
+                 ("SQLite", st.get("sqlite", "-")),
+                 ("Files", "%d .qgif · %s" % (st["files"]["count"], human(st["files"]["bytes"])))]
+        for i, (k, v) in enumerate(lines):
+            put(scr, y + 1 + i, rx + 2, pad(k, 16), C["dim"])
+            put(scr, y + 1 + i, rx + 18, v, C["norm"], rw - 20)
+        yy = y + 2 + len(lines)
+        put(scr, yy, rx + 2, "Records", C["bold"])
+        items = [(label, st["tables"].get(t)) for t, label in COUNT_TABLES if t in st["tables"]]
+        if "online" in st:
+            items.insert(2, ("Devices online", st["online"]))
+        if "sessions" in st:
+            items.append(("Active sessions", st["sessions"]))
+        for i, (k, v) in enumerate(items):
+            if yy + 1 + i >= y + h - 1:
+                break
+            put(scr, yy + 1 + i, rx + 2, pad(k, 16), C["dim"])
+            put(scr, yy + 1 + i, rx + 18, pad(str(v), 8, True), C["norm"] | curses.A_BOLD)
+
+    def draw_backups(self, y, x, h, w):
+        C = self.C
+        total = sum(s for _, s, _ in self.backups)
+        right = [("%s · %s" % (plural(len(self.backups), "archive"), human(total)), C["dim"])]
+        box(self.scr, y, x, h, w, C, "Backups  " + tilde(BACKUP_DIR), right)
+        if not self.backups:
+            put(self.scr, y + 2, x + 3, "No archives yet. Press b to create one.", C["dim"])
+            return
+        self.backup_tbl.draw(self.scr, y + 1, x + 1, h - 3, w - 3, C)
+
+    def draw_database(self, y, x, h, w):
+        C, scr = self.C, self.scr
+        lw = 19
+        box(scr, y, x, h, lw, C, "Queries", focus=not self.query_focus)
+        room = h - 2
+        first = min(max(0, self.query_idx - room + 1), max(0, len(QUERIES) - room))
+        for j, (_, title, _, _) in enumerate(QUERIES[first:first + room]):
+            on = first + j == self.query_idx
+            a = (C["chip"] if not self.query_focus else C["sel"]) if on else C["norm"]
+            put(scr, y + 1 + j, x + 2, pad(" " + title, lw - 4), a)
+        tx = x + lw + 1
+        tw = w - lw - 1
+        key, title, sql, cols = QUERIES[self.query_idx]
+        n = len(self.query_tbl.rows) if self.query_tbl else 0
+        box(scr, y, tx, h, tw, C, title, [(plural(n, "row"), C["dim"])] if self.query_tbl else None, focus=self.query_focus)
+        if self.query_err:
+            put(scr, y + 1, tx + 2, self.query_err, C["err"], tw - 4)
+        elif self.query_tbl and not self.query_tbl.rows and key in EMPTY_HINT:
+            for i, ln in enumerate(self.wrap(EMPTY_HINT[key], min(tw - 6, 90), C["dim"])):
+                segs(scr, y + 2 + i, tx + 3, ln, tw - 6)
+        elif self.query_tbl:
+            self.query_tbl.draw(scr, y + 1, tx + 1, h - 3, tw - 3, C, focus=self.query_focus)
+
+    def draw_library(self, y, x, h, w):
+        C = self.C
+        t = self.lib_tbl
+        right = None
+        if t:
+            right = [(plural(len(t.rows), "item"), C["dim"])]
+            if t.marked:
+                right = [("%d marked" % len(t.marked), C["accent"] | curses.A_BOLD), (" · ", C["dim"])] + right
+        box(self.scr, y, x, h, w, C, "Library", right)
+        if self.lib_err:
+            put(self.scr, y + 1, x + 2, self.lib_err, C["err"], w - 4)
+        elif t:
+            t.draw(self.scr, y + 1, x + 1, h - 3, w - 3, C, multi=True)
+
+    def draw_volume(self, y, x, h, w):
+        C = self.C
+        n = len((self.ls or {}).get("files") or [])
+        box(self.scr, y, x, h, w, C, "Volume  " + (self.env.volume or ""), [("%d files in /data/files" % n, C["dim"])] if self.ls else None)
+        if self.ls_err:
+            put(self.scr, y + 1, x + 2, self.ls_err, C["err"], w - 4)
+        elif self.vol_tbl:
+            self.vol_tbl.draw(self.scr, y + 1, x + 1, h - 3, w - 3, C)
+
+    # -- modals -----------------------------------------------------------------------------
+
+    def modal(self, title, lines, width=64, buttons=None, sel=0, tone="accent"):
+        """Centered box over the current frame. lines: [[(text, attr)]]."""
+        C, scr = self.C, self.scr
+        h, w = scr.getmaxyx()
+        width = max(30, min(width, w - 4))
+        room = max(1, h - 2 - 4 - (2 if buttons else 0))
+        if len(lines) > room:
+            lines = lines[:room - 1] + [[("… enlarge the terminal to see the rest", C["dim"])]]
+        height = len(lines) + 4 + (2 if buttons else 0)
+        y0 = max(0, (h - height) // 2)
+        x0 = max(0, (w - width) // 2)
+        for yy in range(y0, min(h, y0 + height)):
+            put(scr, yy, x0, " " * width)
+        b = C[tone] if tone in C else C["dim"]
+        put(scr, y0, x0, "╭" + "─" * (width - 2) + "╮", b)
+        for yy in range(y0 + 1, y0 + height - 1):
+            put(scr, yy, x0, "│", b)
+            put(scr, yy, x0 + width - 1, "│", b)
+        put(scr, y0 + height - 1, x0, "╰" + "─" * (width - 2) + "╯", b)
+        segs(scr, y0, x0 + 2, [(" ", b), (title, C["bold"]), (" ", b)], width - 4)
+        for i, ln in enumerate(lines):
+            segs(scr, y0 + 2 + i, x0 + 3, ln, width - 6)
+        if buttons:
+            bx = x0 + width - 3
+            for i in reversed(range(len(buttons))):
+                t = " %s " % buttons[i]
+                bx -= dw(t)
+                a = (C["chip"] if tone == "accent" else C["chipwarn"]) | curses.A_BOLD if i == sel else C["dim"]
+                put(scr, y0 + height - 3, bx, t, a)
+                bx -= 2
+
+    def wrap(self, text, width, attr=None):
+        attr = self.C["norm"] if attr is None else attr
+        out = []
+        for para in text.split("\n"):
+            line = ""
+            for word in para.split(" "):
+                if line and dw(line) + 1 + dw(word) > width:
+                    out.append([(line, attr)])
+                    line = word
+                else:
+                    line = (line + " " + word) if line else word
+            out.append([(line, attr)])
+        return out
+
+    def ask(self, title, text, buttons=("Cancel", "OK"), default=0, tone="accent", width=66, extra=None):
+        """Button dialog; returns the chosen label, or None on Esc."""
+        sel = default
+        lines = self.wrap(text, width - 6) + (extra or [])
+        while True:
+            self.draw()
+            self.modal(title, lines, width, list(buttons), sel, tone)
+            curses.doupdate()
+            k = getkey(self.scr)
+            if k in (curses.KEY_LEFT, curses.KEY_BTAB, ord("h")):
+                sel = (sel - 1) % len(buttons)
+            elif k in (curses.KEY_RIGHT, 9, ord("l")):
+                sel = (sel + 1) % len(buttons)
+            elif k in (10, 13, curses.KEY_ENTER):
+                return buttons[sel]
+            elif k in (27, ord("q")):
+                return None
+            elif k == curses.KEY_RESIZE:
+                continue
+            else:
+                for b in buttons:
+                    if k in (ord(b[0].lower()), ord(b[0].upper())):
+                        return b
+
+    def tell(self, title, text, tone="accent", width=66):
+        self.ask(title, text, ("OK",), 0, tone, width)
+
+    def confirm_typed(self, title, text, word):
+        """Destructive confirm: the operator types word. Returns True when it matches."""
+        buf = ""
+        while True:
+            self.draw()
+            lines = self.wrap(text, 60) + [[]] + [[("Type ", self.C["dim"]), (word, self.C["bold"]),
+                                                    (" to continue, Esc to cancel.", self.C["dim"])]]
+            lines.append([("› ", self.C["accent"] | curses.A_BOLD), (buf, self.C["bold"]), ("█", self.C["dim"])])
+            self.modal(title, lines, 66, tone="err")
+            curses.doupdate()
+            k = getkey(self.scr)
+            if k == 27:
+                return False
+            if k in (10, 13, curses.KEY_ENTER):
+                if buf == word:
+                    return True
+                buf = ""
+            elif k in (127, 8, curses.KEY_BACKSPACE):
+                buf = buf[:-1]
+            elif 32 <= k < 0x110000 and k not in range(curses.KEY_MIN, curses.KEY_MAX + 1) and len(buf) < 32:
+                buf += chr(k)
+
+    # -- actions ------------------------------------------------------------------------------
+
+    def prompt(self, title, text, initial="", hints="", keys=None):
+        """One-line text input; returns the text, None on Esc, or keys[k] for an extra control key."""
+        keys = keys or {}
+        buf = initial
+        error = ""
+        while True:
+            self.draw()
+            room = min(74, self.scr.getmaxyx()[1] - 4) - 6 - 4  # modal inner width minus "› " and cursor
+            shown = buf
+            if dw(shown) > room:
+                while shown and dw(shown) > room - 1:
+                    shown = shown[1:]
+                shown = "…" + shown
+            lines = self.wrap(text, 66) + [[], [("› ", self.C["accent"] | curses.A_BOLD), (shown, self.C["bold"]),
+                                                ("█", self.C["dim"])],
+                                               [(error, self.C["warn"])] if error else [],
+                                               [("Enter confirm · Esc cancel · Ctrl-U clear" + hints, self.C["dim"])]]
+            self.modal(title, lines, 74)
+            curses.doupdate()
+            k = getkey(self.scr)
+            if k == 27:
+                return None
+            if k in keys:
+                return keys[k]
+            if k in (10, 13, curses.KEY_ENTER):
+                if buf.strip():
+                    return buf.strip()
+                error = "Enter a directory, or press Esc to cancel."
+                continue
+            error = ""
+            if k in (127, 8, curses.KEY_BACKSPACE):
+                buf = buf[:-1]
+            elif k == 21:  # Ctrl-U
+                buf = ""
+            elif 32 <= k < 0x110000 and not curses.KEY_MIN <= k <= curses.KEY_MAX and len(buf) < 255:
+                buf += chr(k)
+
+    def act_change_dir(self):
+        global BACKUP_DIR, BACKUP_DIR_FROM
+        saved = bool(read_config().get("backups", "dir", fallback="").strip())
+        new = self.prompt("Backup directory", "Directory that holds the backup archives. Currently %s (set by %s)."
+                          % (tilde(BACKUP_DIR), BACKUP_DIR_FROM), tilde(BACKUP_DIR),
+                          " · Ctrl-R reset to default" if saved else "", {18: RESET} if saved else None)
+        if new is RESET:
+            self.act_reset_dir()
+            return
+        if not new:
+            return
+        path = norm_dir(new)
+        if os.path.exists(path) and not os.path.isdir(path):
+            self.tell("Not a directory", tilde(path), "err")
+            return
+        note = "" if os.path.isdir(path) else "\n\nIt does not exist yet; the first backup creates it."
+        if E.get("QBIT_CTL_BACKUP_DIR"):
+            note += "\n\nQBIT_CTL_BACKUP_DIR is set and wins over the saved default in new sessions."
+        choice = self.ask("Backup directory", "Use this directory for backups?\n\n%s%s" % (tilde(path), note),
+                          ("Cancel", "This session", "Save as default"), 2)
+        if choice in (None, "Cancel"):
+            return
+        if choice == "Save as default":
+            try:
+                save_backup_dir(path)
+            except OSError as e:
+                self.tell("Could not save", "%s\n\n%s" % (tilde(CONFIG_FILE), e.strerror or e), "err")
+                return
+            BACKUP_DIR_FROM = tilde(CONFIG_FILE)
+            self.say("Backups now go to %s (saved in %s)." % (tilde(path), tilde(CONFIG_FILE)))
+        else:
+            BACKUP_DIR_FROM = "this session"
+            self.say("Backups go to %s for this session." % tilde(path))
+        BACKUP_DIR = path
+        self.backup_tbl.cur = 0
+        self.refresh("backups")
+
+    def act_reset_dir(self):
+        global BACKUP_DIR, BACKUP_DIR_FROM
+        if self.ask("Reset backup directory", "Remove the saved directory from %s and go back to the default, %s?"
+                    % (tilde(CONFIG_FILE), DEFAULT_BACKUP_DIR), ("Cancel", "Reset"), 1) != "Reset":
+            return
+        try:
+            clear_backup_dir()
+        except OSError as e:
+            self.tell("Could not save", "%s\n\n%s" % (tilde(CONFIG_FILE), e.strerror or e), "err")
+            return
+        BACKUP_DIR, BACKUP_DIR_FROM = resolve_backup_dir()
+        extra = " (QBIT_CTL_BACKUP_DIR still applies)" if BACKUP_DIR_FROM == "QBIT_CTL_BACKUP_DIR" else ""
+        self.say("Backups go to %s again%s." % (tilde(BACKUP_DIR), extra))
+        self.backup_tbl.cur = 0
+        self.refresh("backups")
+
+    def act_backup(self):
+        def fn(job):
+            job.note = "Snapshotting database and copying files"
+            return self.env.backup(BACKUP_DIR)
+        path, err = self.busy("Creating backup", fn)
+        if err:
+            self.tell("Backup failed", err, "err")
+            self.say("Backup failed: " + err, "err")
+        else:
+            self.say("Backup created: %s (%s)" % (os.path.basename(path), human(os.path.getsize(path))))
+        self.refresh("backups")
+        if self.stats is None:
+            self.refresh("overview")
+
+    def act_restore(self):
+        if not self.backups:
+            return
+        path, size, mt = self.backups[self.backup_tbl.cur]
+        name = os.path.basename(path)
+        env = self.env
+        if not env.container:
+            self.tell("Restore unavailable", "No backend container found. Restore needs the container so it can be "
+                      "stopped and started around the change.", "err")
+            return
+        files, err = self.busy("Checking archive", lambda job: env.verify_archive(path))
+        if err:
+            self.tell("Archive rejected", "%s\n\n%s" % (name, err), "err")
+            return
+        text = ("Replace all data in volume %s with:\n\n%s\n%s · created %s · %d .qgif files\n\n"
+                "The backend is stopped, the current data is saved as a backup, then the archive is "
+                "extracted. %s" % (env.volume, name, human(size), stamp(mt), files,
+                                   "The backend is started again afterwards." if env.running
+                                   else "The backend is stopped now and stays stopped."))
+        if not self.confirm_typed("Restore backup", text, "restore"):
+            self.say("Restore cancelled.", "warn")
+            return
+
+        def fn(job):
+            job.note = "Stopping backend"
+            env.refresh()  # the screen may be stale: decide on the current state
+            was_running = env.running
+            env.stop()  # no-op when already stopped
+            job.note = "Saving current data"
+            try:
+                safety = env.backup(BACKUP_DIR, "pre-restore")
+            except DockerError:
+                if was_running:
+                    env.start()
+                raise
+            job.note = "Replacing volume contents"
+            try:
+                env.replace_volume(path)
+            except DockerError as e:
+                job.note = "Restore failed; putting the previous data back"
+                try:
+                    env.replace_volume(safety)
+                except DockerError as e2:
+                    raise DockerError("%s\n\nRolling back also failed: %s\nThe backend is left stopped. Restore %s "
+                                      "by hand." % (e, e2, os.path.basename(safety)))
+                if was_running:
+                    env.start()
+                raise DockerError("%s\n\nThe previous data was put back%s." % (e, " and the backend is running"
+                                                                                  if was_running else ""))
+            if was_running:
+                job.note = "Starting backend and waiting for the health check"
+                env.start()
+            return safety
+        safety, err = self.busy("Restoring", fn, protect=True)
+        self.refresh("all")
+        if err:
+            self.tell("Restore failed", err, "err")
+            self.say("Restore failed: " + err, "err")
+        else:
+            self.say("Restored %s. Previous data saved as %s." % (name, os.path.basename(safety)))
+
+    def act_delete_backup(self):
+        if not self.backups:
+            return
+        path, size, mt = self.backups[self.backup_tbl.cur]
+        name = os.path.basename(path)
+        if len(self.backups) == 1:
+            extra = [[("This is the only backup in this directory.", self.C["warn"])]]
+        else:
+            extra = None
+        if self.ask("Delete backup", "Permanently delete %s (%s, created %s)?" % (name, human(size), stamp(mt)),
+                    ("Cancel", "Delete"), 0, "err", extra=extra) != "Delete":
+            return
+        try:
+            os.remove(path)
+            self.say("Deleted %s." % name)
+        except OSError as e:
+            self.tell("Delete failed", "%s\n\n%s" % (name, e.strerror or e), "err")
+        self.refresh("backups")
+
+    def act_restart(self):
+        env = self.env
+        if not env.container:
+            return
+        verb = "Restart" if env.running else "Start"
+        if self.ask(verb + " backend", "%s %s? Devices and browsers reconnect automatically; expect a few seconds "
+                    "of downtime." % (verb, env.container), ("Cancel", verb), 0) != verb:
+            return
+        _, err = self.busy(verb + "ing backend", lambda job: env.restart() if env.running else env.start())
+        self.refresh("all")
+        if err:
+            self.tell(verb + " failed", err, "err")
+        else:
+            self.say("Backend is %s." % self.env.state)
+
+    def act_delete_library(self):
+        t = self.lib_tbl
+        if not t or not t.rows:
+            return
+        idx = sorted(t.marked) or [t.cur]
+        items = [t.rows[i] for i in idx]
+        names = ", ".join(cell(r[0]) for r in items[:3]) + (" and %d more" % (len(items) - 3) if len(items) > 3 else "")
+        if self.ask("Delete library items", "Delete %d item%s from the library: %s?\n\nThis removes the database rows, "
+                    "their stars and the .qgif files. It cannot be undone except by restoring a backup."
+                    % (len(items), "" if len(items) == 1 else "s", names), ("Cancel", "Delete"), 0, "err") != "Delete":
+            return
+        ids = [r[6] for r in items]
+        res, err = self.busy("Deleting", lambda job: self.env.delete_library(ids), protect=True)
+        if err:
+            self.tell("Delete failed", err + "\n\nThe deletion is all or nothing. Press R to see the current state.", "err")
+            return
+        t.marked.clear()
+        self.refresh("library")
+        self.say("Deleted %d row%s and %d file%s." % (res["rows"], "" if res["rows"] == 1 else "s",
+                                                       res["files"], "" if res["files"] == 1 else "s"))
+        if self.env.running and self.ask("Restart backend", "The website caches the library in memory. Restart "
+                                          "the backend now so the deletion shows up?", ("Later", "Restart"), 0) == "Restart":
+            _, err = self.busy("Restarting backend", lambda job: self.env.restart())
+            self.refresh("all")
+            self.say(("Restart failed: " + err) if err else "Backend restarted.", "err" if err else "ok")
+
+    def act_shell(self):
+        env = self.env
+        try:
+            env.need()
+        except DockerError as e:
+            self.tell("Shell unavailable", str(e), "err")
+            return
+        curses.def_prog_mode()
+        curses.endwin()
+        print("\n%s Shell in a throwaway container with %s mounted at /data." % (bold(PROG + ":"), env.volume))
+        print(dim("  Changes to /data are live. Type exit to return to %s.\n" % PROG))
+        subprocess.call(["docker", "run", "--rm", "-it", "--network", "none", "-w", DATA,
+                         "-v", "%s:%s" % (env.volume, DATA), "--entrypoint", "sh", env.image])
+        curses.reset_prog_mode()
+        self.scr.refresh()
+        self.refresh("volume")
+
+    def help(self):
+        C = self.C
+        sections = [
+            ("Global", [("1-5  ← →", "switch tabs"), ("↑ ↓  j k", "move"), ("PgUp PgDn", "page"),
+                        ("Home End", "first, last"), ("R", "refresh tab"), ("?", "this help"), ("q  Esc", "quit")]),
+            ("Overview", [("b", "back up now"), ("s", "restart or start backend")]),
+            ("Backups", [("b", "create backup"), ("Enter", "restore selected"), ("d", "delete selected"),
+                         ("c", "change directory")]),
+            ("Database", [("↑ ↓", "choose query"), ("Enter", "browse rows / back")]),
+            ("Library", [("Space", "mark item"), ("a", "mark all / none"), ("d", "delete marked")]),
+            ("Volume", [("o", "open shell in /data")]),
+        ]
+        kw, dw_ = 11, 26
+        colw = 2 + kw + dw_
+
+        def block(items):
+            out = []
+            for title, keys in items:
+                if out:
+                    out.append([])
+                out.append([(title, C["bold"])])
+                for k, d in keys:
+                    out.append([("  " + pad(k, kw), C["accent"]), (pad(d, dw_), C["norm"])])
+            return out
+
+        h, w = self.scr.getmaxyx()
+        if w >= 2 * colw + 12:
+            left, right = block(sections[:3]), block(sections[3:])
+            left += [[]] * (len(right) - len(left))
+            right += [[]] * (len(left) - len(right))
+            lines = [(l + [(" " * (colw - sum(dw(t) for t, _ in l)), 0), ("    ", 0)] + r) for l, r in zip(left, right)]
+            width = 2 * colw + 4 + 6
+        else:
+            lines = block(sections)
+            width = colw + 6
+        lines += [[], [("Backups are written to ", C["dim"]), (tilde(BACKUP_DIR), C["norm"])],
+                  [("Set by %s. Press c on the Backups tab to change it." % BACKUP_DIR_FROM, C["dim"])]]
+        while True:
+            self.draw()
+            self.modal("Keys", lines, max(width, 60), ["Close"], 0)
+            curses.doupdate()
+            if getkey(self.scr) not in (curses.KEY_RESIZE, -1):
+                return
+
+    # -- loop ---------------------------------------------------------------------------------
+
+    def current_table(self):
+        name = TABS[self.tab][0]
+        if name == "backups":
+            return self.backup_tbl
+        if name == "database" and self.query_focus:
+            return self.query_tbl
+        if name == "library":
+            return self.lib_tbl
+        if name == "volume":
+            return self.vol_tbl
+        return None
+
+    def switch(self, i):
+        self.tab = i % len(TABS)
+        name = TABS[self.tab][0]
+        if name not in self.loaded:
+            self.load(name)
+
+    def load(self, name):
+        _, err = self.busy("Loading", lambda job: self.refresh(name), replay=True)
+        if err:
+            self.say(err, "err")
+
+    def run(self):
+        curses.curs_set(0)
+        self.scr.keypad(True)
+        self.load("overview")
+        self.loaded.add("overview")
+        while True:
+            self.draw()
+            curses.doupdate()
+            k = getkey(self.scr, 1000)
+            if k == -1:
+                continue
+            name = TABS[self.tab][0]
+            t = self.current_table()
+            h = self.scr.getmaxyx()[0]
+            page = max(1, h - 12)
+            if k in (ord("q"), 27):
+                return 0
+            if ord("1") <= k <= ord(str(len(TABS))):
+                self.switch(k - ord("1"))
+            elif k in (9, curses.KEY_RIGHT):
+                self.switch(self.tab + 1)
+            elif k in (curses.KEY_BTAB, curses.KEY_LEFT):
+                self.switch(self.tab - 1)
+            elif k == ord("R"):
+                self.load(name)
+                self.say("Refreshed.")
+            elif k == ord("?"):
+                self.help()
+            elif k in (curses.KEY_UP, ord("k")):
+                if name == "database" and not self.query_focus:
+                    self.query_idx = (self.query_idx - 1) % len(QUERIES)
+                    self.load("database")
+                elif t:
+                    t.move(-1)
+            elif k in (curses.KEY_DOWN, ord("j")):
+                if name == "database" and not self.query_focus:
+                    self.query_idx = (self.query_idx + 1) % len(QUERIES)
+                    self.load("database")
+                elif t:
+                    t.move(1)
+            elif k == curses.KEY_NPAGE and t:
+                t.move(page)
+            elif k == curses.KEY_PPAGE and t:
+                t.move(-page)
+            elif k == curses.KEY_HOME and t:
+                t.cur = 0
+            elif k == curses.KEY_END and t:
+                t.cur = max(0, len(t.rows) - 1)
+            elif k == ord("b") and name in ("overview", "backups"):
+                self.act_backup()
+            elif k == ord("s") and name == "overview":
+                self.act_restart()
+            elif name == "backups" and k in (10, 13, curses.KEY_ENTER):
+                self.act_restore()
+            elif name == "backups" and k == ord("d"):
+                self.act_delete_backup()
+            elif name == "backups" and k == ord("c"):
+                self.act_change_dir()
+            elif name == "database" and k in (10, 13, curses.KEY_ENTER):
+                self.query_focus = not self.query_focus and bool(self.query_tbl and self.query_tbl.rows)
+            elif name == "library" and k == ord(" ") and t and t.rows:
+                t.marked ^= {t.cur}
+                t.move(1)
+            elif name == "library" and k == ord("a") and t:
+                t.marked = set() if len(t.marked) == len(t.rows) else set(range(len(t.rows)))
+            elif name == "library" and k == ord("d"):
+                self.act_delete_library()
+            elif name == "volume" and k == ord("o"):
+                self.act_shell()
+
+
+def cmd_console(args):
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        fail("the console needs a terminal; use `%s status` or `%s backup` in scripts" % (PROG, PROG), 2)
+    os.environ.setdefault("ESCDELAY", "25")
+    signal.signal(signal.SIGHUP, lambda *a: sys.exit(129))
+    try:
+        return curses.wrapper(lambda scr: App(scr).run())
+    except KeyboardInterrupt:
+        return 130
+
+
+# --------------------------------------------------------------------------- entry
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(
+        prog=PROG,
+        description="Operate the QBIT backend data volume: status, consistent backups, restore, "
+                    "database browser and library cleanup. Run without a command for the interactive console.",
+        epilog="Backup directory: --dir, else QBIT_CTL_BACKUP_DIR, else [backups] dir in %s, else %s. "
+               "Other environment: QBIT_CTL_CONTAINER (default qbit-backend,qbit-backend-dev), QBIT_CTL_IMAGE "
+               "(used when no container exists), NO_COLOR." % (tilde(CONFIG_FILE), DEFAULT_BACKUP_DIR),
     )
-  done <<< "$raw"
+    ap.add_argument("--version", action="version", version="%s %s" % (PROG, VERSION))
+    sub = ap.add_subparsers(dest="cmd", metavar="command")
+    sub.add_parser("console", help="interactive console (default)")
+    p = sub.add_parser("status", help="backend, volume, database and latest backup")
+    p.add_argument("--dir", help="backup directory (default: %s, from %s)" % (tilde(BACKUP_DIR), BACKUP_DIR_FROM))
+    p = sub.add_parser("backup", help="create a consistent backup without stopping the backend")
+    p.add_argument("--dir", help="backup directory (default: %s, from %s)" % (tilde(BACKUP_DIR), BACKUP_DIR_FROM))
+    p = sub.add_parser("backups", help="list backup archives, newest first")
+    p.add_argument("--dir", help="backup directory (default: %s, from %s)" % (tilde(BACKUP_DIR), BACKUP_DIR_FROM))
+    args = ap.parse_args(argv)
+    if hasattr(args, "dir"):
+        args.dir_from = "--dir" if args.dir else BACKUP_DIR_FROM
+        args.dir = norm_dir(args.dir) if args.dir else BACKUP_DIR
+    cmd = args.cmd or "console"
+    return {"console": cmd_console, "status": cmd_status, "backup": cmd_backup, "backups": cmd_backups}[cmd](args)
 
-  [[ $idx -eq 0 ]] && {
-    _ui_msg "Library Items" "No library items found." 5 44
-    return
-  }
 
-  header_cols="$(printf '%-10s %-24s %-14s %8s %6s %6s' 'ID' 'Filename' 'Uploader' 'Size' 'Frm' 'D/L')"
-  menu_items=("0" "$header_cols" "${menu_items[@]}")
-
-  while true; do
-    if ! choice=$(_ui_menu "Library Items" "Total: $idx | 0 = column header | Enter = details" 22 110 14 \
-      "${menu_items[@]}" \
-      "back" "Back"); then
-      return
-    fi
-
-    [[ -z "$choice" || "$choice" == "back" ]] && return
-    [[ "$choice" =~ ^[0-9]+$ ]] || continue
-    [[ "$choice" == "0" ]] && continue
-    (( choice >= 1 && choice <= ${#row_lines[@]} )) || continue
-
-    line="${row_lines[$((choice - 1))]}"
-    IFS='|' read -r id fname uploader uploaded_at size frame_count download_count <<< "$line"
-
-    _ui_scroll_msg "Library Item Detail" "ID: $id\nFilename: $fname\nUploader: $uploader\nUploaded At: $uploaded_at\nSize: ${size:-0}\nFrame Count: ${frame_count:-0}\nDownload Count: ${download_count:-0}" 14 86
-  done
-}
-
-_library_delete_multi() {
-  local raw selected line id fname uploader size frame_count
-  local list_h box_h idx token n escaped_id sql db_out tmp_ids
-  local -a checklist=() id_map=() to_delete=()
-
-  if ! _ensure_backend; then
-    return
-  fi
-
-  _ui_loading "Library Delete" "Loading deletable library items..." 1
-  if ! raw=$(_db_exec "SELECT id, filename, uploader, size, frameCount FROM library ORDER BY uploadedAt DESC;"); then
-    _ui_scroll_msg "Library Delete" "$raw" 14 86
-    return
-  fi
-
-  [[ -z "$raw" ]] && { _ui_msg "Library Delete" "No library items found." 5 44; return; }
-
-  checklist+=("0" "$(printf '%-28s %-16s %8s %6s' 'Filename' 'Uploader' 'Size' 'Frames')" "off")
-  idx=0
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    IFS='|' read -r id fname uploader size frame_count <<< "$line"
-    [[ -z "$id" ]] && continue
-
-    idx=$((idx + 1))
-    id_map+=("$id")
-    checklist+=("$idx" "$(printf '%-28s %-16s %8s %6s' "${fname:0:28}" "${uploader:0:16}" "${size:-0}" "${frame_count:-0}")" "off")
-  done <<< "$raw"
-
-  [[ $idx -eq 0 ]] && { _ui_msg "Library Delete" "No library items found." 5 44; return; }
-
-  list_h=$((idx + 1))
-  [[ $list_h -gt 14 ]] && list_h=14
-  [[ $list_h -lt 6 ]] && list_h=6
-  box_h=$((list_h + 6))
-
-  if ! selected=$(_ui_checklist "Delete Library Items" "Select items to delete (DB row + .qgif file)." "$box_h" 80 "$list_h" "${checklist[@]}"); then
-    return
-  fi
-  [[ -z "$selected" ]] && return
-
-  for token in $selected; do
-    token="${token//\"/}"
-    [[ "$token" =~ ^[0-9]+$ ]] || continue
-    if (( token >= 1 && token <= ${#id_map[@]} )); then
-      id="${id_map[$((token - 1))]}"
-      if [[ " ${to_delete[*]-} " != *" $id "* ]]; then
-        to_delete+=("$id")
-      fi
-    fi
-  done
-
-  n=${#to_delete[@]}
-  if [[ "$n" -eq 0 ]]; then
-    _ui_msg "Delete Library Items" "No valid item selected." 5 40
-    return
-  fi
-
-  if ! _ui_yesno "Confirm Delete" "Delete $n item(s)?\n\nThis removes DB rows and /data/files/<id>.qgif.\nRestart backend afterwards to refresh web cache." 10 70 "Delete" "Cancel"; then
-    return
-  fi
-
-  sql="BEGIN;"
-  for id in "${to_delete[@]}"; do
-    escaped_id=$(_sql_escape "$id")
-    sql+="DELETE FROM library_stars WHERE libraryId = '$escaped_id';"
-    sql+="DELETE FROM library WHERE id = '$escaped_id';"
-  done
-  sql+="COMMIT;"
-
-  _ui_loading "Library Delete" "Deleting DB rows for $n item(s)..." 1
-  if ! db_out=$(_db_exec "$sql"); then
-    _ui_scroll_msg "Delete Failed" "$db_out" 14 86
-    return
-  fi
-
-  _ui_loading "Library Delete" "Deleting matching .qgif files..." 1
-  tmp_ids=$(mktemp)
-  printf '%s\n' "${to_delete[@]}" > "$tmp_ids"
-  docker run --rm -v "${VOLUME_NAME}:${DATA_MOUNT_PATH}" -v "${tmp_ids}:/ids.txt:ro" alpine \
-    sh -ec "
-      while IFS= read -r id; do
-        [ -z \"\$id\" ] && continue
-        case \"\$id\" in
-          *[!A-Za-z0-9._-]*) continue ;;
-        esac
-        rm -f '${DATA_MOUNT_PATH}/files/'\"\$id\"'.qgif'
-      done < /ids.txt
-    " >/dev/null 2>&1 || true
-  rm -f "$tmp_ids"
-
-  _ui_msg "Delete Complete" "$n item(s) removed from DB and matching .qgif files." 6 68
-
-  if [[ -n "${BACKEND_CONTAINER:-}" ]]; then
-    if _ui_yesno "Restart Backend" "Web library data is cached in memory.\n\nRestart backend now to refresh the website list?" 8 62 "Restart" "Later"; then
-      _ui_loading "Restart Backend" "Restarting backend: $BACKEND_CONTAINER" 1
-      if docker restart "$BACKEND_CONTAINER" &>/dev/null; then
-        _ui_msg "Restart Backend" "Success: backend restarted.\n\nContainer: $BACKEND_CONTAINER" 7 62
-      else
-        _ui_msg "Restart Backend" "Failed to restart backend.\n\nContainer: $BACKEND_CONTAINER\nRun manually:\ndocker restart $BACKEND_CONTAINER" 10 72
-      fi
-    fi
-  fi
-}
-
-_library_menu() {
-  local choice
-
-  while true; do
-    if ! _ensure_backend; then
-      return
-    fi
-
-    if ! choice=$(_ui_menu "Library Tools" "Manage DB records and /data/files/*.qgif" 12 70 5 \
-      "list" "List library items" \
-      "delete" "Delete multiple items" \
-      "back" "Back"); then
-      return
-    fi
-
-    [[ -z "$choice" || "$choice" == "back" ]] && return
-
-    case "$choice" in
-      list) _library_list ;;
-      delete) _library_delete_multi ;;
-    esac
-  done
-}
-
-# ---------------------------------------------------------------------------
-#  Main menus
-# ---------------------------------------------------------------------------
-_volume_menu() {
-  local choice
-
-  while true; do
-    if ! choice=$(_ui_menu "Volume Tools" "Volume: ${VOLUME_NAME:-unknown}" 14 68 8 \
-      "backup" "Create tar.gz backup" \
-      "restore" "Restore backup (overwrite current data)" \
-      "list" "List volume contents" \
-      "shell" "Open shell with volume mounted" \
-      "delete_backup" "Delete backup file from disk" \
-      "back" "Back"); then
-      return
-    fi
-
-    [[ -z "$choice" || "$choice" == "back" ]] && return
-
-    case "$choice" in
-      backup) _volume_backup ;;
-      restore) _volume_restore ;;
-      list) _volume_list ;;
-      shell) _volume_shell ;;
-      delete_backup) _volume_delete_backup ;;
-    esac
-  done
-}
-
-_main_menu() {
-  local choice status_line
-
-  while true; do
-    if _ensure_backend silent; then
-      if [[ -n "${BACKEND_CONTAINER:-}" ]]; then
-        status_line="Volume: $VOLUME_NAME | Backend: $BACKEND_CONTAINER"
-      else
-        status_line="Volume: $VOLUME_NAME | Backend: stopped"
-      fi
-    else
-      status_line="Volume: not found"
-    fi
-
-    if ! choice=$(_ui_menu "Main Menu" "$status_line" 14 70 6 \
-      "volume" "Backup / Restore / Inspect volume" \
-      "db" "View DB (read-only queries)" \
-      "library" "List / Delete library items" \
-      "quit" "Quit"); then
-      choice="quit"
-    fi
-
-    [[ -z "$choice" ]] && choice="quit"
-
-    case "$choice" in
-      volume) _ensure_backend && _volume_menu ;;
-      db) _ensure_backend && _db_view_menu ;;
-      library) _library_menu ;;
-      quit)
-        clear
-        exit 0
-        ;;
-    esac
-  done
-}
-
-# ---------------------------------------------------------------------------
-#  Entry
-# ---------------------------------------------------------------------------
-main() {
-  export BACKEND_CONTAINER VOLUME_NAME PICKED_BACKUP_ROW PICKED_BACKUP_PATH
-  PICKED_BACKUP_ROW=""
-  PICKED_BACKUP_PATH=""
-  _main_menu
-}
-
-main "$@"
+if __name__ == "__main__":
+    sys.exit(main())
