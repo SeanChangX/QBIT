@@ -15,3 +15,6 @@ web/frontend/dist/
 web/admin/dist/
 web/backend/dist/
 web/backend/static/admin/
+
+# Python
+__pycache__/

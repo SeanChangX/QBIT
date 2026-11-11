@@ -554,7 +554,7 @@ pio device monitor              # 開啟序列埠監視器（115200 baud）
 | `tools/qgif2header.py` | 將 .qgif 檔案轉換為 C 標頭檔以嵌入 PROGMEM |
 | `tools/png2xbm.py` | 將小尺寸 PNG 圖示（≤16×16）轉換為 u8g2 XBM 格式 C 陣列 |
 | `tools/simulate-devices.py` | 模擬多台 QBIT 裝置連接至後端進行測試 |
-| `tools/qbit-ctl` | 管理後端 SQLite 資料庫與 `/data` 檔案的 TUI 工具 |
+| `tools/qbit-ctl` | 伺服器上管理後端資料 volume 的主控台：狀態、一致性備份、還原、資料庫瀏覽與 library 清理（Python 3.10+，無額外依賴；執行 `tools/qbit-ctl --help`） |
 | `tools/flasher/` | 瀏覽器版韌體燒錄器（部署至 GitHub Pages） |
 
 ---
