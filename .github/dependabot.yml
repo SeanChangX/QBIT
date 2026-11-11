@@ -18,7 +18,14 @@ updates:
     commit-message:
       prefix: build(deps)
       prefix-development: build(deps-dev)
+    # A dependency joins the first group it matches. Packages that must move
+    # together are grouped for every update type, majors included: e.g.
+    # @vitejs/plugin-react 6 requires vite 8, so separate PRs cannot install.
     groups:
+      vite:
+        patterns: [vite, '@vitejs/*']
+      react:
+        patterns: [react, react-dom, '@types/react', '@types/react-dom']
       npm-minor-patch:
         update-types: [minor, patch]
 
