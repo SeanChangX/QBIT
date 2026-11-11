@@ -1,44 +1,65 @@
+# Builds the firmware and publishes the release when a version tag (vX.Y.Z) is pushed.
+# On a pull request that changes how releases are built (or the CHANGELOG, which the notes
+# come from), or when run by hand, it is a dry run: the same files as an artifact, no release.
+# Steps for cutting a release: docs/RELEASING.md.
+#
+# Keep the workflow name: deploy-gh-pages.yml runs after it by name. Keep the asset names and
+# the latest.json format: the web flasher and every device's update check read them.
 name: Build and Release Firmware
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
+  pull_request:
+    paths:
+      - CHANGELOG.md
+      - .github/workflows/build-and-release.yml
+      - tools/release_notes.py
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-      
-      - name: Set up Python
-        uses: actions/setup-python@v7
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
-      
-      - name: Install PlatformIO
-        run: |
-          python -m pip install --upgrade pip
-          pip install platformio
 
-      - name: Set firmware version
+      # A tag must be X.Y.Z with a matching CHANGELOG section; a dry run takes the newest one
+      - name: Version
+        id: version
         run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(python3 tools/release_notes.py latest)"
+          fi
+          python3 tools/release_notes.py check "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "QBIT_VERSION=$VERSION" >> "$GITHUB_ENV"
-      
+
+      - name: Install PlatformIO
+        run: pip install platformio==6.2.0
+
+      # Production WebSocket host and key are injected only into tagged builds
       - name: Build firmware
+        working-directory: firmware
         env:
-          QBIT_WS_HOST: ${{ secrets.QBIT_WS_HOST }}
-          QBIT_WS_API_KEY: ${{ secrets.QBIT_WS_API_KEY }}
+          QBIT_WS_HOST: ${{ github.ref_type == 'tag' && secrets.QBIT_WS_HOST || '' }}
+          QBIT_WS_API_KEY: ${{ github.ref_type == 'tag' && secrets.QBIT_WS_API_KEY || '' }}
         run: |
-          cd firmware
-          # Inject production WebSocket config via build flags
           # Inner \\\" produces literal \" so the C compiler sees a string literal.
           FLAGS=""
           if [ -n "$QBIT_WS_HOST" ]; then
@@ -50,123 +71,82 @@ jobs:
             echo "Injected WS_API_KEY (hidden)"
           fi
           export PLATFORMIO_BUILD_FLAGS="$FLAGS"
-          platformio run -e seeed_xiao_esp32c3
-          platformio run -e seeed_xiao_esp32c3 -t buildfs
-      
-      - name: Check build output
-        run: |
-          echo "Build directory contents:"
-          ls -lh firmware/.pio/build/seeed_xiao_esp32c3/
-      
-      - name: Prepare artifacts
+          pio run -e seeed_xiao_esp32c3
+          pio run -e seeed_xiao_esp32c3 -t buildfs
+
+      # The flasher writes all four images, so every one of them is required
+      - name: Collect images
         run: |
           mkdir -p dist
-          
-          # Copy firmware.bin (always required)
-          if [ -f firmware/.pio/build/seeed_xiao_esp32c3/firmware.bin ]; then
-            cp firmware/.pio/build/seeed_xiao_esp32c3/firmware.bin dist/firmware.bin
-            echo "✓ firmware.bin copied"
-          else
-            echo "✗ firmware.bin NOT found"
-            exit 1
-          fi
-          
-          # Copy optional files if they exist
-          if [ -f firmware/.pio/build/seeed_xiao_esp32c3/littlefs.bin ]; then
-            cp firmware/.pio/build/seeed_xiao_esp32c3/littlefs.bin dist/littlefs.bin
-            echo "✓ littlefs.bin copied"
-          fi
-          
-          if [ -f firmware/.pio/build/seeed_xiao_esp32c3/bootloader.bin ]; then
-            cp firmware/.pio/build/seeed_xiao_esp32c3/bootloader.bin dist/bootloader.bin
-            echo "✓ bootloader.bin copied"
-          fi
-          
-          if [ -f firmware/.pio/build/seeed_xiao_esp32c3/partitions.bin ]; then
-            cp firmware/.pio/build/seeed_xiao_esp32c3/partitions.bin dist/partitions.bin
-            echo "✓ partitions.bin copied"
-          fi
-          
-          echo ""
-          echo "Final artifacts:"
+          for f in bootloader.bin partitions.bin firmware.bin littlefs.bin; do
+            cp "firmware/.pio/build/seeed_xiao_esp32c3/$f" "dist/$f"
+          done
           ls -lh dist/
-      
+
       - name: Generate latest.json
         env:
-          VERSION: ${{ github.ref_name }}
+          TAG: v${{ steps.version.outputs.version }}
           REPOSITORY: ${{ github.repository }}
         run: |
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           export TIMESTAMP
-          
-          # Use python to build clean JSON
           python3 << 'PYEOF'
-          import json
-          import os
-          import hashlib
-          
-          version = os.environ.get("VERSION")
-          timestamp = os.environ.get("TIMESTAMP")
-          repo = os.environ.get("REPOSITORY")
-          
-          data = {
-              "version": version,
-              "timestamp": timestamp,
-              "files": {}
-          }
-          
-          # Add each binary file if it exists
-          files = ["firmware.bin", "littlefs.bin", "bootloader.bin", "partitions.bin"]
-          for filename in files:
-              filepath = f"dist/{filename}"
-              if os.path.exists(filepath):
-                  size = os.path.getsize(filepath)
-                  with open(filepath, "rb") as f:
-                      md5 = hashlib.md5(f.read()).hexdigest()
-                  data["files"][filename] = {
-                      "url": f"https://github.com/{repo}/releases/download/{version}/{filename}",
-                      "size": size,
-                      "md5": md5
-                  }
-          
+          import hashlib, json, os
+
+          tag, repo = os.environ["TAG"], os.environ["REPOSITORY"]
+          data = {"version": tag, "timestamp": os.environ["TIMESTAMP"], "files": {}}
+          for name in ["firmware.bin", "littlefs.bin", "bootloader.bin", "partitions.bin"]:
+              path = f"dist/{name}"
+              with open(path, "rb") as f:
+                  md5 = hashlib.md5(f.read()).hexdigest()
+              data["files"][name] = {
+                  "url": f"https://github.com/{repo}/releases/download/{tag}/{name}",
+                  "size": os.path.getsize(path),
+                  "md5": md5,
+              }
           with open("dist/latest.json", "w") as f:
               json.dump(data, f, indent=2)
           PYEOF
-          
-          echo "Generated latest.json:"
           cat dist/latest.json
-      
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: firmware-artifacts
-          path: dist/
 
-  create-release:
+      - name: Checksums and release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          (cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+          python3 tools/release_notes.py notes "$VERSION" > notes.md
+          cat notes.md
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-v${{ steps.version.outputs.version }}
+          path: |
+            dist/
+            notes.md
+          if-no-files-found: error
+
+  publish:
+    if: github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write      # the release
+      id-token: write      # the attestation's signing certificate
+      attestations: write  # storing the attestation
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-      
-      - name: Determine version
-        id: version
-        run: |
-          VERSION="${{ github.ref_name }}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-      
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v8
         with:
-          name: firmware-artifacts
-          path: dist/
-      
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+          name: release-v${{ needs.build.outputs.version }}
+
+      - uses: actions/attest@v4
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: Release ${{ steps.version.outputs.version }}
-          files: dist/*
-          generate_release_notes: true
+          subject-checksums: dist/SHA256SUMS
+
+      - name: Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          gh release create "v$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "QBIT v$VERSION" --notes-file notes.md

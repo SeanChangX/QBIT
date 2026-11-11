@@ -499,15 +499,22 @@ docker compose logs backend   # 應顯示 "QBIT backend listening on port 3001"
 
 ### GitHub Actions CI/CD
 
-包含兩個工作流程：
+包含三個工作流程：
+
+**CI**（`ci.yml`）-- 每個 Pull Request 及推送至 `main` 時觸發：
+- 只執行改動部分對應的檢查：後端型別檢查、lint 與測試；前端與管理介面建置；韌體建置；workflow 檔案的 actionlint
+- 合併至 `main` 前必須通過彙總的 `ci` 檢查
 
 **Build and Release**（`build-and-release.yml`）-- 由版本標籤（`v*`）觸發：
-- 使用 PlatformIO 編譯韌體
-- 從 `firmware/data/` 建置 LittleFS 檔案系統映像
+- 檢查 [`CHANGELOG.md`](CHANGELOG.md) 中有該版本的段落
+- 使用 PlatformIO 編譯韌體，並從 `firmware/data/` 建置 LittleFS 檔案系統映像
 - 從 Repository Secrets（`QBIT_WS_HOST`、`QBIT_WS_API_KEY`）注入 `WS_HOST` 與 `WS_API_KEY`
-- 建立包含 `firmware.bin`、`littlefs.bin`、`bootloader.bin` 及 `partitions.bin` 的 GitHub Release
+- 建立 GitHub Release「QBIT vX.Y.Z」，包含 `firmware.bin`、`littlefs.bin`、`bootloader.bin`、`partitions.bin`、`latest.json` 與 `SHA256SUMS`，附建置來源證明（build provenance attestation），並以該版本的 CHANGELOG 段落作為說明
+- 在修改發布流程的 Pull Request 上以試跑（dry run）方式執行，不會發布
 
-**Deploy Flasher**（`deploy-gh-pages.yml`）-- 於成功建置後或推送至 main 時觸發：
+發布版本的步驟請見 [docs/RELEASING.md](docs/RELEASING.md)。
+
+**Deploy Flasher**（`deploy-gh-pages.yml`）-- 於成功發布後或推送至 main 時觸發：
 - 下載最新的 Release 產出物
 - 產生與 `firmware/partitions.csv` 分割區偏移量對應的 `manifest.json`（供 esp-web-tools 使用）
 - 將燒錄工具部署至 GitHub Pages
