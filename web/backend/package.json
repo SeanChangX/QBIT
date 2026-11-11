@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "archiver": "^7.0.0",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^13.0.3",
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "express-rate-limit": "^8.7.3",
