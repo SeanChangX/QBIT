@@ -17,7 +17,9 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    # After a release build, deploy only for a tag push: pull request and manual runs of
+    # the release workflow are dry runs with no release to publish
+    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7

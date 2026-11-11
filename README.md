@@ -498,15 +498,22 @@ The backend logs to stdout (pino, JSON in production). View with `docker compose
 
 ### GitHub Actions CI/CD
 
-Two workflows are included:
+Three workflows are included:
+
+**CI** (`ci.yml`) -- on every pull request and push to `main`:
+- Runs only the checks for the parts a change touches: backend typecheck, lint and tests; frontend and admin builds; firmware build; actionlint for workflow files
+- The aggregate `ci` check is required before merging into `main`
 
 **Build and Release** (`build-and-release.yml`) -- triggered on version tags (`v*`):
-- Compiles firmware with PlatformIO
-- Builds the LittleFS filesystem image from `firmware/data/`
+- Checks that the tag has a section in [`CHANGELOG.md`](CHANGELOG.md)
+- Compiles firmware with PlatformIO and builds the LittleFS filesystem image from `firmware/data/`
 - Injects `WS_HOST` and `WS_API_KEY` from repository secrets (`QBIT_WS_HOST`, `QBIT_WS_API_KEY`)
-- Creates a GitHub Release with `firmware.bin`, `littlefs.bin`, `bootloader.bin`, and `partitions.bin`
+- Creates the GitHub Release "QBIT vX.Y.Z" with `firmware.bin`, `littlefs.bin`, `bootloader.bin`, `partitions.bin`, `latest.json` and `SHA256SUMS`, a build provenance attestation, and the changelog section as notes
+- On pull requests that change the release process, runs as a dry run without publishing
 
-**Deploy Flasher** (`deploy-gh-pages.yml`) -- triggered after a successful build or on push to main:
+See [docs/RELEASING.md](docs/RELEASING.md) for how to cut a release.
+
+**Deploy Flasher** (`deploy-gh-pages.yml`) -- triggered after a successful release or on push to main:
 - Downloads the latest release artifacts
 - Generates `manifest.json` for esp-web-tools with partition offsets matching `firmware/partitions.csv`
 - Deploys the flasher tool to GitHub Pages
