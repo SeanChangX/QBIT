@@ -3,6 +3,7 @@
 #include "../../src/settings.h"
 #include "../../src/app_state.h"
 #include "../../src/network_task.h"
+#include "../../src/reminder.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
@@ -820,6 +821,90 @@ static void handleWeatherSearch(AsyncWebServerRequest *request) {
 }
 
 // ==========================================================================
+//  Handlers -- Reminder settings API
+// ==========================================================================
+
+static void handleGetReminders(AsyncWebServerRequest *request) {
+    StaticJsonDocument<512> doc;
+
+    ReminderIntervalCfg wc = reminderGetWaterCfg();
+    JsonObject water = doc.createNestedObject("water");
+    water["enabled"]      = wc.enabled;
+    water["interval_min"] = wc.intervalMin;
+    water["start_h"]      = wc.startHour;
+    water["end_h"]        = wc.endHour;
+
+    ReminderFoodCfg fc = reminderGetFoodCfg();
+    JsonObject food = doc.createNestedObject("food");
+    food["enabled"]      = fc.enabled;
+    food["breakfast_h"]  = fc.breakfastH;
+    food["breakfast_m"]  = fc.breakfastM;
+    food["lunch_h"]      = fc.lunchH;
+    food["lunch_m"]      = fc.lunchM;
+    food["dinner_h"]     = fc.dinnerH;
+    food["dinner_m"]     = fc.dinnerM;
+
+    ReminderIntervalCfg pc = reminderGetPillsCfg();
+    JsonObject pills = doc.createNestedObject("pills");
+    pills["enabled"]      = pc.enabled;
+    pills["interval_min"] = pc.intervalMin;
+    pills["start_h"]      = pc.startHour;
+    pills["end_h"]        = pc.endHour;
+
+    String json;
+    serializeJson(doc, json);
+    request->send(200, "application/json", json);
+}
+
+static void handlePostReminders(AsyncWebServerRequest *request) {
+    // Water
+    if (request->hasParam("water_enabled"))
+        reminderSetEnabled(REM_WATER, request->getParam("water_enabled")->value() == "1");
+    {
+        ReminderIntervalCfg wc = reminderGetWaterCfg();
+        if (request->hasParam("water_interval"))
+            wc.intervalMin = (uint16_t)request->getParam("water_interval")->value().toInt();
+        if (request->hasParam("water_start_h"))
+            wc.startHour = (uint8_t)request->getParam("water_start_h")->value().toInt();
+        if (request->hasParam("water_end_h"))
+            wc.endHour = (uint8_t)request->getParam("water_end_h")->value().toInt();
+        wc.enabled = reminderGetEnabled(REM_WATER);
+        reminderSetWaterCfg(wc);
+    }
+    // Food
+    if (request->hasParam("food_enabled"))
+        reminderSetEnabled(REM_FOOD, request->getParam("food_enabled")->value() == "1");
+    {
+        ReminderFoodCfg fc = reminderGetFoodCfg();
+        if (request->hasParam("breakfast_h")) fc.breakfastH = (uint8_t)request->getParam("breakfast_h")->value().toInt();
+        if (request->hasParam("breakfast_m")) fc.breakfastM = (uint8_t)request->getParam("breakfast_m")->value().toInt();
+        if (request->hasParam("lunch_h"))     fc.lunchH     = (uint8_t)request->getParam("lunch_h")->value().toInt();
+        if (request->hasParam("lunch_m"))     fc.lunchM     = (uint8_t)request->getParam("lunch_m")->value().toInt();
+        if (request->hasParam("dinner_h"))    fc.dinnerH    = (uint8_t)request->getParam("dinner_h")->value().toInt();
+        if (request->hasParam("dinner_m"))    fc.dinnerM    = (uint8_t)request->getParam("dinner_m")->value().toInt();
+        fc.enabled = reminderGetEnabled(REM_FOOD);
+        reminderSetFoodCfg(fc);
+    }
+    // Pills
+    if (request->hasParam("pills_enabled"))
+        reminderSetEnabled(REM_PILLS, request->getParam("pills_enabled")->value() == "1");
+    {
+        ReminderIntervalCfg pc = reminderGetPillsCfg();
+        if (request->hasParam("pills_interval"))
+            pc.intervalMin = (uint16_t)request->getParam("pills_interval")->value().toInt();
+        if (request->hasParam("pills_start_h"))
+            pc.startHour = (uint8_t)request->getParam("pills_start_h")->value().toInt();
+        if (request->hasParam("pills_end_h"))
+            pc.endHour = (uint8_t)request->getParam("pills_end_h")->value().toInt();
+        pc.enabled = reminderGetEnabled(REM_PILLS);
+        reminderSetPillsCfg(pc);
+    }
+
+    reminderSaveSettings();
+    handleGetReminders(request);
+}
+
+// ==========================================================================
 //  Init
 // ==========================================================================
 
@@ -864,6 +949,8 @@ void webDashboardInit(AsyncWebServer &server) {
     server.on("/api/weather/search",HTTP_GET,  handleWeatherSearch);
     server.on("/api/weather",       HTTP_GET,  handleGetWeather);
     server.on("/api/weather",       HTTP_POST, handlePostWeather);
+    server.on("/api/reminders",     HTTP_GET,  handleGetReminders);
+    server.on("/api/reminders",     HTTP_POST, handlePostReminders);
 
     // Catch-all: serve .qgif files from LittleFS for browser preview (path-normalized)
     server.onNotFound([](AsyncWebServerRequest *request) {

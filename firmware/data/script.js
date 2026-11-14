@@ -1476,3 +1476,126 @@ pollCurrent();
   btnOverlay.classList.remove('hidden');
   setOverlayState();
 })();
+
+// Health Reminders API integration
+(function () {
+  var btnWaterRmd = document.getElementById('btnWaterRmd');
+  var waterInt = document.getElementById('waterInt');
+  var waterStart = document.getElementById('waterStart');
+  var waterEnd = document.getElementById('waterEnd');
+  
+  var btnFoodRmd = document.getElementById('btnFoodRmd');
+  var foodB = document.getElementById('foodB');
+  var foodL = document.getElementById('foodL');
+  var foodD = document.getElementById('foodD');
+  
+  var btnPillsRmd = document.getElementById('btnPillsRmd');
+  var pillsInt = document.getElementById('pillsInt');
+  var pillsStart = document.getElementById('pillsStart');
+  var pillsEnd = document.getElementById('pillsEnd');
+  
+  var btnRmdSave = document.getElementById('btnRmdSave');
+
+  var _waterOn = true, _foodOn = true, _pillsOn = false;
+
+  // Populate hour dropdowns (0-23)
+  function popHours(sel) {
+    if (!sel) return;
+    for (var i = 0; i < 24; i++) {
+      var opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = String(i).padStart(2, '0') + ':00';
+      sel.appendChild(opt);
+    }
+  }
+  popHours(waterStart); popHours(waterEnd);
+  popHours(pillsStart); popHours(pillsEnd);
+
+  function updateToggle(btn, state) {
+    if(!btn) return;
+    btn.textContent = state ? 'ON' : 'OFF';
+    btn.classList.toggle('muted', !state);
+  }
+
+  function fmtTime(h, m) {
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  }
+
+  // Fetch current reminders
+  fetch('/api/reminders').then(function(r) { return r.json(); }).then(function(d) {
+    if (d.water) {
+      _waterOn = !!d.water.enabled;
+      waterInt.value = d.water.interval_min;
+      waterStart.value = d.water.start_h;
+      waterEnd.value = d.water.end_h;
+      updateToggle(btnWaterRmd, _waterOn);
+    }
+    if (d.food) {
+      _foodOn = !!d.food.enabled;
+      foodB.value = fmtTime(d.food.breakfast_h, d.food.breakfast_m);
+      foodL.value = fmtTime(d.food.lunch_h, d.food.lunch_m);
+      foodD.value = fmtTime(d.food.dinner_h, d.food.dinner_m);
+      updateToggle(btnFoodRmd, _foodOn);
+    }
+    if (d.pills) {
+      _pillsOn = !!d.pills.enabled;
+      pillsInt.value = d.pills.interval_min;
+      pillsStart.value = d.pills.start_h;
+      pillsEnd.value = d.pills.end_h;
+      updateToggle(btnPillsRmd, _pillsOn);
+    }
+  }).catch(function() {});
+
+  if (btnWaterRmd) {
+    btnWaterRmd.addEventListener('click', function() { _waterOn = !_waterOn; updateToggle(btnWaterRmd, _waterOn); });
+  }
+  if (btnFoodRmd) {
+    btnFoodRmd.addEventListener('click', function() { _foodOn = !_foodOn; updateToggle(btnFoodRmd, _foodOn); });
+  }
+  if (btnPillsRmd) {
+    btnPillsRmd.addEventListener('click', function() { _pillsOn = !_pillsOn; updateToggle(btnPillsRmd, _pillsOn); });
+  }
+
+  if (btnRmdSave) {
+    btnRmdSave.addEventListener('click', function() {
+      btnRmdSave.disabled = true;
+      var fb = foodB.value.split(':');
+      var fl = foodL.value.split(':');
+      var fd = foodD.value.split(':');
+
+      var params = new URLSearchParams();
+      params.append('water_enabled', _waterOn ? '1' : '0');
+      params.append('water_interval', waterInt.value);
+      params.append('water_start_h', waterStart.value);
+      params.append('water_end_h', waterEnd.value);
+      
+      params.append('food_enabled', _foodOn ? '1' : '0');
+      params.append('breakfast_h', fb[0] || '8');
+      params.append('breakfast_m', fb[1] || '0');
+      params.append('lunch_h', fl[0] || '13');
+      params.append('lunch_m', fl[1] || '0');
+      params.append('dinner_h', fd[0] || '19');
+      params.append('dinner_m', fd[1] || '0');
+
+      params.append('pills_enabled', _pillsOn ? '1' : '0');
+      params.append('pills_interval', pillsInt.value);
+      params.append('pills_start_h', pillsStart.value);
+      params.append('pills_end_h', pillsEnd.value);
+
+      fetch('/api/reminders?' + params.toString(), { method: 'POST' })
+        .then(function() {
+          btnRmdSave.classList.add('saved');
+          btnRmdSave.textContent = 'Saved';
+        })
+        .catch(function() {})
+        .finally(function() {
+          btnRmdSave.disabled = false;
+          setTimeout(function() {
+            btnRmdSave.classList.remove('saved');
+            btnRmdSave.textContent = 'Save Reminders';
+          }, 2000);
+        });
+    });
+  }
+})();
+

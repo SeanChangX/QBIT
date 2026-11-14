@@ -39,7 +39,10 @@ enum DisplayState {
     FLAPPY_OVER,
     CAR_RUNNING,
     CAR_OVER,
-    CAM_VIEW
+    CAM_VIEW,
+    POMODORO_SELECT,
+    POMODORO_RUNNING,
+    REMINDER_DISPLAY
 };
 
 // ==========================================================================
