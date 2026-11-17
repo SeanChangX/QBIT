@@ -10,7 +10,7 @@
     "test": "NODE_ENV=test node --import tsx --test --test-force-exit test/*.test.ts"
   },
   "dependencies": {
-    "archiver": "^7.0.0",
+    "archiver": "^8.0.0",
     "better-sqlite3": "^13.0.3",
     "cors": "^2.8.5",
     "express": "^4.21.0",
@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/archiver": "^6.0.0",
+    "@types/archiver": "^8.0.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
