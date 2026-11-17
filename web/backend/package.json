@@ -29,7 +29,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/archiver": "^6.0.0",
-    "@types/better-sqlite3": "^7.6.12",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.18.0",
